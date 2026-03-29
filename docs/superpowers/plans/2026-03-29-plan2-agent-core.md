@@ -1146,7 +1146,7 @@ The heart of the product. Receives a user message, runs the LLM-in-a-loop, retur
 - Create: `student-planner/app/agent/loop.py`
 - Create: `student-planner/tests/test_agent_loop.py`
 
-- [ ] **Step 1: Write agent loop**
+- [x] **Step 1: Write agent loop**
 
 ```python
 # app/agent/loop.py
@@ -1319,7 +1319,7 @@ async def _log_step(
     await db.commit()
 ```
 
-- [ ] **Step 2: Write agent loop test (mocked LLM)**
+- [x] **Step 2: Write agent loop test (mocked LLM)**
 
 ```python
 # tests/test_agent_loop.py
@@ -1400,12 +1400,12 @@ async def test_tool_call_then_text(setup_db):
             assert "done" in types
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `cd student-planner && pytest tests/test_agent_loop.py -v`
 Expected: All 2 tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
