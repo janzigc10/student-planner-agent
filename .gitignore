@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 student-planner/test.db
+student-planner/student_planner.db

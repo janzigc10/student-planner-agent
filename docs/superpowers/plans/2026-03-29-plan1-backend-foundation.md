@@ -1894,11 +1894,11 @@ git commit -m "feat: add AgentLog, Memory, SessionSummary, ConversationMessage m
 - Create: `student-planner/alembic/env.py`
 - Create: `student-planner/alembic/versions/` (auto-generated)
 
-- [ ] **Step 1: Initialize Alembic**
+- [x] **Step 1: Initialize Alembic**
 
 Run: `cd student-planner && alembic init alembic`
 
-- [ ] **Step 2: Configure alembic/env.py to use our models and async engine**
+- [x] **Step 2: Configure alembic/env.py to use our models and async engine**
 
 ```python
 # alembic/env.py
@@ -1944,29 +1944,29 @@ else:
     asyncio.run(run_migrations_online())
 ```
 
-- [ ] **Step 3: Update alembic.ini sqlalchemy.url**
+- [x] **Step 3: Update alembic.ini sqlalchemy.url**
 
 Set `sqlalchemy.url` to empty string (we use `settings.database_url` in env.py):
 ```ini
 sqlalchemy.url =
 ```
 
-- [ ] **Step 4: Generate initial migration**
+- [x] **Step 4: Generate initial migration**
 
 Run: `cd student-planner && alembic revision --autogenerate -m "initial schema"`
 Expected: Migration file created in `alembic/versions/`
 
-- [ ] **Step 5: Apply migration**
+- [x] **Step 5: Apply migration**
 
 Run: `cd student-planner && alembic upgrade head`
 Expected: All tables created
 
-- [ ] **Step 6: Run full test suite**
+- [x] **Step 6: Run full test suite**
 
 Run: `cd student-planner && pytest -v`
 Expected: All tests PASS (auth + courses + exams + tasks + reminders + calendar)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
