@@ -992,7 +992,7 @@ git commit -m "feat: exam model and CRUD endpoints with tests"
 - Modify: `student-planner/app/main.py`
 - Create: `student-planner/tests/test_tasks.py`
 
-- [ ] **Step 1: Write Task model**
+- [x] **Step 1: Write Task model**
 
 ```python
 # app/models/task.py
@@ -1019,7 +1019,7 @@ class Task(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending / completed / skipped
 ```
 
-- [ ] **Step 2: Write Task schemas**
+- [x] **Step 2: Write Task schemas**
 
 ```python
 # app/schemas/task.py
@@ -1060,7 +1060,7 @@ class TaskOut(BaseModel):
     model_config = {"from_attributes": True}
 ```
 
-- [ ] **Step 3: Write tasks router with conflict detection**
+- [x] **Step 3: Write tasks router with conflict detection**
 
 ```python
 # app/routers/tasks.py
@@ -1176,7 +1176,7 @@ async def delete_task(
     await db.commit()
 ```
 
-- [ ] **Step 4: Update models/__init__.py and main.py**
+- [x] **Step 4: Update models/__init__.py and main.py**
 
 ```python
 # app/models/__init__.py
@@ -1195,7 +1195,7 @@ from app.routers import auth, courses, exams, tasks
 app.include_router(tasks.router, prefix="/api")
 ```
 
-- [ ] **Step 5: Write task tests (including conflict detection)**
+- [x] **Step 5: Write task tests (including conflict detection)**
 
 ```python
 # tests/test_tasks.py
@@ -1290,12 +1290,12 @@ async def test_update_task_conflict(auth_client: AsyncClient):
     assert resp.status_code == 409
 ```
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `cd student-planner && pytest tests/test_tasks.py -v`
 Expected: All 6 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
