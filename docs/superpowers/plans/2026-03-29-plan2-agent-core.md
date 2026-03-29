@@ -784,7 +784,7 @@ Builds the dynamic portion of the system prompt — current time, today's schedu
 - Create: `student-planner/app/agent/context.py`
 - Create: `student-planner/tests/test_context.py`
 
-- [ ] **Step 1: Write context builder**
+- [x] **Step 1: Write context builder**
 
 ```python
 # app/agent/context.py
@@ -860,7 +860,7 @@ async def build_dynamic_context(user: User, db: AsyncSession) -> str:
     return "\n".join(parts)
 ```
 
-- [ ] **Step 2: Write context tests**
+- [x] **Step 2: Write context tests**
 
 ```python
 # tests/test_context.py
@@ -898,12 +898,12 @@ async def test_context_includes_preferences(setup_db):
         assert "22:00" in ctx
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `cd student-planner && pytest tests/test_context.py -v`
 Expected: All 2 tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
