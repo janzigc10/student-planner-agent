@@ -1314,7 +1314,7 @@ git commit -m "feat: task model and CRUD with time conflict detection"
 - Modify: `student-planner/app/main.py`
 - Create: `student-planner/tests/test_reminders.py`
 
-- [ ] **Step 1: Write Reminder model**
+- [x] **Step 1: Write Reminder model**
 
 ```python
 # app/models/reminder.py
@@ -1338,7 +1338,7 @@ class Reminder(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending / sent / failed
 ```
 
-- [ ] **Step 2: Write Reminder schemas**
+- [x] **Step 2: Write Reminder schemas**
 
 ```python
 # app/schemas/reminder.py
@@ -1364,7 +1364,7 @@ class ReminderOut(BaseModel):
     model_config = {"from_attributes": True}
 ```
 
-- [ ] **Step 3: Write reminders router**
+- [x] **Step 3: Write reminders router**
 
 ```python
 # app/routers/reminders.py
@@ -1421,7 +1421,7 @@ async def delete_reminder(
     await db.commit()
 ```
 
-- [ ] **Step 4: Update models/__init__.py and main.py**
+- [x] **Step 4: Update models/__init__.py and main.py**
 
 ```python
 # app/models/__init__.py
@@ -1441,7 +1441,7 @@ from app.routers import auth, courses, exams, tasks, reminders
 app.include_router(reminders.router, prefix="/api")
 ```
 
-- [ ] **Step 5: Write reminder tests**
+- [x] **Step 5: Write reminder tests**
 
 ```python
 # tests/test_reminders.py
@@ -1487,12 +1487,12 @@ async def test_delete_reminder(auth_client: AsyncClient):
     assert resp.status_code == 204
 ```
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `cd student-planner && pytest tests/test_reminders.py -v`
 Expected: All 3 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
