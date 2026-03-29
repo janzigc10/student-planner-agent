@@ -457,7 +457,7 @@ The executor maps tool names to actual Python functions that call Plan 1's CRUD 
 - Create: `student-planner/app/agent/tool_executor.py`
 - Create: `student-planner/tests/test_tool_executor.py`
 
-- [ ] **Step 1: Write tool executor**
+- [x] **Step 1: Write tool executor**
 
 ```python
 # app/agent/tool_executor.py
@@ -702,7 +702,7 @@ TOOL_HANDLERS = {
 }
 ```
 
-- [ ] **Step 2: Write executor tests**
+- [x] **Step 2: Write executor tests**
 
 ```python
 # tests/test_tool_executor.py
@@ -762,12 +762,12 @@ async def test_ask_user_returns_action(setup_db):
 
 Note: These tests need the same `TestSession` and `setup_db` fixtures from `conftest.py`. The test file should import them.
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `cd student-planner && pytest tests/test_tool_executor.py -v`
 Expected: All 4 tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
