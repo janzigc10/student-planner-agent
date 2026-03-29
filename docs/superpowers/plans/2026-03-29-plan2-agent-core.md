@@ -1803,7 +1803,7 @@ End-to-end test with mocked LLM to verify the complete flow.
 **Files:**
 - Create: `student-planner/tests/test_integration.py`
 
-- [ ] **Step 1: Write integration test**
+- [x] **Step 1: Write integration test**
 
 ```python
 # tests/test_integration.py
@@ -1865,12 +1865,12 @@ async def test_full_flow_list_courses(setup_db):
             assert tool_result_event["result"]["count"] == 1
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 Run: `cd student-planner && pytest -v`
 Expected: All tests PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A
