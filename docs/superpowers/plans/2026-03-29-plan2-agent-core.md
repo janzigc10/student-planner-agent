@@ -1030,7 +1030,7 @@ Safety checks that run in the agent loop to prevent bad behavior.
 - Create: `student-planner/app/agent/guardrails.py`
 - Create: `student-planner/tests/test_guardrails.py`
 
-- [ ] **Step 1: Write guardrails**
+- [x] **Step 1: Write guardrails**
 
 ```python
 # app/agent/guardrails.py
@@ -1080,7 +1080,7 @@ def check_max_retries(tool_name: str, error_count: dict[str, int], max_retries: 
         )
 ```
 
-- [ ] **Step 2: Write guardrail tests**
+- [x] **Step 2: Write guardrail tests**
 
 ```python
 # tests/test_guardrails.py
@@ -1124,12 +1124,12 @@ def test_max_retries():
     check_max_retries("list_courses", {"list_courses": 1}, max_retries=2)  # No exception
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `cd student-planner && pytest tests/test_guardrails.py -v`
 Expected: All 5 tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
