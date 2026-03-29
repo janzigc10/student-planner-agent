@@ -1573,7 +1573,7 @@ This tool uses LLM internally to generate study plans. It's the most complex too
 - Modify: `student-planner/app/agent/tool_executor.py` (wire up create_study_plan)
 - Create: `student-planner/tests/test_study_planner.py`
 
-- [ ] **Step 1: Write study planner**
+- [x] **Step 1: Write study planner**
 
 ```python
 # app/agent/study_planner.py
@@ -1711,7 +1711,7 @@ async def generate_study_plan(
         return []
 ```
 
-- [ ] **Step 2: Wire up in tool_executor.py**
+- [x] **Step 2: Wire up in tool_executor.py**
 
 Replace the `create_study_plan: None` line in `TOOL_HANDLERS`:
 
@@ -1733,7 +1733,7 @@ async def _create_study_plan(
 # "create_study_plan": _create_study_plan,
 ```
 
-- [ ] **Step 3: Write test (mocked LLM)**
+- [x] **Step 3: Write test (mocked LLM)**
 
 ```python
 # tests/test_study_planner.py
@@ -1782,12 +1782,12 @@ async def test_generate_study_plan_invalid_json():
         assert result == []
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd student-planner && pytest tests/test_study_planner.py -v`
 Expected: All 2 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A

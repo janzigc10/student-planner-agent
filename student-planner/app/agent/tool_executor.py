@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.study_planner import generate_study_plan
 from app.models.course import Course
 from app.models.reminder import Reminder
 from app.models.task import Task
@@ -298,6 +299,18 @@ async def _ask_user(
         "data": kwargs.get("data"),
     }
 
+async def _create_study_plan(
+    db: AsyncSession,
+    user_id: str,
+    exams: list,
+    available_slots: dict,
+    strategy: str = "balanced",
+    **kwargs,
+) -> dict[str, Any]:
+    tasks = await generate_study_plan(exams, available_slots, strategy)
+    if not tasks:
+        return {"error": "Failed to generate study plan. Please try again."}
+    return {"tasks": tasks, "count": len(tasks)}
 
 TOOL_HANDLERS = {
     "list_courses": _list_courses,
@@ -310,5 +323,5 @@ TOOL_HANDLERS = {
     "set_reminder": _set_reminder,
     "list_reminders": _list_reminders,
     "ask_user": _ask_user,
-    "create_study_plan": None,
+    "create_study_plan": _create_study_plan,
 }
