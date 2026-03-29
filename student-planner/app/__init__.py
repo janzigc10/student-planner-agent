@@ -1,0 +1,1 @@
+"""Student Planner application package."""
