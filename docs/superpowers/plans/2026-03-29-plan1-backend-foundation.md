@@ -783,7 +783,7 @@ async def test_course_not_found(auth_client: AsyncClient):
 Run: `cd student-planner && pytest tests/test_courses.py -v`
 Expected: All 5 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -802,7 +802,7 @@ git commit -m "feat: course model and CRUD endpoints with tests"
 - Modify: `student-planner/app/main.py`
 - Create: `student-planner/tests/test_exams.py`
 
-- [ ] **Step 1: Write Exam model**
+- [x] **Step 1: Write Exam model**
 
 ```python
 # app/models/exam.py
@@ -826,7 +826,7 @@ class Exam(Base):
     description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 ```
 
-- [ ] **Step 2: Write Exam schemas**
+- [x] **Step 2: Write Exam schemas**
 
 ```python
 # app/schemas/exam.py
@@ -860,7 +860,7 @@ class ExamOut(BaseModel):
     model_config = {"from_attributes": True}
 ```
 
-- [ ] **Step 3: Write exams router**
+- [x] **Step 3: Write exams router**
 
 ```python
 # app/routers/exams.py
@@ -933,7 +933,7 @@ from app.routers import auth, courses, exams
 app.include_router(exams.router, prefix="/api")
 ```
 
-- [ ] **Step 5: Write exam tests**
+- [x] **Step 5: Write exam tests**
 
 ```python
 # tests/test_exams.py
@@ -1176,7 +1176,7 @@ async def delete_task(
     await db.commit()
 ```
 
-- [x] **Step 4: Update models/__init__.py and main.py**
+- [ ] **Step 4: Update models/__init__.py and main.py**
 
 ```python
 # app/models/__init__.py
@@ -1290,7 +1290,7 @@ async def test_update_task_conflict(auth_client: AsyncClient):
     assert resp.status_code == 409
 ```
 
-- [x] **Step 6: Run tests**
+- [ ] **Step 6: Run tests**
 
 Run: `cd student-planner && pytest tests/test_tasks.py -v`
 Expected: All 6 tests PASS
@@ -1421,7 +1421,7 @@ async def delete_reminder(
     await db.commit()
 ```
 
-- [x] **Step 4: Update models/__init__.py and main.py**
+- [ ] **Step 4: Update models/__init__.py and main.py**
 
 ```python
 # app/models/__init__.py
@@ -1487,7 +1487,7 @@ async def test_delete_reminder(auth_client: AsyncClient):
     assert resp.status_code == 204
 ```
 
-- [x] **Step 6: Run tests**
+- [ ] **Step 6: Run tests**
 
 Run: `cd student-planner && pytest tests/test_reminders.py -v`
 Expected: All 3 tests PASS
