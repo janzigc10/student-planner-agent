@@ -191,7 +191,7 @@ touch app/auth/__init__.py app/services/__init__.py tests/__init__.py
 Run: `cd student-planner && pip install -e ".[dev]" && python -c "from app.main import app; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -212,7 +212,7 @@ git commit -m "feat: project scaffolding with FastAPI, SQLAlchemy, config"
 - Create: `student-planner/tests/conftest.py`
 - Create: `student-planner/tests/test_auth.py`
 
-- [ ] **Step 1: Write User model**
+- [x] **Step 1: Write User model**
 
 ```python
 # app/models/user.py
@@ -238,7 +238,7 @@ class User(Base):
     current_semester_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 ```
 
-- [ ] **Step 2: Write User schemas**
+- [x] **Step 2: Write User schemas**
 
 ```python
 # app/schemas/user.py
@@ -272,7 +272,7 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 ```
 
-- [ ] **Step 3: Write JWT utilities**
+- [x] **Step 3: Write JWT utilities**
 
 ```python
 # app/auth/jwt.py
@@ -298,7 +298,7 @@ def verify_token(token: str) -> str | None:
         return None
 ```
 
-- [ ] **Step 4: Write auth dependency**
+- [x] **Step 4: Write auth dependency**
 
 ```python
 # app/auth/dependencies.py
@@ -328,7 +328,7 @@ async def get_current_user(
     return user
 ```
 
-- [ ] **Step 5: Write auth router**
+- [x] **Step 5: Write auth router**
 
 ```python
 # app/routers/auth.py
@@ -374,7 +374,7 @@ async def me(user: User = Depends(get_current_user)):
     return user
 ```
 
-- [ ] **Step 6: Mount auth router in main.py**
+- [x] **Step 6: Mount auth router in main.py**
 
 ```python
 # app/main.py
@@ -397,7 +397,7 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 7: Write test fixtures**
+- [x] **Step 7: Write test fixtures**
 
 ```python
 # tests/conftest.py
@@ -456,7 +456,7 @@ async def auth_client(client: AsyncClient) -> AsyncGenerator[AsyncClient, None]:
     yield client
 ```
 
-- [ ] **Step 8: Write auth tests**
+- [x] **Step 8: Write auth tests**
 
 ```python
 # tests/test_auth.py
@@ -508,7 +508,7 @@ async def test_me_no_token(client: AsyncClient):
     assert resp.status_code == 403
 ```
 
-- [ ] **Step 9: Run tests**
+- [x] **Step 9: Run tests**
 
 Run: `cd student-planner && pytest tests/test_auth.py -v`
 Expected: All 6 tests PASS
@@ -783,7 +783,7 @@ async def test_course_not_found(auth_client: AsyncClient):
 Run: `cd student-planner && pytest tests/test_courses.py -v`
 Expected: All 5 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -973,7 +973,7 @@ async def test_delete_exam(auth_client: AsyncClient):
 Run: `cd student-planner && pytest tests/test_exams.py -v`
 Expected: All 3 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -1295,7 +1295,7 @@ async def test_update_task_conflict(auth_client: AsyncClient):
 Run: `cd student-planner && pytest tests/test_tasks.py -v`
 Expected: All 6 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -1492,7 +1492,7 @@ async def test_delete_reminder(auth_client: AsyncClient):
 Run: `cd student-planner && pytest tests/test_reminders.py -v`
 Expected: All 3 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -1966,7 +1966,7 @@ Expected: All tables created
 Run: `cd student-planner && pytest -v`
 Expected: All tests PASS (auth + courses + exams + tasks + reminders + calendar)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
