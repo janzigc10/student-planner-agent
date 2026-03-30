@@ -706,7 +706,7 @@ def _parse_weeks(weeks_str: str | None) -> tuple[int, int]:
 Run: `cd student-planner && python -m pytest tests/test_schedule_ocr.py -v`
 Expected: All 4 tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd student-planner
@@ -789,7 +789,7 @@ async def test_upload_requires_auth(client: AsyncClient):
 Run: `cd student-planner && python -m pytest tests/test_schedule_import_api.py -v`
 Expected: FAIL — 404 (route not registered)
 
-- [ ] **Step 3: Implement schedule_import router**
+- [x] **Step 3: Implement schedule_import router**
 
 ```python
 # app/routers/schedule_import.py
@@ -865,7 +865,7 @@ def _raw_course_to_dict(course: RawCourse) -> dict:
     }
 ```
 
-- [ ] **Step 4: Mount the router in main.py**
+- [x] **Step 4: Mount the router in main.py**
 
 In `app/main.py`, add the import and include_router:
 
@@ -955,7 +955,7 @@ Append these two entries to the `TOOL_DEFINITIONS` list in `app/agent/tools.py`:
     },
 ```
 
-- [x] **Step 2: Write the failing tests**
+- [ ] **Step 2: Write the failing tests**
 
 ```python
 # tests/test_schedule_tools.py
@@ -984,7 +984,7 @@ def test_parse_schedule_image_requires_file_id():
     assert "file_id" in tool["function"]["parameters"]["required"]
 ```
 
-- [x] **Step 3: Run tests to verify they fail**
+- [ ] **Step 3: Run tests to verify they fail**
 
 Run: `cd student-planner && python -m pytest tests/test_schedule_tools.py -v`
 Expected: FAIL — `parse_schedule` not found in TOOL_DEFINITIONS
@@ -1062,7 +1062,7 @@ TOOL_HANDLERS = {
 Run: `cd student-planner && python -m pytest tests/test_schedule_tools.py tests/test_tool_executor.py tests/test_tools_schema.py -v`
 Expected: All PASS
 
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd student-planner
@@ -1119,7 +1119,7 @@ Append to `TOOL_DEFINITIONS` in `app/agent/tools.py`:
     },
 ```
 
-- [x] **Step 2: Write the failing tests**
+- [ ] **Step 2: Write the failing tests**
 
 ```python
 # tests/test_bulk_import.py
@@ -1210,7 +1210,7 @@ async def test_bulk_import_empty_list(setup_db):
         assert result["count"] == 0
 ```
 
-- [x] **Step 3: Run tests to verify they fail**
+- [ ] **Step 3: Run tests to verify they fail**
 
 Run: `cd student-planner && python -m pytest tests/test_bulk_import.py -v`
 Expected: FAIL — `bulk_import_courses` not in TOOL_HANDLERS
@@ -1259,7 +1259,7 @@ TOOL_HANDLERS = {
 }
 ```
 
-- [x] **Step 5: Run tests to verify they pass**
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd student-planner && python -m pytest tests/test_bulk_import.py -v`
 Expected: All 3 tests PASS

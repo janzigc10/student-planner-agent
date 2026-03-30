@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 import openpyxl
 
@@ -56,7 +57,7 @@ _PERIOD_RE = re.compile(r"(\d+)\s*-\s*(\d+)")
 _TEACHER_RE = re.compile(r"老师|教授|讲师")
 
 
-def parse_excel_schedule(file_path: Path | str) -> list[RawCourse]:
+def parse_excel_schedule(file_path: Path | str | BinaryIO) -> list[RawCourse]:
     workbook = openpyxl.load_workbook(file_path, data_only=True)
     worksheet = workbook.active
 
