@@ -439,7 +439,7 @@ def _parse_cell(text: str, weekday: int, period: str) -> list[RawCourse]:
 Run: `cd student-planner && python -m pytest tests/test_schedule_parser.py -v`
 Expected: All 10 tests PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd student-planner
@@ -458,7 +458,7 @@ Uses a multimodal LLM (Qwen-VL, DeepSeek-VL, etc.) to extract course data from p
 - Create: `student-planner/tests/test_schedule_ocr.py`
 - Modify: `student-planner/app/config.py` (add vision model config)
 
-- [ ] **Step 1: Add vision model config**
+- [x] **Step 1: Add vision model config**
 
 Add to `app/config.py` Settings class:
 
@@ -489,7 +489,7 @@ class Settings(BaseSettings):
     model_config = {"env_prefix": "SP_"}
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```python
 # tests/test_schedule_ocr.py
@@ -571,12 +571,12 @@ async def test_parse_image_handles_missing_weeks():
     assert courses[0].week_end == 16
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `cd student-planner && python -m pytest tests/test_schedule_ocr.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.agent.schedule_ocr'`
 
-- [ ] **Step 4: Implement schedule_ocr.py**
+- [x] **Step 4: Implement schedule_ocr.py**
 
 ```python
 # app/agent/schedule_ocr.py
@@ -701,7 +701,7 @@ def _parse_weeks(weeks_str: str | None) -> tuple[int, int]:
     return 1, 16
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd student-planner && python -m pytest tests/test_schedule_ocr.py -v`
 Expected: All 4 tests PASS
@@ -890,7 +890,7 @@ def create_app() -> FastAPI:
     return app
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd student-planner && python -m pytest tests/test_schedule_import_api.py -v`
 Expected: All 4 tests PASS
@@ -955,7 +955,7 @@ Append these two entries to the `TOOL_DEFINITIONS` list in `app/agent/tools.py`:
     },
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```python
 # tests/test_schedule_tools.py
@@ -984,7 +984,7 @@ def test_parse_schedule_image_requires_file_id():
     assert "file_id" in tool["function"]["parameters"]["required"]
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `cd student-planner && python -m pytest tests/test_schedule_tools.py -v`
 Expected: FAIL — `parse_schedule` not found in TOOL_DEFINITIONS
@@ -1062,7 +1062,7 @@ TOOL_HANDLERS = {
 Run: `cd student-planner && python -m pytest tests/test_schedule_tools.py tests/test_tool_executor.py tests/test_tools_schema.py -v`
 Expected: All PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd student-planner
@@ -1119,7 +1119,7 @@ Append to `TOOL_DEFINITIONS` in `app/agent/tools.py`:
     },
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```python
 # tests/test_bulk_import.py
@@ -1210,7 +1210,7 @@ async def test_bulk_import_empty_list(setup_db):
         assert result["count"] == 0
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `cd student-planner && python -m pytest tests/test_bulk_import.py -v`
 Expected: FAIL — `bulk_import_courses` not in TOOL_HANDLERS
@@ -1259,7 +1259,7 @@ TOOL_HANDLERS = {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd student-planner && python -m pytest tests/test_bulk_import.py -v`
 Expected: All 3 tests PASS
