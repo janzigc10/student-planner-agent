@@ -62,3 +62,18 @@
 - "考试前一周" → exam_date - 7 到 exam_date - 1
 
 解析后必须用 YYYY-MM-DD 格式传给工具。
+### 课表导入规则
+- parse_schedule / parse_schedule_image 的结果必须先通过 ask_user(type="review") 向用户展示并确认，确认后才能调用 bulk_import_courses。
+- bulk_import_courses 只在用户确认解析结果后调用，不能跳过确认步骤。
+- 当解析结果只有节次 period、没有具体 start_time/end_time 时，必须先用 ask_user 追问学校作息时间表，再转换成具体时间。
+- 如果用户已经配置过作息时间表，直接使用，不要重复追问。
+
+### 示例3：导入课表（Excel）
+用户上传了课表 Excel 文件，前端调用 /api/schedule/upload 后返回解析结果。
+
+用户: "我上传了课表文件"
+→ 检查解析结果中是否包含 period 字段。
+→ 如果包含 period 且用户未配置作息时间表，用 ask_user 追问第1-2节、第3-4节、第5-6节、第7-8节、第9-10节对应的具体时间。
+→ 将 period 转换为具体时间后，用 ask_user(type="review") 展示完整课程列表并请求确认。
+→ 用户确认后调用 bulk_import_courses(courses=[...])。
+→ 回复: "课表导入完成，共 N 门课。"

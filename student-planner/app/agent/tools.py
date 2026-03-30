@@ -221,4 +221,68 @@ TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
-]
+    {
+        "type": "function",
+        "function": {
+            "name": "parse_schedule",
+            "description": "Parse an uploaded Excel/WPS schedule file and return recognized courses for user confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_id": {
+                        "type": "string",
+                        "description": "Temporary upload identifier returned by /api/schedule/upload"
+                    }
+                },
+                "required": ["file_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "parse_schedule_image",
+            "description": "Parse an uploaded schedule image and return recognized courses for user confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_id": {
+                        "type": "string",
+                        "description": "Temporary upload identifier returned by /api/schedule/upload"
+                    }
+                },
+                "required": ["file_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bulk_import_courses",
+            "description": "Bulk import a confirmed list of courses into the user's schedule.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "courses": {
+                        "type": "array",
+                        "description": "Confirmed course list",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Course name"},
+                                "teacher": {"type": "string", "description": "Teacher"},
+                                "location": {"type": "string", "description": "Location"},
+                                "weekday": {"type": "integer", "description": "Weekday 1-7"},
+                                "start_time": {"type": "string", "description": "Start time HH:MM"},
+                                "end_time": {"type": "string", "description": "End time HH:MM"},
+                                "week_start": {"type": "integer", "description": "Start week"},
+                                "week_end": {"type": "integer", "description": "End week"}
+                            },
+                            "required": ["name", "weekday", "start_time", "end_time"]
+                        }
+                    }
+                },
+                "required": ["courses"]
+            }
+        }
+    },]

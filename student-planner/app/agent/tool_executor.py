@@ -312,6 +312,62 @@ async def _create_study_plan(
         return {"error": "Failed to generate study plan. Please try again."}
     return {"tasks": tasks, "count": len(tasks)}
 
+
+
+async def _parse_schedule(
+    db: AsyncSession,
+    user_id: str,
+    file_id: str,
+    **kwargs,
+) -> dict[str, Any]:
+    return {
+        "status": "ready",
+        "message": "课表已解析。请使用 ask_user 向用户展示识别结果并确认。",
+        "file_id": file_id,
+    }
+
+
+async def _parse_schedule_image(
+    db: AsyncSession,
+    user_id: str,
+    file_id: str,
+    **kwargs,
+) -> dict[str, Any]:
+    return {
+        "status": "ready",
+        "message": "课表图片已识别。请使用 ask_user 向用户展示识别结果并确认。",
+        "file_id": file_id,
+    }
+
+
+async def _bulk_import_courses(
+    db: AsyncSession,
+    user_id: str,
+    courses: list[dict[str, Any]],
+    **kwargs,
+) -> dict[str, Any]:
+    created: list[str] = []
+    for course_data in courses:
+        course = Course(
+            user_id=user_id,
+            name=course_data["name"],
+            teacher=course_data.get("teacher"),
+            location=course_data.get("location"),
+            weekday=course_data["weekday"],
+            start_time=course_data["start_time"],
+            end_time=course_data["end_time"],
+            week_start=course_data.get("week_start", 1),
+            week_end=course_data.get("week_end", 16),
+        )
+        db.add(course)
+        created.append(course_data["name"])
+
+    await db.commit()
+    return {
+        "status": "imported",
+        "count": len(created),
+        "courses": created,
+    }
 TOOL_HANDLERS = {
     "list_courses": _list_courses,
     "add_course": _add_course,
@@ -324,4 +380,7 @@ TOOL_HANDLERS = {
     "list_reminders": _list_reminders,
     "ask_user": _ask_user,
     "create_study_plan": _create_study_plan,
+    "parse_schedule": _parse_schedule,
+    "parse_schedule_image": _parse_schedule_image,
+    "bulk_import_courses": _bulk_import_courses,
 }
