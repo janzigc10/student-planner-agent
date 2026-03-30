@@ -1,4 +1,4 @@
-# Plan 4: Memory 缂傚倷绶￠崹闈涚暦閻㈤潧鍨?+ 濠电偞鍨堕幐鎼佹晝閿濆洨绠旈柛娑欐綑濡﹢鏌涢妷銏℃珦闁告埃鍋撻梻?
+# Plan 4: Memory 缂傚倸鍊风欢锟犲垂闂堟稓鏆﹂柣銏ゆ涧閸?+ 婵犵數鍋為崹鍫曞箰閹间焦鏅濋柨婵嗘川缁犳棃鏌涘☉娆愮稇婵☆偅锕㈤弻娑㈠Ψ閵忊剝鐝﹂梺鍛婂焹閸嬫捇姊?
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the three-layer memory system (working/short-term/long-term) and context window management to keep conversations coherent across sessions without blowing up the context window.
@@ -15,25 +15,25 @@
 
 ```
 student-planner/
-闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?app/
-闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?services/
-闂?  闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?memory_service.py          # Memory CRUD: create, query, update, delete, staleness
-闂?  闂?  闂備礁鐤囬～澶愬蓟閿熺姴缁╅柕蹇嬪€曢悡姗€鏌?context_compressor.py      # Tool result summarization + conversation compression
-闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?agent/
-闂?  闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?tools.py                   # (modify: add recall_memory, save_memory definitions)
-闂?  闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?tool_executor.py           # (modify: add recall_memory, save_memory handlers)
-闂?  闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?loop.py                    # (modify: add tool result compression after each tool call)
-闂?  闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?context.py                 # (modify: add hot/warm memory loading)
-闂?  闂?  闂備礁鐤囬～澶愬蓟閿熺姴缁╅柕蹇嬪€曢悡姗€鏌?session_lifecycle.py       # Session end: generate summary + extract memories
-闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?routers/
-闂?  闂?  闂備礁鐤囬～澶愬蓟閿熺姴缁╅柕蹇嬪€曢悡姗€鏌?chat.py                    # (modify: call session lifecycle on disconnect/timeout)
-闂?  闂備礁鐤囬～澶愬蓟閿熺姴缁╅柕蹇嬪€曢悡姗€鏌?config.py                      # (modify: add context window thresholds)
-闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?tests/
-闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?test_memory_service.py         # Memory CRUD unit tests
-闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?test_context_compressor.py     # Compression logic tests
-闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?test_memory_tools.py           # recall_memory / save_memory tool tests
-闂?  闂備礁鐤囬～澶嬬珶閺囥垹缁╅柕蹇嬪€曢悡姗€鏌?test_session_lifecycle.py      # Session end flow tests
-闂?  闂備礁鐤囬～澶愬蓟閿熺姴缁╅柕蹇嬪€曢悡姗€鏌?test_context_loading.py        # Hot/warm memory in system prompt tests
+闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?app/
+闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?services/
+闂?  闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?memory_service.py          # Memory CRUD: create, query, update, delete, staleness
+闂?  闂?  闂傚倷绀侀悿鍥綖婢舵劕钃熼柨鐔哄Т缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?context_compressor.py      # Tool result summarization + conversation compression
+闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?agent/
+闂?  闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?tools.py                   # (modify: add recall_memory, save_memory definitions)
+闂?  闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?tool_executor.py           # (modify: add recall_memory, save_memory handlers)
+闂?  闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?loop.py                    # (modify: add tool result compression after each tool call)
+闂?  闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?context.py                 # (modify: add hot/warm memory loading)
+闂?  闂?  闂傚倷绀侀悿鍥綖婢舵劕钃熼柨鐔哄Т缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?session_lifecycle.py       # Session end: generate summary + extract memories
+闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?routers/
+闂?  闂?  闂傚倷绀侀悿鍥綖婢舵劕钃熼柨鐔哄Т缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?chat.py                    # (modify: call session lifecycle on disconnect/timeout)
+闂?  闂傚倷绀侀悿鍥綖婢舵劕钃熼柨鐔哄Т缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?config.py                      # (modify: add context window thresholds)
+闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?tests/
+闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?test_memory_service.py         # Memory CRUD unit tests
+闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?test_context_compressor.py     # Compression logic tests
+闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?test_memory_tools.py           # recall_memory / save_memory tool tests
+闂?  闂傚倷绀侀悿鍥綖婢跺鐝堕柡鍥ュ灩缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?test_session_lifecycle.py      # Session end flow tests
+闂?  闂傚倷绀侀悿鍥綖婢舵劕钃熼柨鐔哄Т缂佲晠鏌曡箛瀣偓鏇㈡偂濮椻偓閺?test_context_loading.py        # Hot/warm memory in system prompt tests
 ```
 
 ---
@@ -81,12 +81,12 @@ async def test_create_memory(setup_db):
             db=db,
             user_id="mem-user-1",
             category="preference",
-            content="闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏缁秹鏌嶇悰鈥充壕缂備焦顨呴崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡叉垿姊烘潪鎵妽婵犮垺锕㈤、?,
+            content="闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰缂侇偄绉归弻宥囨偘閳ュ厖澹曠紓鍌欑劍椤ㄥ懘宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊鍙夊灴濮婄儤娼幍顔煎濠电姰鍨洪敃銏ゃ€?,
             source_session_id="session-abc",
         )
         assert mem.id is not None
         assert mem.category == "preference"
-        assert mem.content == "闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏缁秹鏌嶇悰鈥充壕缂備焦顨呴崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡叉垿姊烘潪鎵妽婵犮垺锕㈤、?
+        assert mem.content == "闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰缂侇偄绉归弻宥囨偘閳ュ厖澹曠紓鍌欑劍椤ㄥ懘宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊鍙夊灴濮婄儤娼幍顔煎濠电姰鍨洪敃銏ゃ€?
         assert mem.user_id == "mem-user-1"
         assert mem.source_session_id == "session-abc"
         assert mem.relevance_score == 1.0
@@ -103,9 +103,9 @@ async def test_get_hot_memories_returns_preferences(setup_db):
         db.add(user)
         await db.commit()
 
-        await create_memory(db, "mem-user-2", "preference", "闂備礁鎼崯鐘诲疾濞嗘垹绠旈柛灞剧☉缁剁偟鈧箍鍎辩€氼噣鎯佹惔銊︾厸濞达綀顫夌欢鍙夈亜?)
-        await create_memory(db, "mem-user-2", "habit", "濠电偞鍨堕幐鎾磻閹惧绠鹃柛鈥崇箰婢у弶绻涢幘鐟扮厫鐎?闂佽绻愮换鎰崲閹存繍娓?)
-        await create_memory(db, "mem-user-2", "decision", "濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚?)
+        await create_memory(db, "mem-user-2", "preference", "闂傚倷绀侀幖顐﹀疮閻樿鐤炬繛鍡樺灩缁犳棃鏌涚仦鍓р槈缂佸墎鍋熼埀顒€绠嶉崕杈┾偓姘煎櫍閹焦鎯旈妸锔惧幐婵炶揪缍€椤娆㈤崣澶堜簻?)
+        await create_memory(db, "mem-user-2", "habit", "婵犵數鍋為崹鍫曞箰閹绢喖纾婚柟鎯ь嚟缁犻箖鏌涢垾宕囩濠⒀冨级缁绘盯骞橀悷鎵帿閻?闂備浇顕х换鎰崲閹邦喗宕查柟瀛樼箥濞?)
+        await create_memory(db, "mem-user-2", "decision", "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥?)
 
         hot = await get_hot_memories(db, "mem-user-2")
         categories = {m.category for m in hot}
@@ -127,13 +127,13 @@ async def test_get_warm_memories_returns_recent(setup_db):
         await db.commit()
 
         # Recent memory (within 7 days)
-        await create_memory(db, "mem-user-3", "decision", "濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚?)
+        await create_memory(db, "mem-user-3", "decision", "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥?)
 
         # Old memory (simulate 30 days ago)
         old_mem = Memory(
             user_id="mem-user-3",
             category="decision",
-            content="缂傚倷鐒﹂崕鎶藉Φ濮椻偓瀹曨剟顢楅崟顒€浠洪梺闈涱焾閸庨亶鎮￠弴鐐嶆盯鎮ч崼顐ゅ姺闂佸鏉垮姦闁?,
+            content="缂傚倸鍊烽悞锕傚磿閹惰棄桅婵せ鍋撶€规洦鍓熼、妤呭礋椤掆偓娴犳椽姊洪棃娑辩劸闁稿酣浜堕幃锟犲即閻愬秵鐩幃褔宕奸銈呭Ш闂備礁顓介弶鍨Е闂?,
             created_at=datetime.now(timezone.utc) - timedelta(days=30),
             last_accessed=datetime.now(timezone.utc) - timedelta(days=30),
         )
@@ -142,7 +142,7 @@ async def test_get_warm_memories_returns_recent(setup_db):
 
         warm = await get_warm_memories(db, "mem-user-3", days=7)
         assert len(warm) == 1
-        assert warm[0].content == "濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚?
+        assert warm[0].content == "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥?
 
 
 @pytest.mark.asyncio
@@ -156,13 +156,13 @@ async def test_recall_memories_keyword_search(setup_db):
         db.add(user)
         await db.commit()
 
-        await create_memory(db, "mem-user-4", "decision", "濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚呴梻浣瑰缁嬫垿寮甸鍕柧闁靛鏅涢崙鐘崇節婵炴儳浜剧紓浣诡殔椤︾敻寮?)
-        await create_memory(db, "mem-user-4", "preference", "闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏缁秹鏌嶇悰鈥充壕缂備焦顨呴崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡?)
-        await create_memory(db, "mem-user-4", "knowledge", "婵犳鍠楃敮鎺楀磹鐠囧樊鍟呴柤娴嬫櫆婵ジ鏌ｉ幋鐐嗘垶绂掑鈧?)
+        await create_memory(db, "mem-user-4", "decision", "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥鍛存⒒娴ｇ懓顕滅紒瀣灴瀵敻顢楅崟顐ゆ煣闂侀潧顦弲娑㈠礄閻樺磭绡€濠电偞鍎虫禍鍓х磽娴ｈ娈旀い锔炬暬瀵?)
+        await create_memory(db, "mem-user-4", "preference", "闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰缂侇偄绉归弻宥囨偘閳ュ厖澹曠紓鍌欑劍椤ㄥ懘宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊?)
+        await create_memory(db, "mem-user-4", "knowledge", "濠电姵顔栭崰妤冩暜閹烘纾归悹鍥ф▕閸熷懘鏌ゅù瀣珕濠殿垰銈搁弻锝夊箣閻愬棙鍨剁粋鎺戭潨閳ь剙顫?)
 
-        results = await recall_memories(db, "mem-user-4", query="濠德板€曢崐纭呮懌闂?)
+        results = await recall_memories(db, "mem-user-4", query="婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻?)
         assert len(results) >= 1
-        assert any("濠德板€曢崐纭呮懌闂? in m.content for m in results)
+        assert any("婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻? in m.content for m in results)
 
 
 @pytest.mark.asyncio
@@ -176,11 +176,11 @@ async def test_recall_updates_last_accessed(setup_db):
         db.add(user)
         await db.commit()
 
-        mem = await create_memory(db, "mem-user-5", "decision", "濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚?)
+        mem = await create_memory(db, "mem-user-5", "decision", "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥?)
         original_accessed = mem.last_accessed
 
         # Small delay to ensure timestamp differs
-        results = await recall_memories(db, "mem-user-5", query="濠德板€曢崐纭呮懌闂?)
+        results = await recall_memories(db, "mem-user-5", query="婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻?)
         assert len(results) == 1
         assert results[0].last_accessed >= original_accessed
 
@@ -196,7 +196,7 @@ async def test_delete_memory(setup_db):
         db.add(user)
         await db.commit()
 
-        mem = await create_memory(db, "mem-user-6", "preference", "闂備礁鎼崯鐘诲疾濞嗘垹绠旈柛灞剧☉缁剁偟鈧箍鍎辩€氼噣鎯?)
+        mem = await create_memory(db, "mem-user-6", "preference", "闂傚倷绀侀幖顐﹀疮閻樿鐤炬繛鍡樺灩缁犳棃鏌涚仦鍓р槈缂佸墎鍋熼埀顒€绠嶉崕杈┾偓姘煎櫍閹?)
         deleted = await delete_memory(db, "mem-user-6", mem.id)
         assert deleted is True
 
@@ -215,7 +215,7 @@ async def test_delete_memory_wrong_user(setup_db):
         db.add(user)
         await db.commit()
 
-        mem = await create_memory(db, "mem-user-7", "preference", "闂備礁鎼崯鐘诲疾濞嗘垹绠旈柛灞剧☉缁剁偟鈧箍鍎辩€氼噣鎯?)
+        mem = await create_memory(db, "mem-user-7", "preference", "闂傚倷绀侀幖顐﹀疮閻樿鐤炬繛鍡樺灩缁犳棃鏌涚仦鍓р槈缂佸墎鍋熼埀顒€绠嶉崕杈┾偓姘煎櫍閹?)
         deleted = await delete_memory(db, "wrong-user", mem.id)
         assert deleted is False
 
@@ -235,7 +235,7 @@ async def test_mark_stale_memories(setup_db):
         old_mem = Memory(
             user_id="mem-user-8",
             category="decision",
-            content="闂備礁鎼崬鏌ュ川椤旂偓娈搁梻浣告啞閸旀洜澹曢銏″仱?,
+            content="闂傚倷绀侀幖顐﹀船閺屻儱宸濇い鏃傚亾濞堟悂姊绘担鍛婂暈闁告梹娲滄竟鏇㈩敇閵忊€充槐?,
             last_accessed=datetime.now(timezone.utc) - timedelta(days=100),
             relevance_score=1.0,
         )
@@ -435,30 +435,30 @@ def test_compress_get_free_slots():
         "slots": [
             {
                 "date": "2026-04-01",
-                "weekday": "闂備礁鎲＄粙蹇涘礉鐎ｎ剛绠?,
+                "weekday": "闂傚倷绀侀幉锛勭矙韫囨稑绀夐悗锝庡墰缁?,
                 "free_periods": [
                     {"start": "08:00", "end": "10:00", "duration_minutes": 120},
                     {"start": "14:00", "end": "16:00", "duration_minutes": 120},
                 ],
                 "occupied": [
-                    {"start": "10:00", "end": "12:00", "type": "course", "name": "濠德板€曢崐纭呮懌闂?},
+                    {"start": "10:00", "end": "12:00", "type": "course", "name": "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻?},
                 ],
             },
             {
                 "date": "2026-04-02",
-                "weekday": "闂備礁鎲＄粙蹇涘礉鐏炵煫?,
+                "weekday": "闂傚倷绀侀幉锛勭矙韫囨稑绀夐悘鐐电叓?,
                 "free_periods": [
                     {"start": "09:00", "end": "11:00", "duration_minutes": 120},
                 ],
                 "occupied": [],
             },
         ],
-        "summary": "2026-04-01 闂?2026-04-02 闂?3 濠电偞鍨堕幖鈺傜閻愬搫鐓橀柡宥庡幗閳锋帡鏌涘▎蹇ｆ▓闁哥偘绮欓弻銊モ槈濡粯鎷遍梺閫炲苯澧俊鍙夊浮椤?6 闂佽绻愮换鎰崲閹存繍娓?0 闂備礁鎲＄敮鎺懳涘┑瀣?,
+        "summary": "2026-04-01 闂?2026-04-02 闂?3 婵犵數鍋為崹鍫曞箹閳哄倻顩查柣鎰惈閻撴﹢鏌″搴″箺闁抽攱甯￠弻娑樷枎韫囷絾鈻撻梺鍝ュ仒缁瑩寮婚妸銉㈡婵☆垳绮幏閬嶆⒑闁偛鑻晶顖涗繆閸欏娴い?6 闂備浇顕х换鎰崲閹邦喗宕查柟瀛樼箥濞?0 闂傚倷绀侀幉锛勬暜閹烘嚦娑樷攽鐎ｎ亞顔?,
     }
     compressed = compress_tool_result("get_free_slots", result)
     # Should use the existing summary field
-    assert "3 濠电偞鍨堕幖鈺傜閻愬搫鐓橀柡宥庡幗閳锋帡鏌涘▎蹇ｆ▓闁? in compressed
-    assert "6 闂佽绻愮换鎰崲閹存繍娓? in compressed
+    assert "3 婵犵數鍋為崹鍫曞箹閳哄倻顩查柣鎰惈閻撴﹢鏌″搴″箺闁抽攱甯￠弻娑樷枎韫囷絾鈻撻梺? in compressed
+    assert "6 闂備浇顕х换鎰崲閹邦喗宕查柟瀛樼箥濞? in compressed
     # Should NOT contain the full slot details
     assert "free_periods" not in compressed
 
@@ -466,23 +466,23 @@ def test_compress_get_free_slots():
 def test_compress_list_courses():
     result = {
         "courses": [
-            {"id": "1", "name": "濠德板€曢崐纭呮懌闂?, "teacher": "闁?, "weekday": 1, "start_time": "08:00", "end_time": "09:40"},
-            {"id": "2", "name": "缂傚倷鐒﹂崕鎶藉Φ濮椻偓瀹?, "teacher": "闂?, "weekday": 3, "start_time": "10:00", "end_time": "11:40"},
-            {"id": "3", "name": "闂備礁鍚嬪Σ鎺斿垝妤ｅ喚鏁?, "teacher": "闂?, "weekday": 2, "start_time": "08:00", "end_time": "09:40"},
+            {"id": "1", "name": "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻?, "teacher": "闂?, "weekday": 1, "start_time": "08:00", "end_time": "09:40"},
+            {"id": "2", "name": "缂傚倸鍊烽悞锕傚磿閹惰棄桅婵せ鍋撶€?, "teacher": "闂?, "weekday": 3, "start_time": "10:00", "end_time": "11:40"},
+            {"id": "3", "name": "闂傚倷绀侀崥瀣ｉ幒鏂垮灊濡わ絽鍠氶弫?, "teacher": "闂?, "weekday": 2, "start_time": "08:00", "end_time": "09:40"},
         ],
         "count": 3,
     }
     compressed = compress_tool_result("list_courses", result)
     assert "3" in compressed
-    assert "濠德板€曢崐纭呮懌闂? in compressed
+    assert "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻? in compressed
 
 
 def test_compress_list_tasks():
     result = {
         "tasks": [
-            {"id": "1", "title": "濠电姰鍨煎▔娑氱矓瀹曞洤濮柛鏇ㄥ墻濞堟淇婇婊呭笡婵炲牆澧庣槐鎺懳旀繝鍌氬箰缂備焦鏌ㄩ顓犲垝?, "status": "completed"},
-            {"id": "2", "title": "濠电姰鍨煎▔娑氱矓瀹曞洤濮柛鏇ㄥ墻濞堟淇婇婊呭笡婵炲牆澧庣槐鎺懳旀繝鍌氬箰缂備降鍔夐弲婵堝垝?, "status": "pending"},
-            {"id": "3", "title": "濠电姰鍨煎▔娑氱矓瀹曞洤濮柛鏇ㄥ幘濡垰顭块崜渚囩劸闁?, "status": "pending"},
+            {"id": "1", "title": "婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨顒勬煕閺囥劌澧绘繛鍫燁殕娣囧﹪顢涘鍛濠电偛鐗嗘晶搴ｆ閹烘嚦鏃€绻濋崒姘缂傚倷鐒﹂弻銊╊敋椤撶姴鍨?, "status": "completed"},
+            {"id": "2", "title": "婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨顒勬煕閺囥劌澧绘繛鍫燁殕娣囧﹪顢涘鍛濠电偛鐗嗘晶搴ｆ閹烘嚦鏃€绻濋崒姘缂傚倷闄嶉崝澶愬疾濠靛牆鍨?, "status": "pending"},
+            {"id": "3", "title": "婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨顒勬煕閺囥劌骞樻俊顐灠椤潡宕滄笟鍥╁姼闂?, "status": "pending"},
         ],
         "count": 3,
     }
@@ -494,9 +494,9 @@ def test_compress_list_tasks():
 def test_compress_create_study_plan():
     result = {
         "tasks": [
-            {"title": "濠电姰鍨煎▔娑氱矓瀹曞洤濮柛鏇ㄥ墻濞堟淇婇婊呭笡婵炲牆澧庣槐鎺懳旀繝鍌氬箰缂備焦鏌ㄩ顓犲垝?, "date": "2026-04-01"},
-            {"title": "濠电姰鍨煎▔娑氱矓瀹曞洤濮柛鏇ㄥ墻濞堟淇婇婊呭笡婵炲牆澧庣槐鎺懳旀繝鍌氬箰缂備降鍔夐弲婵堝垝?, "date": "2026-04-02"},
-            {"title": "濠电姰鍨煎▔娑氱矓瀹曞洤濮柛鏇ㄥ幘濡垰顭块崜渚囩劸闁?, "date": "2026-04-03"},
+            {"title": "婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨顒勬煕閺囥劌澧绘繛鍫燁殕娣囧﹪顢涘鍛濠电偛鐗嗘晶搴ｆ閹烘嚦鏃€绻濋崒姘缂傚倷鐒﹂弻銊╊敋椤撶姴鍨?, "date": "2026-04-01"},
+            {"title": "婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨顒勬煕閺囥劌澧绘繛鍫燁殕娣囧﹪顢涘鍛濠电偛鐗嗘晶搴ｆ閹烘嚦鏃€绻濋崒姘缂傚倷闄嶉崝澶愬疾濠靛牆鍨?, "date": "2026-04-02"},
+            {"title": "婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨顒勬煕閺囥劌骞樻俊顐灠椤潡宕滄笟鍥╁姼闂?, "date": "2026-04-03"},
         ],
         "count": 3,
     }
@@ -575,10 +575,10 @@ def compress_tool_result(tool_name: str, result: dict) -> str:
 def _compress_get_free_slots(result: dict) -> str:
     summary = result.get("summary", "")
     if summary:
-        return f"[缂傚倷绀侀張顒€顪冮挊澹╂稒绂掔€ｎ亞鐫勯梺鐓庢啞椤旀牠宕禒瀣厸閻忕偠顕ч崝銉︺亜閺囩噥娈樼紒杈ㄥ浮楠炴鈧敻鏅查崙绲?{summary}"
+        return f"[缂傚倸鍊风粈渚€寮甸鈧—鍐寠婢光晜绋掔粋鎺斺偓锝庝簽閻嫰姊洪悡搴㈠暈妞ゆ梹鐗犲畷顒佺鐎ｎ偆鍘搁柣蹇曞仩椤曆囧礉閵夛负浜滈柡鍥╁櫏濞堟绱掓潏銊ユ诞妤犵偞顭囬埀顒傛暬閺呮煡宕欑徊?{summary}"
     slots = result.get("slots", [])
     total = sum(len(d.get("free_periods", [])) for d in slots)
-    return f"[缂傚倷绀侀張顒€顪冮挊澹╂稒绂掔€ｎ亞鐫勯梺鐓庢啞椤旀牠宕禒瀣厸閻忕偠顕ч崝銉︺亜閺囩噥娈樼紒杈ㄥ浮楠炴鈧敻鏅查崙绲?{len(slots)} 濠电姰鍨归悘鍫ュ疾椤忓棙顫曟繝闈涱儏缁€?{total} 濠电偞鍨堕幖鈺傜閻愬搫鐓橀柡宥庡幗閳锋帡鏌涘▎蹇ｆ▓闁?
+    return f"[缂傚倸鍊风粈渚€寮甸鈧—鍐寠婢光晜绋掔粋鎺斺偓锝庝簽閻嫰姊洪悡搴㈠暈妞ゆ梹鐗犲畷顒佺鐎ｎ偆鍘搁柣蹇曞仩椤曆囧礉閵夛负浜滈柡鍥╁櫏濞堟绱掓潏銊ユ诞妤犵偞顭囬埀顒傛暬閺呮煡宕欑徊?{len(slots)} 婵犵數濮伴崹褰掓倶閸儱鐤炬い蹇撴椤洘绻濋棃娑卞剰缂佲偓?{total} 婵犵數鍋為崹鍫曞箹閳哄倻顩查柣鎰惈閻撴﹢鏌″搴″箺闁抽攱甯￠弻娑樷枎韫囷絾鈻撻梺?
 
 
 def _compress_list_courses(result: dict) -> str:
@@ -588,7 +588,7 @@ def _compress_list_courses(result: dict) -> str:
     names_str = "闂?.join(names)
     if count > 5:
         names_str += f" 缂?{count} 闂?
-    return f"[闂佽崵濮村ú銈嗘櫠娴犲鐓濆┑鍌滎焾缁€鍡樹繆閵堝懎顏ラ柍褜鍓欓崕?闂?{count} 闂傚倸鍊搁崐鍫曞礉韫囨侗鏁嬮柟鎯板Г閺咁剚鎱ㄥ┑鍫滃垔ames_str}"
+    return f"[闂備浇宕垫慨鏉懨洪妶鍡樻珷濞寸姴顑呴悡婵嗏攽閸屾粠鐒剧紒鈧崱妯圭箚闁靛牆鎳庨銉╂煃瑜滈崜娆撳磿?闂?{count} 闂傚倸鍊搁崐鎼佸磹閸洖绀夐煫鍥ㄤ緱閺佸鏌熼幆鏉啃撻柡鍜佸墯閹便劌鈹戦崼婊冨灁ames_str}"
 
 
 def _compress_list_tasks(result: dict) -> str:
@@ -596,13 +596,13 @@ def _compress_list_tasks(result: dict) -> str:
     count = result.get("count", len(tasks))
     completed = sum(1 for t in tasks if t.get("status") == "completed")
     pending = count - completed
-    return f"[濠电偛顕慨楣冾敋瑜庨幈銊╂偄閻撳海顦┑掳鍊曠€氥劑鍩€椤掆偓閸?闂?{count} 濠电偞鍨堕幖鈺傜濞嗘挸绠查柕蹇嬪€曠粈澶愭煃閽樺鍣界紒鈧晶鍧坥mpleted} 濠电偞鍨堕幖鈺傜濠婂牆绀勯柨娑樺閸嬫捇鎮烽悧鍫熸嫳闂佹悶鍔嶅畝鎼佸极瀹ュ洠鍋撻棃娑氬醇ending} 濠电偞鍨堕幖鈺傜濠婂懏顐介柣鏃囥€€閸嬫捇鎮烽悧鍫熸嫳闂?
+    return f"[婵犵數鍋涢顓熸叏妤ｅ喚鏁嬬憸搴ㄥ箞閵娾晜鍋勯柣鎾虫捣椤︻偄鈹戞幊閸婃洜鈧哎鍔戦崺鈧い鎺嗗亾闁?闂?{count} 婵犵數鍋為崹鍫曞箹閳哄倻顩叉繛鍡樻尭缁犳煡鏌曡箛瀣偓鏇犵矆婢舵劖鐓冮柦妯侯槹閸ｇ晫绱掗埀顒佹櫠閸у潵mpleted} 婵犵數鍋為崹鍫曞箹閳哄倻顩叉繝濠傜墕缁€鍕煥濞戞ê顏ら柛瀣崌閹兘鎮ч崼鐔稿闂備焦鎮堕崝宥呯暆閹间礁鏋佺€广儱娲犻崑鎾绘濞戞艾閱噀nding} 婵犵數鍋為崹鍫曞箹閳哄倻顩叉繝濠傛噺椤愪粙鏌ｉ弮鍥モ偓鈧柛瀣崌閹兘鎮ч崼鐔稿闂?
 
 
 def _compress_create_study_plan(result: dict) -> str:
     tasks = result.get("tasks", [])
     count = result.get("count", len(tasks))
-    return f"[濠电姰鍨煎▔娑氱矓瀹曞洤濮柛鏇ㄥ幗婵ジ鏌嶉妷銉ユ毐闁诲繐銈?闁诲氦顫夐悺鏇犱焊濞嗘挸鏋侀柟鎹愵嚙缁?{count} 濠电偞鍨堕幖鈺傜濠婂煻鍥矗婢跺备鏋欓梺缁橆焾妞寸鐣烽弻銉︾厱?
+    return f"[婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨顒勬煕閺囥劌骞楀┑顖氥偢閺屽秹濡烽妷銉︽瘣闂佽绻愰妶?闂佽姘﹂～澶愭偤閺囩姳鐒婃繛鍡樻尭閺嬩線鏌熼幑鎰靛殭缂?{count} 婵犵數鍋為崹鍫曞箹閳哄倻顩叉繝濠傜吇閸ヮ剙鐭楀璺哄閺嬫瑩姊虹紒姗嗙劸濡炲顭堥悾鐑藉蓟閵夛妇鍘?
 
 
 _COMPRESSORS = {
@@ -646,13 +646,13 @@ Append these two entries to the `TOOL_DEFINITIONS` list in `app/agent/tools.py`:
         "type": "function",
         "function": {
             "name": "recall_memory",
-            "description": "濠电偛顕慨鏉懨归悜钘夋瀬闁靛牆顦粻锝咁渻鐎ｎ亜顒㈤柣锝変憾濮婂鍩€椤掑嫬绠伴幖娣灩閻掓悂鏌ｉ悩杈╁妽婵犮垺顭囬幑銏ゅ磼濞戞埃鏋栧銈嗘尵閸ｃ儱顫忛崜褏纾煎〒姘仢閻忣喗绻涢弶鎴█鐎规洘顨婂畷妤呭川椤掑倻鐣鹃梻浣筋嚃閸欏酣宕归鍕劦妞ゆ巻鍋撻柛濠傛憸缁辩偟鈧綆鍠楅ˉ鍡涙煃瑜滈崜娑㈠箟閻楀牊濯撮柛娑橈功椤︺儵妫呴銏℃悙婵☆偅鐩顐﹀Χ婢跺﹦顓洪梺鐐壘閸婂顢樺ú顏呯厱闁规儳纾倴濠电偛鐗婇崹鍨暦閹达絿鐤€闁规儳宕禒娲⒑闂堟稒顥欐俊鐐村笧瀵囧礋椤栨氨鐣惧銈嗙墬缁嬫垿鎮樺Δ鍛厱闁归偊鍓涢敍宥夋煟鎺抽崕闈涱嚕椤曗偓瀵敻妫冨☉鎺撶€奸梻浣规た濞煎潡宕濇繝鍥х劦妞ゆ巻鍋撻柛濠勬櫕閹广垽骞嬮敃鈧悙濠囨煟閹邦厼绲婚柣鏍憾濮婃椽寮剁捄銊愩倖绻涢崼鐔风仼闁瑰嘲顑夊鍓佹崉閵娧呮殼闂備礁鎲＄敮妤呫€冩径鎰ラ柛鎰靛枛杩?,
+            "description": "婵犵數鍋涢顓熸叏閺夋嚚褰掓倻閽樺鐎梺闈涚墕椤︻垳绮婚敐鍜佹富閻庯綆浜滈銏ゆ煟閿濆鎲炬慨濠傤煼閸┾偓妞ゆ帒瀚粻浼村箹濞ｎ剙鐏╅柣鎺撴倐閺岋綁鎮╂潏鈺佸濠电姰鍨洪…鍥箲閵忋倕纾兼繛鎴炲焹閺嬫牕顪冮妶鍡樺暗闁革絻鍎遍～蹇涘礈瑜忕壕鐓庛€掑顒備虎闁诲浚鍠楃换娑㈠级閹搭厽鈻堥悗瑙勬礃椤ㄥ﹤鐣峰Δ鍛窛妞ゆ帒鍊婚悾楣冩⒒娴ｇ瓔鍤冮柛娆忛叄瀹曞綊顢楅崟顐ゅ姦濡炪倖宸婚崑鎾绘煕婵犲倹鎲哥紒杈╁仧閳ь剨缍嗛崰妤吽夐崱娑欑厓鐟滄粓宕滃☉銏犵疅闁绘鐗婃刊鎾煕濞戞﹫鍔熸い锔哄劦濡懘顢曢姀鈩冩倷濠碘槅鍋呴惄顖氼嚕椤愶箑围濠㈣泛锕﹂娲⒑閻愵剝澹橀柛濠傤煼椤㈡ê煤椤忓懐鍘遍梺瑙勫劤绾绢叀鍊存繝鐢靛仜閻楀﹪宕归崹顔炬殾闁硅揪绲块悿鈧梺瑙勫劤瀹曨剚绂掑ú顏呪拺闂傚牊绋掗ˉ娆愪繆閻愭潙绗х€殿啫鍥х妞ゆ牗姘ㄩ悾鎯ь渻閵堝棛澧紒瀣灴閹ê螖閸涱喚鍘遍梺褰掑亰閸撴盯鏁嶅澶嬬厽閹烘娊宕曢棃娑卞殨妞ゆ洍鍋撶€殿喚鏁诲Λ鍐ㄢ槈閹烘挾鈧ジ姊绘担瑙勩仧婵炵厧娼″畷婵囩節閸パ呭姦濡炪倖宸婚崑鎾绘煕婵犲嫭娅曢柟骞垮灲楠炲鏁冮埀顒勬倷婵犲洦鐓熼柟閭﹀幖缁插鏌ｉ弽顓濇喚婵﹥妞藉鍓佹崉閵婃劑鍊栫换娑㈠醇閻旈浠奸梺鐟板槻椤戝顕ｉ崜浣瑰磯闁靛ě鍛闂傚倷绀侀幉锛勬暜濡ゅ懌鈧啯寰勯幇顑┿儵鏌涢幇闈涙灈鏉?,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "闂備胶鎳撻崥瀣垝鎼淬劌纾奸柕濞炬櫅缁€鍌炴煙閹澘袚闁哄棙鐩幃褰掑炊瑜忛埢宀€绱掓潏銊х畺濞?闂備浇妗ㄩ悞锕€顭垮鈧、妤呮偄缁嬭法绐為悗骞垮劚鐎氼噣鎯佹惔锝囩＜婵炴垶鐟ф晶閬嶆煛?闂?闂佽瀛╅崘鑽ょ磽濮樺崬濮柛鏇ㄥ墰閳绘洟鏌ｅΟ鍝勬毐闁?",
+                        "description": "闂傚倷鑳堕幊鎾诲触鐎ｎ剙鍨濋幖娣妼绾惧ジ鏌曟繛鐐珔缂佲偓閸岀偞鐓欓柟顖涙緲琚氶梺鍝勬閻╊垶骞冭ぐ鎺戠倞鐟滃繘鍩㈠畝鈧槐鎺撴綇閵娧呯暫婵?闂傚倷娴囧銊╂倿閿曗偓椤灝顫滈埀顒勩€佸Δ鍛亜缂佸娉曠粣鐐烘倵楠炲灝鍔氶悗姘煎櫍閹焦鎯旈敐鍥╋紲濠电偞鍨堕悷褎鏅堕柆宥嗙厸?闂?闂備浇顕х€涒晠宕橀懡銈囩＝婵ê宕慨顒勬煕閺囥劌澧伴柍缁樻礋閺岋絽螣閸濆嫭姣愰梺?",
                     },
                 },
                 "required": ["query"],
@@ -663,18 +663,18 @@ Append these two entries to the `TOOL_DEFINITIONS` list in `app/agent/tools.py`:
         "type": "function",
         "function": {
             "name": "save_memory",
-            "description": "濠电儑绲藉ú锔炬崲閸岀偞鍋ら柕濠忓閳绘棃鏌嶈閸撶喎顕ｉ崼鏇熸櫖闁告洦鍓氬▓銏ゆ⒑鐟欏嫭灏︽い銉︽尭閳绘捇骞嬮敂瑙ｆ嫻闂佸湱顭堢€涒晠宕洪崒鐐村仯濞达綀顫夌欢鑼磼鐠囨彃鈧寧淇婇幘顔肩＜婵﹩鍓氶柨顓熺箾閿濆懏澶勭紒璇插€块幃娲Ω閳哄倸浠洪梺闈涱煭缁犳垿鎮￠弴銏＄厸闁告洦鍋呴幑锝夋煃閵夛富鐒介柟顔诲嵆婵℃悂濡搁敃鈧☉褔姊哄Ч鍥у閻庢凹鍓氱粋宥夊川婵犲嫰妾繝娈垮枟閸斿繘宕戦幘瀛樺濡炲娴峰Σ鎴︽⒑鐠団€崇伇闁搞劑浜跺畷褰掑Ω閳哄倻鍘掗悗骞垮劚閻楁粌煤閿濆鐓曢柟閭﹀墰閿涘秹鏌ｆ幊閸庣敻寮鍥︽勃闁兼祴鏅濋幉褰掓煟閻斿憡纾婚柣鎺炲閺侇喛銇愰幒鎴烆棟濡炪倖鎸绘竟鏇㈠磻閹捐纾兼繛鍡樺灩椤旀棃鏌ｆ惔銏⑩姇闁挎艾顭胯婵墽绮诲☉銏犲窛婵烇綆鍏橀崑鎾圭疀濞戞顦ч梺鍓插亖閸ㄦ椽寮?ask_user 缂備胶铏庨崣搴ㄥ窗濞戙埄鏁囧┑鐘宠壘杩?,
+            "description": "婵犵數鍎戠徊钘壝洪敂鐐床闁稿瞼鍋為崑銈夋煏婵犲繐顩柍缁樻閺屽秷顧侀柛鎾跺枎椤曪綁宕奸弴鐔告珫闂佸憡娲﹂崜姘枔閵忋倖鈷戦悷娆忓鐏忥附銇勯妷锔藉碍闁崇粯鎹囬獮瀣晜鐟欙絾瀚婚梻浣告贡椤牏鈧稈鏅犲畷娲磼閻愭潙浠繛杈剧秬椤娆㈤懠顒傜＜閻犲洦褰冮埀顒佸娣囧﹪骞橀鑲╋紲濠殿喗锕╅崜姘舵煥椤撶喓绠鹃柨婵嗘噺婢跺嫮绱掔拠鎻掆偓鍧楀箖濞差亜惟闁冲搫鍊告禒娲⒑闂堟侗鐓紒鐘冲灴閹繝寮撮姀锛勫幐闂佸憡娲﹂崑鍛村箲閿濆鐓冮柕澶涘瘜閻掍粙鏌熼璇插祮濠碘剝鎮傛俊鎼佹晝閳ь剙鈽夎濮婂搫效閸パ冾瀳闁诲孩鍑归崜姘辩矉瀹ュ宸濆┑鐘插濡绢喗绻濆▓鍨灍闁告柨绻樺畷鎴﹀箻鐎涙ê顎撴俊鐐差儏濞村嘲危閹达附鈷戦悹鍥ｂ偓宕囦紘闂佹悶鍔戞禍璺虹暦瑜版帒惟闁冲搫鍊婚崢鎺楁倵楠炲灝鍔氶柣妤佺矊鐓ら柨婵嗩槹閻撴洟鏌熼柇锕€澧伴柨娑樼Ч閺岋絾骞婇柛搴ｆ暬瀵偄顓奸崶锔藉媰闂佸吋绁撮弲婵嬪箟瑜版帗鐓熼柣鏂挎啞绾惧鏌ｉ幒鐐差洭闁轰緡鍠涢妵鎰板箳閹寸儐妫熸俊鐐€栭幐缁樼珶閺囥垹纾婚柟鎹愵嚙绾惧吋绻涢崱妯虹仼妞ゆ梹妫冮弻锝嗘償閵忊懇濮囬梺鎸庤壘椤儻顦村┑顔煎⒔缁鈽夐姀鐘茬獩濠电儑缍嗛崗姗€宕戦幘鍦杸婵炴垶顭囬ˇ褔姊洪崜鎻掍簴闁搞劍妞藉?ask_user 缂傚倷鑳堕搹搴ㄥ矗鎼淬劌绐楁繛鎴欏焺閺佸洤鈹戦悩瀹犲鏉?,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "category": {
                         "type": "string",
                         "enum": ["preference", "habit", "decision", "knowledge"],
-                        "description": "闂佽崵濮抽悞锕€顭垮Ο鍏煎床闁稿本绮庣亸鐢告偣閸ャ劌绲婚柣鎺戙偢閺屻劌鈽夊▎妯哄reference=闂備胶顭堥鍛崲閹版澘围? habit=濠电偞鍨跺缁樻叏閻㈢纾? decision=闂備礁鎲￠崝鏇犲椤撱垺鍋? knowledge=闂佽崵濮抽梽宥夊磹濡ゅ懏鍋?,
+                        "description": "闂備浇宕垫慨鎶芥倿閿曗偓椤灝螣閸忕厧搴婇梺绋挎湰缁海浜搁悽鍛婂仯闁搞儯鍔岀徊濠氭煟閹烘垯鍋㈤柡灞诲妼閳藉鈻庡Ο鍝勵潏reference=闂傚倷鑳堕…鍫ヮ敄閸涱垱宕查柟鐗堟緲鍥? habit=婵犵數鍋為崹璺侯潖缂佹ɑ鍙忛柣銏㈩焾绾? decision=闂傚倷绀侀幉锟犲礉閺囩姴顥氭い鎾卞灪閸? knowledge=闂備浇宕垫慨鎶芥⒔瀹ュ纾规俊銈呮噺閸?,
                     },
                     "content": {
                         "type": "string",
-                        "description": "闂佽崵濮抽悞锕€顭垮Ο鍏煎床闁稿瞼鍋涚粈鍐煕濞戝崬寮鹃柛鐔锋喘閺屻劌鈽夊Ο鑲╁姰闂佹悶鍊栫划鎾诲箖閻愬搫绠氶梺顓ㄧ畱濞堁囨煟閻旈娈遍柛瀣崌閺岀喓鎷犻懠顒傤啈闂?,
+                        "description": "闂備浇宕垫慨鎶芥倿閿曗偓椤灝螣閸忕厧搴婇梺绋跨灱閸嬫稓绮堥崘顔界厱婵炴垵宕楣冩煕閻旈攱鍠橀柡灞诲妼閳藉螣閼测晛濮伴梻浣规偠閸婃牜鍒掗幘璇茬畺闁绘劕鎼粻姘舵⒑椤撱劎鐣辨繛鍫佸洦鐓熼柣鏃堫棑濞堥亶鏌涚€ｎ偅宕岄柡宀€鍠撻幏鐘绘嚑椤掑偆鍟堥梻?,
                     },
                 },
                 "required": ["category", "content"],
@@ -690,13 +690,13 @@ Also append a `delete_memory` tool definition:
         "type": "function",
         "function": {
             "name": "delete_memory",
-            "description": "闂備礁鎲＄敮鐐寸箾閳ь剚绻涢崨顓烆劉缂佸顦甸崺鈧い鎺戝缁狙囨煥濞戞ê顏柡鍡楃箻閺岀喖骞橀鍛棖濠电偛鐗婇崹鍨潖瑜版帒绠伴幖娣灩閻掓悂鏌ｉ悩杈╁妽婵犮垺顭囬幑銏ゅ磼閻愬弬銉╂煕鐏炵偓鐨戠紒澶娿偢閺岋綁锝為鈧俊浠嬫煕閳哄倻銆掗柟?闂傚鍋勫ú锕佹懌闁汇埄鍨崑鎼檟x'闂備礁鎼崯鎶筋敊閹邦喗顫曟繝闈涱儏缁€鍌炴煕椤愮姴鐏柡?recall_memory 闂備胶鎳撻悘姘跺磿閹惰棄鏄ョ€光偓閳ь剟鍩€椤掑倹鏆╅柟铏尵閼洪亶鎳犻浣割€涢梺鍝勵槼濞夋洜绮婚幘缁樼厽?ID闂備焦瀵х粙鎴︽嚐椤栫偛鐤柍褜鍓熼幃鍦偓锝庝簻閺嗙喖鏌℃担闈涒偓鏇綖閵忋倕围闁告侗鍓涢惌妤呮⒑缁嬭法绠伴柛銏＄叀瀹曠銇愰幒鎾寖闂侀潧鐗嗛崯鐘诲磻?,
+            "description": "闂傚倷绀侀幉锛勬暜閻愬绠鹃柍褜鍓氱换娑㈠川椤撶儐鍔夌紓浣割儏椤︾敻宕洪埀顒併亜閹烘垵顏╃紒鐙欏洦鐓ユ繛鎴灻顏堟煛閸℃绠婚柡宀€鍠栭獮姗€顢氶崨顕呮婵犵數鍋涢悧濠囧垂閸噮娼栫憸鐗堝笒缁犱即骞栧ǎ顒€鐏╅柣鎺撴倐閺岋綁鎮╂潏鈺佸濠电姰鍨洪…鍥箲閵忋倕纾奸柣鎰棘閵夆晜鐓曢悘鐐靛亾閻ㄦ垹绱掓径濞垮仮闁哄矉缍侀敐鐐侯敆閳ь剚淇婃禒瀣厱闁冲搫鍊婚妴鎺楁煙?闂傚倸顭崑鍕洪敃浣规噷闂佹眹鍩勯崹顏堝磻閹兼獰x'闂傚倷绀侀幖顐﹀疮閹剁瓔鏁婇柟閭﹀枟椤洘绻濋棃娑卞剰缂佲偓閸岀偞鐓曟い鎰Т閻忣亪鏌?recall_memory 闂傚倷鑳堕幊鎾绘倶濮樿泛纾块柟鎯版閺勩儳鈧厜鍋撻柍褜鍓熼崺鈧い鎺戝€归弳鈺呮煙閾忣偅灏甸柤娲憾閹崇娀顢楁担鍓测偓娑㈡⒑閸濆嫷妲兼繛澶嬫礈缁骞樼紒妯煎幗?ID闂傚倷鐒︾€笛呯矙閹达附鍤愭い鏍仜閻ゎ噣鏌嶈閸撶喖骞冮崷顓涘亾閿濆簼绨婚柡鍡欏枛閺屸剝鎷呴棃娑掑亾閺囶澁缍栭柕蹇嬪€曞洿闂佸憡渚楅崜娑㈡儗濡ゅ懏鈷戠紒瀣硶缁犱即鏌涢姀锛勫弨鐎规洜顢婇妵鎰板箳閹绢垱瀵栭梻渚€娼ч悧鍡涘疮閻樿纾?,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "memory_id": {
                         "type": "string",
-                        "description": "闂佽崵鍠愬ú鎴犵矆娓氣偓瀹曠銇愰幒鎾寖闂侀潧鐗嗗ú锕傛偩闁秵鍋ｅù锝堫潐缁惰尙绱?ID闂備焦瀵х粙鎴︽偋閸涱垰鍨?recall_memory 缂傚倸鍊烽悞锕傚箰婵犳碍鍊跺璺侯儑閳绘梹銇勯幘顖楀亾瀹曞浂鍞甸梻浣告啞閻燂箓鎮ч鐘愁潟?,
+                        "description": "闂備浇宕甸崰鎰洪幋鐘电焼濞撴埃鍋撶€规洜顢婇妵鎰板箳閹绢垱瀵栭梻渚€娼ч悧鍡椕洪敃鍌涘仼闂侇剙绉甸崑锝吤归敐鍫綈缂佹儼灏欑槐?ID闂傚倷鐒︾€笛呯矙閹达附鍋嬮柛娑卞灠閸?recall_memory 缂傚倸鍊搁崐鐑芥倿閿曞倸绠板┑鐘崇閸婅泛顭跨捄渚剳闁崇粯姊归妵鍕箻椤栨浜剧€规洖娴傞崬鐢告⒒娴ｅ憡鍟為柣鐕傜畵閹囶敇閻樻剚娼?,
                     },
                 },
                 "required": ["memory_id"],
@@ -760,20 +760,20 @@ async def test_recall_memory_returns_results(setup_db):
         mem = Memory(
             user_id="tool-mem-1",
             category="preference",
-            content="闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏缁秹鏌嶇悰鈥充壕缂備焦顨呴崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡叉垿姊烘潪鎵妽婵犮垺锕㈤、?,
+            content="闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰缂侇偄绉归弻宥囨偘閳ュ厖澹曠紓鍌欑劍椤ㄥ懘宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊鍙夊灴濮婄儤娼幍顔煎濠电姰鍨洪敃銏ゃ€?,
         )
         db.add(mem)
         await db.commit()
 
         result = await execute_tool(
             "recall_memory",
-            {"query": "闂備浇妗ㄩ悞锕€顭垮鈧、?},
+            {"query": "闂傚倷娴囧銊╂倿閿曗偓椤灝顫滈埀顒勩€?},
             db=db,
             user_id="tool-mem-1",
         )
         assert "memories" in result
         assert len(result["memories"]) >= 1
-        assert "闂備浇妗ㄩ悞锕€顭垮鈧、? in result["memories"][0]["content"]
+        assert "闂傚倷娴囧銊╂倿閿曗偓椤灝顫滈埀顒勩€? in result["memories"][0]["content"]
 
 
 @pytest.mark.asyncio
@@ -787,7 +787,7 @@ async def test_recall_memory_empty_results(setup_db):
 
         result = await execute_tool(
             "recall_memory",
-            {"query": "濠电偞鍨堕幐鍝ョ矓閹绢喗鍋ら柕濞炬櫅閹瑰爼鏌曟繛褍瀚弳鐘绘⒑閸涘﹤濮囬柟鍐查叄椤?},
+            {"query": "婵犵數鍋為崹鍫曞箰閸濄儳鐭撻柟缁㈠枟閸嬨倝鏌曟繛鐐珔闁圭懓鐖奸弻鏇熺箾瑜嶇€氼噣寮抽悩缁樷拺闁告稑锕ゆ慨鍥煙閸愭煡鍙勬い?},
             db=db,
             user_id="tool-mem-2",
         )
@@ -806,7 +806,7 @@ async def test_save_memory_creates_record(setup_db):
 
         result = await execute_tool(
             "save_memory",
-            {"category": "preference", "content": "闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏閻ょ偓鎱ㄥ鍡椾簽闁荤喐鍔曢…璺ㄦ崉閾忓墣锛勭磼閳ュ啿顏€殿噮鍓熷畷鍫曞煛婵犲啰绋?},
+            {"category": "preference", "content": "闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰闁汇倗鍋撻幈銊ヮ潨閸℃ぞ绨介梺鑽ゅ枑閸旀洟鈥︾捄銊﹀磯闁惧繐澧ｉ敍鍕＜闁炽儱鍟块顓犫偓娈垮櫘閸撶喎鐣烽崼鏇炵厸濠电姴鍟扮粙?},
             db=db,
             user_id="tool-mem-3",
         )
@@ -817,7 +817,7 @@ async def test_save_memory_creates_record(setup_db):
         )
         saved = mems.scalars().all()
         assert len(saved) == 1
-        assert saved[0].content == "闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏閻ょ偓鎱ㄥ鍡椾簽闁荤喐鍔曢…璺ㄦ崉閾忓墣锛勭磼閳ュ啿顏€殿噮鍓熷畷鍫曞煛婵犲啰绋?
+        assert saved[0].content == "闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰闁汇倗鍋撻幈銊ヮ潨閸℃ぞ绨介梺鑽ゅ枑閸旀洟鈥︾捄銊﹀磯闁惧繐澧ｉ敍鍕＜闁炽儱鍟块顓犫偓娈垮櫘閸撶喎鐣烽崼鏇炵厸濠电姴鍟扮粙?
         assert saved[0].category == "preference"
 ```
 
@@ -869,7 +869,7 @@ async def _save_memory(
     return {
         "status": "saved",
         "id": mem.id,
-        "message": f"闁诲氦顫夐悺鏇犱焊椤忓牜鏁婇柛銉ｅ妽婵挳鐓崶銉ュ姢缂佹劖鈷媍ontent}",
+        "message": f"闂佽姘﹂～澶愭偤閺囩姳鐒婃い蹇撶墱閺佸﹪鏌涢妷锝呭濠殿垱鎸抽悡顐﹀炊閵夈儱濮㈢紓浣瑰姈閳峰獚ontent}",
     }
 
 
@@ -879,8 +879,8 @@ async def _delete_memory_handler(
     """Delete a long-term memory by ID."""
     deleted = await delete_memory(db, user_id, memory_id)
     if deleted:
-        return {"status": "deleted", "message": "闁诲海鎳撻幉陇銇愰崘顔煎瀭鐟滅増甯楅埛鏃堟煏閸繄澧遍柛銈咁樀閹鎷呯憴鍕嚒缂?}
-    return {"error": "闂佽崵濮抽悞锕€顭垮Ο鍏煎床闁稿本绋撻埢鏃傗偓骞垮劚閹虫劙骞楅悩缁樼厱闁挎柨鎼俊浠嬫煕閵婏絽濮傜€殿噮鍣ｉ幃鈺呮惞椤愩倗袣闂備礁鎲＄敮鐐寸箾閳ь剚绻?}
+        return {"status": "deleted", "message": "闂佽娴烽幊鎾诲箟闄囬妵鎰板礃椤旂厧鐎悷婊呭鐢鍩涢弮鍫熺厪闁割偅绻勬晶閬嶆煕閵堝拋妯€闁诡喛顫夐幏鍛喆閸曨厼鍤掔紓?}
+    return {"error": "闂備浇宕垫慨鎶芥倿閿曗偓椤灝螣閸忕厧搴婇梺绋挎湰缁嬫捇鍩㈤弮鍌楀亾楠炲灝鍔氶柟铏姍楠炴鎮╃紒妯煎幈闂佹寧鏌ㄩ幖顐ｄ繆娴犲鐓曢柕濠忕到婵倻鈧鍣崳锝夊箖閳哄懏鎯炴い鎰╁€楄ⅲ闂傚倷绀侀幉锛勬暜閻愬绠鹃柍褜鍓氱换?}
 ```
 
 Add all three to the `TOOL_HANDLERS` dict:
@@ -948,8 +948,8 @@ async def test_loop_compresses_large_tool_result(setup_db):
 
         # Mock LLM: first call returns a tool call, second call returns text
         large_result = {
-            "slots": [{"date": f"2026-04-{i:02d}", "weekday": "闂備礁鎲＄粙蹇涘礉鐎ｎ剛鍗?, "free_periods": [{"start": "08:00", "end": "22:00", "duration_minutes": 840}], "occupied": []} for i in range(1, 8)],
-            "summary": "2026-04-01 闂?2026-04-07 闂?7 濠电偞鍨堕幖鈺傜閻愬搫鐓橀柡宥庡幗閳锋帡鏌涘▎蹇ｆ▓闁哥偘绮欓弻銊モ槈濡粯鎷遍梺閫炲苯澧俊鍙夊浮椤?98 闂佽绻愮换鎰崲閹存繍娓?0 闂備礁鎲＄敮鎺懳涘┑瀣?,
+            "slots": [{"date": f"2026-04-{i:02d}", "weekday": "闂傚倷绀侀幉锛勭矙韫囨稑绀夐悗锝庡墰閸?, "free_periods": [{"start": "08:00", "end": "22:00", "duration_minutes": 840}], "occupied": []} for i in range(1, 8)],
+            "summary": "2026-04-01 闂?2026-04-07 闂?7 婵犵數鍋為崹鍫曞箹閳哄倻顩查柣鎰惈閻撴﹢鏌″搴″箺闁抽攱甯￠弻娑樷枎韫囷絾鈻撻梺鍝ュ仒缁瑩寮婚妸銉㈡婵☆垳绮幏閬嶆⒑闁偛鑻晶顖涗繆閸欏娴い?98 闂備浇顕х换鎰崲閹邦喗宕查柟瀛樼箥濞?0 闂傚倷绀侀幉锛勬暜閹烘嚦娑樷攽鐎ｎ亞顔?,
         }
 
         call_count = 0
@@ -976,13 +976,13 @@ async def test_loop_compresses_large_tool_result(setup_db):
                 content = tool_msg["content"]
                 # Compressed version should NOT contain "free_periods"
                 assert "free_periods" not in content
-                assert "7 濠电偞鍨堕幖鈺傜閻愬搫鐓橀柡宥庡幗閳锋帡鏌涘▎蹇ｆ▓闁? in content
-                return {"role": "assistant", "content": "濠电偠鎻徊鎸庢叏閸撗勫床闁哄稁鍘煎婵嬫煏婵犲繘妾紒鐘冲笧閳ь剙鐏氬姗€鎮ч崱娴板洨鎹勯妸褏鐓斿┑鐐叉▕娴滄繈鏁嶅┑瀣厸闁告劑鍔庨崺锝嗕繆椤愩垺鍋ラ柡?}
+                assert "7 婵犵數鍋為崹鍫曞箹閳哄倻顩查柣鎰惈閻撴﹢鏌″搴″箺闁抽攱甯￠弻娑樷枎韫囷絾鈻撻梺? in content
+                return {"role": "assistant", "content": "婵犵數鍋犻幓顏嗗緤閹稿孩鍙忛柛鎾楀嫬搴婇梺鍝勭▉閸樼厧顔忓┑瀣厪濠电姴绻樺顔剧磼閻樺啿绗ч柍褜鍓欓悘姘熆濮椻偓閹囧幢濞存澘娲ㄩ幑鍕Ω瑜忛悡鏂库攽閻愬弶鈻曞ù婊勭箞閺佸秴鈹戠€ｎ偆鍘搁梺鍛婂姂閸斿酣宕洪敐鍡曠箚妞ゆ劑鍨洪崑銉╂煛?}
 
         with patch("app.agent.loop.chat_completion", side_effect=mock_chat_completion):
             with patch("app.agent.loop.execute_tool", new_callable=AsyncMock, return_value=large_result):
                 events = []
-                gen = run_agent_loop("闂備礁鎼悮顐﹀磿閸愯鑰块柛娑卞灣閻碍绻涘顔荤凹闁挎稒绻堥弻锟犲礃閵娧冪厽濠?, user, "test-session", db, AsyncMock())
+                gen = run_agent_loop("闂傚倷绀侀幖顐ゆ偖椤愶箑纾块柛鎰嚋閼板潡鏌涘☉鍗炵仯闁活厽纰嶇换娑橆啅椤旇崵鍑归梺鎸庣⊕缁诲牓寮婚敓鐘茬闁靛ě鍐幗婵?, user, "test-session", db, AsyncMock())
                 try:
                     event = await gen.__anext__()
                     while True:
@@ -1084,14 +1084,14 @@ async def test_hot_memories_in_context(setup_db):
     async with TestSession() as db:
         user = User(id="ctx-user-1", username="ctxtest1", hashed_password="x")
         db.add(user)
-        pref = Memory(user_id="ctx-user-1", category="preference", content="闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏缁秹鏌嶇悰鈥充壕缂備焦顨呴崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡叉垿姊烘潪鎵妽婵犮垺锕㈤、?)
-        habit = Memory(user_id="ctx-user-1", category="habit", content="濠电偞鍨堕幐鎾磻閹惧绠鹃柛鈥崇箰婢у弶绻涢幘鐟扮厫鐎垫澘瀚～婵嬫嚋娴ｅ啫浜栧┑?闂佽绻愮换鎰崲閹存繍娓?)
+        pref = Memory(user_id="ctx-user-1", category="preference", content="闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰缂侇偄绉归弻宥囨偘閳ュ厖澹曠紓鍌欑劍椤ㄥ懘宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊鍙夊灴濮婄儤娼幍顔煎濠电姰鍨洪敃銏ゃ€?)
+        habit = Memory(user_id="ctx-user-1", category="habit", content="婵犵數鍋為崹鍫曞箰閹绢喖纾婚柟鎯ь嚟缁犻箖鏌涢垾宕囩濠⒀冨级缁绘盯骞橀悷鎵帿閻庡灚婢樼€氼剟锝炲┑瀣殝濞达絽鍟禍鏍р攽?闂備浇顕х换鎰崲閹邦喗宕查柟瀛樼箥濞?)
         db.add_all([pref, habit])
         await db.commit()
 
         context = await build_dynamic_context(user, db)
-        assert "闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏缁秹鏌嶇悰鈥充壕缂備焦顨呴崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡叉垿姊烘潪鎵妽婵犮垺锕㈤、? in context
-        assert "濠电偞鍨堕幐鎾磻閹惧绠鹃柛鈥崇箰婢у弶绻涢幘鐟扮厫鐎垫澘瀚～婵嬫嚋娴ｅ啫浜栧┑?闂佽绻愮换鎰崲閹存繍娓? in context
+        assert "闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰缂侇偄绉归弻宥囨偘閳ュ厖澹曠紓鍌欑劍椤ㄥ懘宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊鍙夊灴濮婄儤娼幍顔煎濠电姰鍨洪敃銏ゃ€? in context
+        assert "婵犵數鍋為崹鍫曞箰閹绢喖纾婚柟鎯ь嚟缁犻箖鏌涢垾宕囩濠⒀冨级缁绘盯骞橀悷鎵帿閻庡灚婢樼€氼剟锝炲┑瀣殝濞达絽鍟禍鏍р攽?闂備浇顕х换鎰崲閹邦喗宕查柟瀛樼箥濞? in context
 
 
 @pytest.mark.asyncio
@@ -1101,12 +1101,12 @@ async def test_warm_memories_in_context(setup_db):
     async with TestSession() as db:
         user = User(id="ctx-user-2", username="ctxtest2", hashed_password="x")
         db.add(user)
-        decision = Memory(user_id="ctx-user-2", category="decision", content="濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚?)
+        decision = Memory(user_id="ctx-user-2", category="decision", content="婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥?)
         db.add(decision)
         await db.commit()
 
         context = await build_dynamic_context(user, db)
-        assert "濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚? in context
+        assert "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥? in context
 
 
 @pytest.mark.asyncio
@@ -1120,7 +1120,7 @@ async def test_no_memories_still_works(setup_db):
 
         context = await build_dynamic_context(user, db)
         # Should still have time info, just no memory section
-        assert "闁荤喐绮庢晶妤呭箰閸涘﹥娅犻柣妯款嚙缁秹鏌涢锝嗙闁? in context
+        assert "闂佽崵鍠愮划搴㈡櫠濡ゅ懎绠伴柛娑橈攻濞呯娀鏌ｅΟ娆惧殭缂侇偄绉归弻娑㈩敃閿濆棛顦ㄩ梺? in context
 
 
 @pytest.mark.asyncio
@@ -1135,13 +1135,13 @@ async def test_last_session_summary_in_context(setup_db):
         summary = SessionSummary(
             user_id="ctx-user-4",
             session_id="prev-session",
-            summary="濠电偞鍨堕幐鎼佹晝閵夆晩鏁冮柤娴嬫杹閸嬫捇鎮藉▓鎸庢暞闂佷紮缂氱划娆撳极瀹ュ拋娼╅弶鍫涘妽濞堛垽姊虹憴鍕稇闁搞垺鐓￠、姘舵焼瀹ュ懐顦ч梺闈涱槶閸婃宕繝鍥ㄥ仯闁搞儯鍔岀粈鍐煏閸℃鏆ｉ柡浣哥Т閻ｆ繈宕橀幆褎娅楃紓鍌氬€搁崰姘跺窗閺囩姾濮?闂傚倸鍊搁崐鍫曞礉韫囨稑鐒垫い鎺嗗亾闁哥喐濞婇幆渚€顢涢悙鏉戝壄闂佸憡娲﹂崑鎺懳ｇ拠娴嬫闁哄啫鍊搁瀷濡炪倖鎸婚幃鍌氱暦?,
+            summary="婵犵數鍋為崹鍫曞箰閹间焦鏅濋柕澶嗘櫓閺佸啴鏌ゅù瀣澒闁稿鎹囬幃钘夆枔閹稿孩鏆為梻浣风串缂傛氨鍒掑▎鎾虫瀬鐎广儱鎷嬪鈺呭级閸稑濡芥繛鍫涘灲濮婅櫣鎲撮崟顒傜▏闂佹悶鍨洪悡锟犮€佸鑸电劶鐎广儱鎳愰ˇ褔姊洪棃娑辨Ф闁稿﹥顨婂畷顖涚節閸ャ劌浠梺鎼炲劘閸斿瞼绮堥崘顔界厪闁糕剝顨呴弳锝夋煛娴ｅ摜孝闁伙絾绻堝畷姗€骞嗚濞呮绱撻崒姘偓鎼佸窗濮樿泛绐楅柡鍥╁Ь婵?闂傚倸鍊搁崐鎼佸磹閸洖绀夐煫鍥ㄧ☉閻掑灚銇勯幒鍡椾壕闂佸摜鍠愭繛濠囧箚娓氣偓椤㈡盯鎮欓弶鎴濆闂備礁鎲″ú锕傚磻閹烘嚦锝囨嫚濞村顫嶉梺鍝勫暙閸婃悂鐎锋俊鐐€栭幐濠氬箖閸屾氨鏆?,
         )
         db.add(summary)
         await db.commit()
 
         context = await build_dynamic_context(user, db)
-        assert "闂佽娴烽弫鎼佸储瑜斿畷锝夊幢濡⒈娲搁梺绯曞墲閸戝綊宕甸敃鍌涘仩? in context
+        assert "闂備浇顕уù鐑藉极閹间礁鍌ㄧ憸鏂跨暦閿濆骞㈡俊顖溾拡濞叉悂姊虹化鏇炲⒉闁告垵缍婂畷鐢告晝閸屾稑浠? in context
 ```
 
 - [x] **Step 2: Run tests to verify they fail**
@@ -1165,7 +1165,7 @@ from app.models.task import Task
 from app.models.user import User
 from app.services.memory_service import get_hot_memories, get_warm_memories
 
-WEEKDAY_NAMES = ["闂備礁鎲＄粙蹇涘礉鐎ｎ剛鍗?, "闂備礁鎲＄粙蹇涘礉鐎ｎ剝濮?, "闂備礁鎲＄粙蹇涘礉鐎ｎ剛绠?, "闂備礁鎲＄粙蹇涘礉鐏炵煫?, "闂備礁鎲＄粙蹇涘礉鐎ｎ剝濮?, "闂備礁鎲＄粙蹇涘礉瀹€鍕煑?, "闂備礁鎲＄粙蹇涘礉瀹ュ憘?]
+WEEKDAY_NAMES = ["闂傚倷绀侀幉锛勭矙韫囨稑绀夐悗锝庡墰閸?, "闂傚倷绀侀幉锛勭矙韫囨稑绀夐悗锝庡墲婵?, "闂傚倷绀侀幉锛勭矙韫囨稑绀夐悗锝庡墰缁?, "闂傚倷绀侀幉锛勭矙韫囨稑绀夐悘鐐电叓?, "闂傚倷绀侀幉锛勭矙韫囨稑绀夐悗锝庡墲婵?, "闂傚倷绀侀幉锛勭矙韫囨稑绀夌€光偓閸曨偆鐓?, "闂傚倷绀侀幉锛勭矙韫囨稑绀夌€广儱鎲?]
 
 
 async def build_dynamic_context(user: User, db: AsyncSession) -> str:
@@ -1175,12 +1175,12 @@ async def build_dynamic_context(user: User, db: AsyncSession) -> str:
     weekday = today.isoweekday()
 
     parts: list[str] = []
-    parts.append(f"闁荤喐绮庢晶妤呭箰閸涘﹥娅犻柣妯款嚙缁秹鏌涢锝嗙闁挎稓鍠栭弻銊モ槈濞嗘ê濮眓ow.strftime('%Y-%m-%d %H:%M')}闂備焦瀵х粙鎴濐熆閺堛€KDAY_NAMES[weekday - 1]}闂?)
+    parts.append(f"闂佽崵鍠愮划搴㈡櫠濡ゅ懎绠伴柛娑橈攻濞呯娀鏌ｅΟ娆惧殭缂侇偄绉归弻娑㈩敃閿濆棛顦ㄩ梺鎸庣〒閸犳牠寮婚妸銉㈡婵炲棙锚婵湏ow.strftime('%Y-%m-%d %H:%M')}闂傚倷鐒︾€笛呯矙閹存繍鐔嗛柡鍫涒偓顨獽DAY_NAMES[weekday - 1]}闂?)
 
     if user.current_semester_start:
         delta = (today - user.current_semester_start).days
         week_num = delta // 7 + 1
-        parts.append(f"闁荤喐绮庢晶妤呭箰閸涘﹥娅犻柣妯碱暯閸嬫挸鈽夐幎鑺ヮ€嶅┑鐘亾闁跨喓濮甸弲顒佹叏濮椻偓绾悂宕曢幉鎲宔ek_num}闂?)
+        parts.append(f"闂佽崵鍠愮划搴㈡櫠濡ゅ懎绠伴柛娑橈攻濞呯娀鏌ｅΟ纰辨毌闁稿鎸搁埥澶愬箮閼恒儺鈧秴鈹戦悩顐壕闂佽法鍠撴慨鐢稿疾椤掍焦鍙忔慨妞诲亾缁绢厽鎮傚畷鏇㈠箟閹插當ek_num}闂?)
 
     # Today's schedule
     course_result = await db.execute(
@@ -1197,43 +1197,43 @@ async def build_dynamic_context(user: User, db: AsyncSession) -> str:
     )
     tasks = task_result.scalars().all()
 
-    parts.append("\n濠电偛顕慨鎾晝閵堝桅濠㈣埖鍔栭崕宥夋煕閺囥劌澧柨娑橆槺缁辨帞鈧綆浜堕崕婊呯磼?)
+    parts.append("\n婵犵數鍋涢顓熸叏閹绢喗鏅濋柕鍫濐槸妗呮繝銏ｅ煐閸旀牠宕曞澶嬬厱闁哄洢鍔屾晶顖炴煥濞戞﹩妲虹紒杈ㄥ笧閳ь剨缍嗘禍鍫曞磿濠婂懐纾?)
     if not courses and not tasks:
-        parts.append("- 闂備礁鎼崯鐗堟叏閹绢喗鍋╅柕濞炬櫅缁?)
+        parts.append("- 闂傚倷绀侀幖顐﹀疮閻楀牊鍙忛柟缁㈠枟閸嬧晠鏌曟繛鐐珔缂?)
     else:
         for course in courses:
             location = f" @ {course.location}" if course.location else ""
-            parts.append(f"- {course.start_time}-{course.end_time} {course.name}{location}闂備焦瀵х粙鎴︽偋閹伴偊鏁嬬€规洖娲ㄩ惌娆撴倵閿濆懎顣崇紒鈧?)
+            parts.append(f"- {course.start_time}-{course.end_time} {course.name}{location}闂傚倷鐒︾€笛呯矙閹达附鍋嬮柟浼村亰閺佸鈧娲栧ú銊╂儗濞嗘挻鍊甸柨婵嗘噹椤ｅ磭绱掗埀?)
         for task in tasks:
             status_mark = "闂? if task.status == "completed" else "闂?
-            parts.append(f"- {task.start_time}-{task.end_time} {task.title}闂備焦瀵х粙鎴濐熆閺夋挤atus_mark}闂?)
+            parts.append(f"- {task.start_time}-{task.end_time} {task.title}闂傚倷鐒︾€笛呯矙閹存繍鐔嗛柡澶嬫尋atus_mark}闂?)
 
     # User preferences
     preferences = user.preferences or {}
     if preferences:
-        parts.append("\n闂備焦妞垮鍧楀礉瀹ュ鏄ユ繛鎴欏灩绾惧鐓崶銊﹀蔼闁稿鍔戦弻?)
+        parts.append("\n闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰銉︾箾閹存瑥鐏╃痪鎯ь煼閻擃偊宕堕妸锕€钄奸梺绋款儍閸旀垿寮?)
         if "earliest_study" in preferences:
-            parts.append(f"- 闂備礁鎼悧鍐磻閹剧粯鐓涢柛鎰剁稻濞呭懏銇勯幒鏂挎瀾缂佸锕幃鈺呮惞椤愵偅袧闂傚倸鍊搁崐浠嬪箵椤忓棙顫曢柣銊︹叞references['earliest_study']}")
+            parts.append(f"- 闂傚倷绀侀幖顐︽偋閸愵喖纾婚柟鍓х帛閻撴盯鏌涢幇鍓佺ɑ婵炲懎鎳忛妵鍕箳閺傛寧鐎剧紓浣割儏閿曨亪骞冮埡鍛優妞ゆ劦鍋呰ⅶ闂傚倸鍊搁崐鎼佸磹娴犲绠垫い蹇撴椤洟鏌ｉ妸锔瑰彏references['earliest_study']}")
         if "latest_study" in preferences:
-            parts.append(f"- 闂備礁鎼悧鍐磻閹剧粯鐓涢柛娑卞枦婢规ɑ銇勯幒鏂挎瀾缂佸锕幃鈺呮惞椤愵偅袧闂傚倸鍊搁崐浠嬪箵椤忓棙顫曢柣銊︹叞references['latest_study']}")
+            parts.append(f"- 闂傚倷绀侀幖顐︽偋閸愵喖纾婚柟鍓х帛閻撴盯鏌涘☉鍗炴灕濠㈣蓱閵囧嫰骞掗弬鎸庣€剧紓浣割儏閿曨亪骞冮埡鍛優妞ゆ劦鍋呰ⅶ闂傚倸鍊搁崐鎼佸磹娴犲绠垫い蹇撴椤洟鏌ｉ妸锔瑰彏references['latest_study']}")
         if "lunch_break" in preferences:
-            parts.append(f"- 闂備礁鎲￠〃鍛存偋閸涱垱顫曢柕鍫濐槹閺咁剚鎱ㄥ┑鍫熸灳references['lunch_break']}")
+            parts.append(f"- 闂傚倷绀侀幉锟犮€冮崨瀛樺亱闁告侗鍨遍～鏇㈡煏閸繍妲归柡鍜佸墯閹便劌鈹戦崼鐔哥伋references['lunch_break']}")
         if "min_slot_minutes" in preferences:
-            parts.append(f"- 闂備礁鎼悧鍐磻閹剧粯鐓熸い鎾楀啫绠哄┑鐘亾濞撴埃鍋撶€殿噮鍋婂畷濂告偄閸撳弶袧婵犵數鍋涢悧蹇涖€傞鐐潟闁汇劍鈪皉eferences['min_slot_minutes']}闂備礁鎲＄敮鎺懳涘┑瀣?)
+            parts.append(f"- 闂傚倷绀侀幖顐︽偋閸愵喖纾婚柟鍓х帛閻撶喐銇勯幘妤€鍟粻鍝勨攽閻橆偄浜炬繛鎾村焹閸嬫挾鈧鍣崑濠傜暦婵傚憡鍋勯柛鎾冲级琚у┑鐘垫暩閸嬫盯鎮ц箛娑栤偓鍌烆敊閻愵剦娼熼梺姹囧妽閳殙eferences['min_slot_minutes']}闂傚倷绀侀幉锛勬暜閹烘嚦娑樷攽鐎ｎ亞顔?)
         if "school_schedule" in preferences:
-            parts.append("- 闁诲海鎳撻幉锟犳偂閿熺姴鍌ㄩ柕鍫濇川绾剧偓銇勯弮鍥у惞缂佸锕弻鐔碱敇瑜嶉悘鈩冧繆閻愭彃鈧灝顫忛懡銈咁棜閻庯絻鍔夐崑?)
+            parts.append("- 闂佽娴烽幊鎾诲箟閿熺姵鍋傞柨鐔哄Т閸屻劑鏌曢崼婵囧窛缁惧墽鍋撻妵鍕籍閸パ冩優缂備礁顑呴敃顏堝蓟閻旂⒈鏁囩憸宥夋倶閳╁啩绻嗛柣鎰絻閳ь剙鐏濋～蹇涙嚒閵堝拋妫滈柣搴祷閸斿宕?)
 
     # Hot memories (preferences + habits) 闂?always loaded
     hot_memories = await get_hot_memories(db, user.id)
     if hot_memories:
-        parts.append("\n闂傚倸鍊甸崑鎾绘煙缁嬪灝顒㈤柛鈺佸€块幃瑙勬媴鐟欏嫮鍑＄紓浣筋嚙閸婂潡寮澶婇唶婵犻潧鎳愰崜銊︾節闂堟稑鈧綊宕瑰┑鍫㈢當閻忕偛澧介埢鏇㈡煟濡搫鏆遍柛鏃傛暬閺屻劌鈽夊鍡橆€嗙紓?)
+        parts.append("\n闂傚倸鍊搁崐鐢稿磻閹剧粯鐓欑紒瀣仢椤掋垽鏌涢埡浣糕偓鍧楀箖鐟欏嫭濯撮悷娆忓閸戯紕绱撴担绛嬪殭闁稿﹤娼″顐㈩吋婢跺﹪鍞跺┑鐘绘涧閹虫劙宕滈妸锔剧瘈闂傚牊绋戦埀顒€缍婂畷鐟扳攽閸垻鐣堕柣蹇曞仜婢т粙鍩㈤弴銏＄厽婵☆垰鎼弳閬嶆煕閺冨倹鏆柡灞诲妼閳藉顫滈崱姗嗏偓鍡欑磽?)
         for mem in hot_memories:
             parts.append(f"- [{mem.category}] {mem.content}")
 
     # Warm memories (recent decisions/knowledge) 闂?loaded at session start
     warm_memories = await get_warm_memories(db, user.id, days=7)
     if warm_memories:
-        parts.append("\n闂佸搫顦弲婊堝垂鐠虹尨鑰块柨娑樺婵ジ鏌℃径搴㈢《缂佺姵鎹囬弻銊モ槈濡厧顤€濠电偞鎹侀崺鏍ь焽?濠电姰鍨归悘鍫ュ疾椤忓棙顫曟慨妯垮煐閺?)
+        parts.append("\n闂備礁鎼ˇ顐﹀疾濠婂牆鍨傞悹铏瑰皑閼板潡鏌ㄥ☉妯侯仾濠殿垰銈搁弻鈩冨緞鎼淬垻銆婄紓浣哄У閹瑰洭寮婚妸銉㈡婵☆垳鍘ч·鈧繝鐢靛仦閹逛線宕洪弽褜鐒?婵犵數濮伴崹褰掓倶閸儱鐤炬い蹇撴椤洘鎱ㄥΟ鍨厫闁?)
         for mem in warm_memories:
             parts.append(f"- [{mem.category}] {mem.content}")
 
@@ -1250,7 +1250,7 @@ async def build_dynamic_context(user: User, db: AsyncSession) -> str:
     )
     last_summary = summary_result.scalar_one_or_none()
     if last_summary:
-        parts.append(f"\n濠电偞鍨堕幐鎼佹晝閵夆晩鏁冮柤娴嬫杹閸嬫捇鎮藉▓鎸庢暞闂佷紮缂氱划娆撶嵁濡も偓铻ｆ繛鍡欏亾閻姊洪幐搴ｂ姇妞ゆ帞鐝產st_summary.summary}")
+        parts.append(f"\n婵犵數鍋為崹鍫曞箰閹间焦鏅濋柕澶嗘櫓閺佸啴鏌ゅù瀣澒闁稿鎹囬幃钘夆枔閹稿孩鏆為梻浣风串缂傛氨鍒掑▎鎾跺祦婵°倐鍋撻摶锝嗙箾閸℃瑥浜鹃柣顓燁殜濮婃椽骞愭惔锝傚濡炪倖甯為悵鐢t_summary.summary}")
 
     return "\n".join(parts)
 ```
@@ -1265,7 +1265,7 @@ Expected: All 4 tests PASS
 Run: `cd student-planner && python -m pytest tests/ -v -k "context"`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd student-planner
@@ -1283,7 +1283,7 @@ When a session ends (WebSocket disconnect or timeout), generate a session summar
 - Create: `student-planner/app/agent/session_lifecycle.py`
 - Create: `student-planner/tests/test_session_lifecycle.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_session_lifecycle.py
@@ -1310,10 +1310,10 @@ async def test_end_session_creates_summary(setup_db):
 
         # Simulate conversation messages
         msgs = [
-            ConversationMessage(session_id="sess-1", role="user", content="闂佹眹鍩勯崹濂稿窗濡ゅ懎鍨傛繝濠傜墛閸庢垿鎮楅敐搴″缂佺姵鐟╁鍫曞煛閸屾粍鍣ч梺鐟板暱濡繈骞嗛崘顔肩妞ゆ挻绋掗弲鐐烘⒒閸屾艾鈧顕ｇ捄渚富闁稿瞼鍋為埛?),
-            ConversationMessage(session_id="sess-1", role="assistant", content="濠电偠鎻徊鎸庢叏閸撗勫床闁哄稁鍘煎婵嬫煏婵犲繘妾紒?2濠电偞鍨堕幖鈺傜閻愬搫鐓橀柡宥庡幗閳锋帡鏌涘▎蹇ｆЧ妞は佸嫮绠?),
-            ConversationMessage(session_id="sess-1", role="user", content="闂佹眹鍩勯崹濂稿窗濡ゅ懎鍨傛繝濠傛噳閸嬫捇鎮烽柇锔叫ч柣銏╁灡閹稿銆冮崶顬喓绱掑Ο娲诲晙濠电姰鍨煎▔娑氱矓瀹曞洤濮?),
-            ConversationMessage(session_id="sess-1", role="assistant", content="闁诲氦顫夐悺鏇犱焊濞嗘挸鏋侀柟鎹愵嚙缁?濠电偞鍨堕幖鈺傜濠婂煻鍥矗婢跺备鏋欓梺缁橆焾妞寸鐣烽弻銉︾厱?),
+            ConversationMessage(session_id="sess-1", role="user", content="闂備焦鐪归崺鍕垂婵傜绐楁俊銈呮噹閸ㄥ倹绻濇繝鍌滃闁稿孩鍨块幃妤呮晲鎼粹€愁潽缂備胶濮甸悷鈺侇嚕閸洖鐓涢柛灞剧矋閸Ｑ囨⒑閻熸澘鏆辨俊顐ｇ箞楠炲棝宕橀鑲╊槹濡炪倖鎸荤粙鎺楀疾閻愮儤鈷掗柛灞捐壘閳ь剛顭堥锝囨崉娓氼垱瀵岄梺绋跨灱閸嬬偤鍩?),
+            ConversationMessage(session_id="sess-1", role="assistant", content="婵犵數鍋犻幓顏嗗緤閹稿孩鍙忛柛鎾楀嫬搴婇梺鍝勭▉閸樼厧顔忓┑瀣厪濠电姴绻樺顔剧磼?2婵犵數鍋為崹鍫曞箹閳哄倻顩查柣鎰惈閻撴﹢鏌″搴″箺闁抽攱甯￠弻娑樷枎韫囷絾效濡炪伅浣稿缁?),
+            ConversationMessage(session_id="sess-1", role="user", content="闂備焦鐪归崺鍕垂婵傜绐楁俊銈呮噹閸ㄥ倹绻濇繝鍌涘櫝闁稿鎹囬幃鐑芥焽閿斿彨褔鏌ｉ姀鈺佺仭闁圭顭烽妴鍐炊椤剛鍠撶槐鎺懳熷ú璇叉櫃婵犵數濮伴崹鐓庘枖濞戞氨鐭撶€规洖娲ゆ慨?),
+            ConversationMessage(session_id="sess-1", role="assistant", content="闂佽姘﹂～澶愭偤閺囩姳鐒婃繛鍡樻尭閺嬩線鏌熼幑鎰靛殭缂?婵犵數鍋為崹鍫曞箹閳哄倻顩叉繝濠傜吇閸ヮ剙鐭楀璺哄閺嬫瑩姊虹紒姗嗙劸濡炲顭堥悾鐑藉蓟閵夛妇鍘?),
         ]
         db.add_all(msgs)
         await db.commit()
@@ -1321,8 +1321,8 @@ async def test_end_session_creates_summary(setup_db):
         mock_summary_response = {
             "role": "assistant",
             "content": json.dumps({
-                "summary": "闂備焦妞垮鍧楀礉瀹ュ鏄ユ繛鎴欏灩閽冪喖鏌曟竟顖氬閻ｈ姤绻涚€涙鐭婃俊顐ｇ懃閿曘垺瀵奸弶鎴濈獩闂侀潧臎閳ь剟寮崟顖涒拻闁稿本鑹剧痪褎淇婇悙鎻掆偓鍨潖缂佹ɑ缍囬柛鎾楀拋妲烽梺璇叉捣閹虫捇藝閹殿喗鏆滈柟鎯ь嚟椤╂煡鏌涢埄鍐€掔憸閭﹀灦閺屸剝鎷呯憴鍕嚒濡炪倧绠戝鍓佺矙婵犲洦鍋愬〒姘煎灠閹線姊洪崨濠傜瑲閻㈩垼浜炲Σ?濠电偞鍨堕幖鈺傜濞嗘挸绠查柕蹇嬪€曠粈澶愭煃閽樺鍣界紒鈧?,
-                "actions": ["闂備礁鎼悮顐﹀磿閹绢噮鏁嬫俊銈呭暟閻碍绻涘顔荤凹闁挎稒绻堥弻锟犲礃閵娧冪厽濠?, "闂備焦鐪归崹濠氬窗閹版澘鍨傛慨姗嗗弾濞堟淇婇婊呭笡婵炲牐娉涢…璺ㄦ崉閾忓墣锛勭磼閳ュ啿顏柟宄邦儔閸ㄩ箖宕橀懠顑垮枈"],
+                "summary": "闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰銉︾箾閹存瑥鐏╅柦鍐枛閺屾洘绔熼姘伀闁伙綀濮ょ换娑氣偓娑欘焽閻﹥淇婇锝囨噧闁挎洏鍨虹€靛ジ寮堕幋婵堢崺闂備線娼ц噹闁逞屽墴瀵偊宕熼娑掓嫽闂佺鏈懝鍓х棯瑜庢穱濠囨倷閹绘巻鍋撻崹顕呮綎缂備焦蓱缂嶅洭鏌涢幘妤€鎷嬪Σ鐑芥⒑鐠囧弶鎹ｉ柟铏崌钘濋柟娈垮枟閺嗘粓鏌熼幆褜鍤熸い鈺傜叀閺屾盯鍩勯崘顏傗偓鎺旀喐闁箑鐏﹂柡灞稿墲閹峰懐鎲撮崟顓炲殥婵＄偑鍊х粻鎴濐嚕閸撲胶鐭欏┑鐘叉处閸嬫劕銆掑鐓庣仩闁诡喕绶氬娲川婵犲倻鐟查柣銏╁灱娴滅偛危?婵犵數鍋為崹鍫曞箹閳哄倻顩叉繛鍡樻尭缁犳煡鏌曡箛瀣偓鏇犵矆婢舵劖鐓冮柦妯侯槹閸ｇ晫绱掗埀?,
+                "actions": ["闂傚倷绀侀幖顐ゆ偖椤愶箑纾块柟缁㈠櫘閺佸淇婇妶鍛殶闁活厽纰嶇换娑橆啅椤旇崵鍑归梺鎸庣⊕缁诲牓寮婚敓鐘茬闁靛ě鍐幗婵?, "闂傚倷鐒﹂惇褰掑垂婵犳艾绐楅柟鐗堟緲閸ㄥ倹鎱ㄥ鍡楀季婵炲牊顨嗘穱濠囶敍濠婂懎绗″┑鐐茬墣濞夋盯鈥︾捄銊﹀磯闁惧繐澧ｉ敍鍕＜闁炽儱鍟块顐︽煙瀹勯偊鍎旈柛銊╃畺瀹曟﹢鎳犻鍨瀳"],
                 "memories": [],
             }, ensure_ascii=False),
         }
@@ -1335,7 +1335,7 @@ async def test_end_session_creates_summary(setup_db):
         )
         summary = result.scalar_one_or_none()
         assert summary is not None
-        assert "濠德板€曢崐纭呮懌闂佸搫妫涢崰鎰嚗閸曨偒鍚嬮柛鏇ㄥ幘濡? in summary.summary
+        assert "婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴幇顒夊殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊? in summary.summary
 
 
 @pytest.mark.asyncio
@@ -1347,8 +1347,8 @@ async def test_end_session_extracts_memories(setup_db):
         db.add(user)
 
         msgs = [
-            ConversationMessage(session_id="sess-2", role="user", content="闂備胶鎳撻悺銊╁垂閻㈢鍑犻柍杞拌閺嬪酣鏌曡箛濠傚⒉闁挎稑绉撮埥澶愬箻缁涚懓浼愬銈忕畱瀵墎绮欐繝鍥ㄥ亹闁割煈鍋勯埀顒傚仧缁辨帗寰勭€ｎ亞鍘愮紓浣介哺缁诲牆顕ｉ幓鎺濇僵妞ゆ劑鍊楅幉顏堟⒑濞茶绨绘い鎴濇瀵悂宕橀鍡欑厠?),
-            ConversationMessage(session_id="sess-2", role="assistant", content="濠电娀娼ч崐濠氬疾椤愨懇鏋旈柟杈鹃檮閺咁剟鎮橀悙鏉戝姢闁诲繐顦甸幃瑙勭瑹閳ь剟銆傞敂鍓х闁搞儯鍔庨々?),
+            ConversationMessage(session_id="sess-2", role="user", content="闂傚倷鑳堕幊鎾绘偤閵娾晛鍨傞柣銏㈩焾閸戠娀鏌嶆潪鎷岊唹闁哄閰ｉ弻鏇＄疀婵犲倸鈷夐梺鎸庣☉缁夋挳鍩ユ径鎰缂佹稓鎳撴导鎰渻閵堝繒鐣辩€殿喖澧庣划娆愮節閸ャ劌浜归梺鍓茬厛閸嬪嫰鍩€椤掑倸浠х紒杈ㄥ笚瀵板嫮鈧綆浜為崢鎰磽娴ｄ粙鍝虹紒璇茬墕椤曪綁骞撻幒婵囧兊濡炪倖鍔戦崐妤呭箟椤忓牊鈷戞繛鑼额唺缁ㄧ粯銇勯幋婵囶棦鐎殿喗鎮傚畷姗€顢旈崱娆戝帬?),
+            ConversationMessage(session_id="sess-2", role="assistant", content="婵犵數濞€濞佳囧磹婵犳艾鐤炬い鎰ㄦ噰閺嬫棃鏌熸潏楣冩闁哄拋鍓熼幃姗€鎮欓弶鎴濆Б闂佽绻愰ˇ鐢稿箖鐟欏嫮鐟归柍褜鍓熼妴鍌炴晜閸撗咁槸闂佹悶鍎崝搴ㄣ€?),
         ]
         db.add_all(msgs)
         await db.commit()
@@ -1356,10 +1356,10 @@ async def test_end_session_extracts_memories(setup_db):
         mock_response = {
             "role": "assistant",
             "content": json.dumps({
-                "summary": "闂備焦妞垮鍧楀礉瀹ュ鏄ユ繛鎴炵閸嬫﹢鏌曟繛鍨鐟滄妸鍏犵懓顭ㄩ崘鈺婃濡炪倖甯為崰鎰矙婵犲洦鍋愰柧蹇ｅ亽濡差垶姊婚崒姘偓鐟邦焽濞嗘劗顩查柛娑橈功闂?,
+                "summary": "闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰銉︾箾閹寸偟顣查柛瀣耿閺屾洘绻涢崹顔碱瀴閻熸粍濡搁崗鐘垫嚀椤劑宕橀埡濠冾棧婵＄偑鍊栫敮鐐哄窗閹邦喚鐭欏┑鐘叉处閸嬫劙鏌ц箛锝呬航婵″樊鍨跺濠氬磼濮橆兘鍋撻悷閭︾劷婵炲棙鍔楅々鏌ユ煕濞戞﹫鍔熼梻?,
                 "actions": [],
                 "memories": [
-                    {"category": "preference", "content": "闂備礁鎽滄慨鐢靛垝瀹ュ鏁冨ù鐘差儏缁秹鏌嶇悰鈥充壕缂備焦顨呴崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡叉垿姊洪懡銈呬粶婵☆偅鐩敐鐐哄冀椤撶喐娅栭柣蹇曞仧閸嬫捇鎮甸幘鏂ユ闁瑰墽顒查崝鐔哥節閳ь剟宕ㄩ弶鎴烆棟闂佹悶鍎弲鈺侇焽?},
+                    {"category": "preference", "content": "闂傚倷绀侀幗婊勬叏閻㈤潧鍨濈€广儱顦介弫鍐归悩宸剰缂侇偄绉归弻宥囨偘閳ュ厖澹曠紓鍌欑劍椤ㄥ懘宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊鍙夊灴濮婃椽鎳￠妶鍛捕濠碘槅鍋呴惄顖炴晲閻愬搫鍐€妞ゆ挾鍠愬▍鏍煟韫囨洖浠ч柛瀣崌閹敻骞橀弬銉︻潔闂佺懓澧介鏌ュ礉閻斿摜绡€闁逞屽墴瀹曘劑寮堕幋鐑嗘闂備焦鎮堕崕顕€寮查埡渚囩劷?},
                 ],
             }, ensure_ascii=False),
         }
@@ -1373,7 +1373,7 @@ async def test_end_session_extracts_memories(setup_db):
         memories = result.scalars().all()
         assert len(memories) == 1
         assert memories[0].category == "preference"
-        assert "闂備浇宕甸崑娑樜涘☉顫稏? in memories[0].content
+        assert "闂傚倷娴囧畷鐢稿磻濞戞娑樷槈椤喚绋? in memories[0].content
         assert memories[0].source_session_id == "sess-2"
 
 
@@ -1417,12 +1417,12 @@ async def test_end_session_handles_llm_error(setup_db):
         assert result.scalar_one_or_none() is None
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd student-planner && python -m pytest tests/test_session_lifecycle.py -v`
 Expected: FAIL 闂?`ModuleNotFoundError: No module named 'app.agent.session_lifecycle'`
 
-- [ ] **Step 3: Implement session_lifecycle.py**
+- [x] **Step 3: Implement session_lifecycle.py**
 
 ```python
 # app/agent/session_lifecycle.py
@@ -1442,16 +1442,16 @@ from app.models.session_summary import SessionSummary
 
 logger = logging.getLogger(__name__)
 
-_EXTRACT_PROMPT = """闂備礁鎲＄敮鎺懳涘▎鎾村€甸柤鎭掑劤椤╃兘鏌曟径鍫濃偓妤呮偡閹剧粯鍊甸柣銏☆問閺€浼存煟閿旇法鐭欓柡浣哥Т閻ｆ繈宕橀鍡欏€抽梻?JSON闂備焦瀵х粙鎴︽偋閸涱垳绠斿璺烘湰閸熷搫霉閿濆洦娅曠紓鍫濐煼閺屾盯骞嬪┑鍥ㄥ創闂佸憡鐟ч崑鎾剁矉閹烘鍐€鐟滃秹寮崼鏇熷€甸柛锔诲幗椤忕喓绱掓潏銊ュ摵闁?
+_EXTRACT_PROMPT = """闂傚倷绀侀幉锛勬暜閹烘嚦娑樷枎閹炬潙鈧敻鏌ら幁鎺戝姢妞も晝鍏橀弻鏇熷緞閸績鍋撳Δ鍛仭闁瑰墽绮崐鐢告煟閵忊槅鍟忛柡鈧导瀛樼厽闁挎棁娉曢惌娆撴煛娴ｅ摜孝闁伙絾绻堝畷姗€顢旈崱娆忊偓鎶芥⒒?JSON闂傚倷鐒︾€笛呯矙閹达附鍋嬮柛娑卞灣缁犳柨顭跨捄鐑樻拱闁哥喎鎼湁闁挎繂娲﹀▍鏇犵磽閸繍鐓奸柡灞剧洴楠炲鈹戦崶銊ュ壍闂備礁鎲￠悷褔宕戦幘鍓佺焿闁圭儤顨呴崘鈧悷婊冪Ч瀵偊宕奸弴鐔封偓鐢告煕閿旇骞楁い蹇曞枔缁辨帗娼忛妸銉ユ懙闂?
 {
-  "summary": "濠电偞鍨堕幐鎾磻閹剧粯鐓曟繛鍡楃Т閸斻儵鏌ｉ敂璺ㄧ煓妤犵偐鍋撻梺鐓庮潟閸婃鈻旈姀銈呯骇闁冲搫鍊婚幊鍕亜閹邦垰浜归柍褜鍓涢弫鎼併€佹繝鍥ㄥ剨濞寸姴顑呯壕缁樻叏濮楀棗浜為柛鐔凤工闇夐柣姗嗗亜娴滅偓绻?,
-  "actions": ["闂備礁婀遍悷鎶藉幢閳哄倹鏉搁梻浣圭湽閸斿瞼鈧凹鍙冮獮鏍煥鐎ｎ偄顎撳┑鐘诧工閸燁偊鎮樺▎鎾村仩?],
+  "summary": "婵犵數鍋為崹鍫曞箰閹绢喖纾婚柟鍓х帛閻撴洘绻涢崱妤冃㈤柛鏂诲劦閺岋綁鏁傜捄銊х厯濡ょ姷鍋愰崑鎾绘⒑閻撳寒娼熼柛濠冾殔閳绘棃濮€閵堝懐楠囬梺鍐叉惈閸婂骞婇崟顑句簻闁归偊鍨版禍褰掓煃瑜滈崜娑㈠极閹间降鈧焦绻濋崶銊ュ墾婵炲濮撮鍛缂佹ɑ鍙忔慨妤€妫楁禍鐐烘煕閻斿嚖宸ラ棁澶愭煟濮楀棗浜滃ù婊呭亾缁?,
+  "actions": ["闂傚倷绀佸﹢閬嶆偡閹惰棄骞㈤柍鍝勫€归弶鎼佹⒒娴ｅ湱婀介柛鏂跨灱閳ь剚鍑归崣鍐嵁閺嶎厽鐓ラ悗锝庡亜椤庢挸鈹戦悩璇у伐闁哥噥鍋婇幃妯衡枎閹炬潙浠?],
   "memories": [
-    {"category": "preference|habit|decision|knowledge", "content": "闂備胶顭堥敃锕傚储瑜忓▎銏ゆ焼瀹ュ棌鎷归梺鍦焾鐎涒晠宕洪崒鐐村仯濞撴埃鍋撴い锝忓缁辩偤宕堕浣稿壄闂佸憡娲︽禍娆戞崲閸℃稒鐓?}
+    {"category": "preference|habit|decision|knowledge", "content": "闂傚倷鑳堕…鍫ユ晝閿曞倸鍌ㄧ憸蹇撯枎閵忋倖鐒肩€广儱妫岄幏褰掓⒑閸︻収鐒鹃悗娑掓櫊瀹曟椽宕掗悙鏉戜化婵炴挻鍩冮崑鎾淬亜閿濆繐顩紒杈╁仱瀹曞爼顢楁担绋垮闂備礁鎲″ú锔界濞嗘垶宕查柛鈩冪⊕閻?}
   ]
 }
 
-闂佽崵鍠愰悷銉р偓姘煎墴瀹曞綊顢涢悙瀛樻珫?- summary 闂佽崵鍠愬ú鎴︽嚄閸洘鍋╂繝闈涙灩閻戞鐟瑰┑鐘插椤︻喗绻涢幋鐐村皑闁稿鎸搁埥澶愬箻閸楃偐鍋撻弴掳浜归柣鎰仛鐎?- memories 闂備礁鎲￠悷顖涚濠靛浜瑰〒姘ｅ亾鐎规洩缍佸浠嬵敃閿濆棙顓归梻浣筋潐閹告娊寮ㄩ崡鐐嶏綁骞嬮悩鍐插幑濡炪倖妫侀敓銉╁焵椤掆偓閸燁垰顭囪箛娑樼鐟滃酣鎮鹃柆宥嗙厱閻庯綆浜炵粻浼存煏閸粎鐭欏┑鈥崇摠閹峰懏顦版惔锝嗩潠闂備浇顕栭崹濂稿垂闁秴鍨傞柕濞炬櫆閻撳倻鈧箍鍎遍悧婊兠洪敐澶嬬厱闁归偊鍓涢敍宥夋煟?- 濠电偞鍨堕幐鍝ョ矓閻戝鈧懘鏁冮崒姘鳖唺闂侀潧顭梽鍕倿娴犲鐓ユ繛鎴烆焽婢с垽鏌℃担闈涒偓婵嬬嵁鐎ｎ喗鍋い鏍电到濞?闂備胶鎳撻悺銊╁垂閸洖姹查柣鏃囥€€閸嬫挸鈽夊畷鍥╃獥缂備焦顨呴ˇ鎵紦?闂備焦鍓氶崑鍛暜閻旂⒈鏁婇柛銉簵娴滃綊鏌￠崶鏈电敖妤犵偑鍨介弻锝夛綖椤掆偓婵′粙鏌涢埡鍌滄创闁硅櫕鎹囧畷妯款槾闁?0闂備礁鎲＄敮鎺懳涘畝鍕柈閻庯綆鍋嗛埢鏃傗偓骞垮劚濡鎳欒ぐ鎺撶厸闁稿被鍊曞璺ㄧ磼?- 濠电偞鍨堕幐鎼佹偤閵娿儺娓婚柛宀€鍋涚粻鎴犳喐鐏炲墽鈹嶅┑鐘叉搐缁犳帗銇勯弽銊ф噮闁荤喐绻堥幃瑙勬媴缁嬭法鐩庣紓?濠电偛顕慨鎾晝閵堝桅濠㈣泛顑囬埢鏃傗偓骞垮劚濡宕㈤幒妤佸€垫繛鎴濈－缁辨壆绱?闂?- 濠电姷顣介埀顒€鍟块埀顒€缍婇幃妯诲緞婵炵偓鐓㈤梺鏂ユ櫅閸燁垳绮婚幒妤佺厱濠电姴瀚敮鍓佺磼閹鍚柟宄邦儐閿涙劖鎷呴搹鍓愩倝姊哄Ч鍥у閻庢凹浜濈粚杈ㄧ節閸パ呯暢濡炪倖鐗撻崐妤冪矆婵夌ざmories 濠电偞鍨堕幑浣糕枍閿濆鐓橀柡宥庡幖閺嬩線鏌熷▓鍨灓闁?""
+闂備浇宕甸崰鎰版偡閵壯€鍋撳鐓庡⒋鐎规洖缍婇、娑㈡倷鐎涙ɑ鐝?- summary 闂備浇宕甸崰鎰洪幋锔藉殑闁割偅娲橀崑鈺傜節闂堟稒鐏╅柣鎴烆焽閻熺懓鈹戦悩鎻掝伀妞わ富鍠楃换娑㈠箣閻愭潙鐨戦梺绋款儐閹告悂鍩ユ径鎰闁告鍋愰崑鎾诲即鎺虫禍褰掓煟閹邦剛浠涢悗?- memories 闂傚倷绀侀幉锟犳偡椤栨稓顩叉繝闈涱焾娴滅懓銆掑锝呬壕閻庤娲╃紞浣割嚕娴犲鏁冮柨婵嗘椤撳綊姊绘担绛嬫綈闁瑰憡濞婂銊╁础閻愬稄缍侀獮瀣偐閸愭彃骞戞俊鐐€栧Λ渚€鏁撻妷鈺佺劦妞ゆ巻鍋撻柛鐕佸灠椤洩绠涘☉妯碱槶閻熸粌閰ｉ幃楣冩焼瀹ュ棛鍘遍柣搴秵娴滅偟绮绘导瀛樼厪闁割偅绮庨惌娆忊攽閳ュ磭鎽犻柟宄版噺椤︾増鎯旈敐鍡╂綘闂傚倷娴囬鏍垂婵傜鍨傞梺顒€绉撮崹鍌炴煏婵炵偓娅嗛柣鎾冲€婚埀顒€绠嶉崕閬嶆偋濠婂厾娲晲婢跺鍘遍梺褰掑亰閸撴盯鏁嶅澶嬬厽?- 婵犵數鍋為崹鍫曞箰閸濄儳鐭撻柣鎴濐潟閳ь剙鎳橀弫鍐磼濮橀硸鍞洪梻渚€娼ч…顓㈡⒔閸曨垱鍊垮ù鐘差儐閻撱儲绻涢幋鐑嗙劷濠⒀佸灲閺屸剝鎷呴棃娑掑亾濠靛宓侀悗锝庡枟閸嬵亝銇勯弽鐢靛埌婵?闂傚倷鑳堕幊鎾绘偤閵娾晛鍨傞柛顐ｆ礀濮规煡鏌ｉ弮鍥モ偓鈧柛瀣尭閳藉鐣烽崶鈺冪崶缂傚倷鐒﹂〃鍛此囬幍顔剧处?闂傚倷鐒﹂崜姘跺磻閸涱垱鏆滈柣鏃傗拡閺佸﹪鏌涢妷顔荤暗濞存粌缍婇弻锟犲炊閺堢數鏁栧Δ鐘靛亼閸ㄤ粙寮婚敐澶涚稏妞ゆ巻鍋撳┑鈥茬矙閺屾盯鍩￠崒婊勫垱闂佺娅曢幑鍥х暦濡妲鹃梺?0闂傚倷绀侀幉锛勬暜閹烘嚦娑樼暆閸曨偆鏌堥柣搴秵閸嬪棝鍩㈤弮鍌楀亾楠炲灝鍔氭俊顐ｎ殜閹虫瑨銇愰幒鎾跺幐闂佺琚崐鏇烆嚕鐠恒劎纾?- 婵犵數鍋為崹鍫曞箰閹间焦鍋ら柕濞垮労濞撳鏌涘畝鈧崑娑氱不閹寸姵鍠愰悘鐐插⒔閳瑰秴鈹戦悩鍙夋悙缂佺姵甯楅妵鍕冀閵娧勫櫘闂佽崵鍠愮换鍫ュ箖鐟欏嫭濯寸紒瀣硶閻╁海绱?婵犵數鍋涢顓熸叏閹绢喗鏅濋柕鍫濐槸妗呮繝銏ｆ硾椤戝洭鍩㈤弮鍌楀亾楠炲灝鍔氭俊顐ｎ殜瀹曘垽骞掑Δ浣糕偓鍨箾閹存繄锛嶇紒杈ㄥ缁?闂?- 婵犵數濮烽。浠嬪焵椤掆偓閸熷潡鍩€椤掆偓缂嶅﹪骞冨Ο璇茬窞濠电偟鍋撻悡銏ゆ⒑閺傘儲娅呴柛鐕佸灣缁骞掑Δ浣哄幈婵犵數濮寸€氼剛鏁崜浣虹＜闁诡垶顣﹂崥顐︽煙瀹勯偊鍎愰柨娑欏姈閹峰懘鎼归崜鎰╁€濆鍝勑ч崶褍顬堥柣搴㈠嚬娴滄繄绮氭潏銊х瘈闁搞儜鍛殺婵＄偑鍊栭悧鎾诲磹濡ゅ啰鐭嗗┑澶屻仏mories 婵犵數鍋為崹鍫曞箲娴ｇ硶鏋嶉柨婵嗩槸閻撴﹢鏌″搴″箹闁哄绶氶弻鐔封枔閸喗鐏撻梺?""
 
 
 async def end_session(
@@ -1529,7 +1529,7 @@ async def end_session(
     await db.commit()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd student-planner && python -m pytest tests/test_session_lifecycle.py -v`
 Expected: All 4 tests PASS
@@ -1648,7 +1648,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         await websocket.send_json(event)
                         if event["type"] == "ask_user":
                             user_response = await websocket.receive_json()
-                            user_answer = user_response.get("answer", "缂備胶铏庨崣搴ㄥ窗濞戙埄鏁?)
+                            user_answer = user_response.get("answer", "缂傚倷鑳堕搹搴ㄥ矗鎼淬劌绐楁繛鎴欏焺閺?)
                             event = await generator.asend(user_answer)
                         elif event["type"] == "done":
                             break
@@ -1681,29 +1681,29 @@ Add behavior rules for the memory tools to Agent.md.
 
 - [ ] **Step 1: Add memory tool usage rules**
 
-Add the following under the `### 闁诲氦顫夐幃鍫曞磿闁秴鐭楅柟绋垮婵挳鎮归幁鎺戝闁哄棗鍖?section in `Agent.md`:
+Add the following under the `### 闂佽姘﹂～澶愬箖閸洖纾块梺顒€绉撮惌妤呮煙缁嬪灝顒㈠┑顖涙尦閹綊骞侀幒鎴濐瀴闂佸搫妫楅崠?section in `Agent.md`:
 
 ```markdown
-- recall_memory闂備焦瀵х粙鎺楁嚌閸撗呯閻庯綆鍠楅ˉ鍡涙煃瑜滈崜娑㈠箟閻楀牊濯撮柛娑橈功椤︺儵妫呴銏℃悙婵☆偅鐩顐﹀Χ婢跺﹦顓洪梺鐐壘閸婂顢樺ú顏呯厱闁规儳纾倴濠电偛鐗婇崹鍨暦閹达絿鐤€闁规儳宕禒娲⒑闂堟稒顥欐俊鐐村笧瀵囧礋椤栨氨鐣惧銈嗙墬缁嬫垿鎮樺Δ鍛厱闁归偊鍓涢敍宥夋煟鎺抽崕闈涱嚕椤曗偓瀵敻妫冨☉鎺撶€奸梻浣规た濞煎潡宕濇繝鍥х劦妞ゆ巻鍋撻柛濠囶棑缁厽寰勭仦鎯ф毇婵炶揪绲藉﹢鍗炍ｉ妸锔剧闁糕€崇箚閸嬫捇骞囨担鍛婎啅闂佽崵濮村ú锔炬崲閸儱绀傛俊顖氬悑鐎氼剟鏌涢幇鍏哥凹闁哄棗绻橀弻銊モ槈濡灝顏悷婊勫Ω閸パ勫祶闂侀潧臎閳ь剟鍩€椤掍緡鐒介柍褜鍓欏﹢閬嶅磻閵堝懌鈧帡宕滄担鐟版毇婵炶揪绲块…鍫ュ锤婵犲洦鐓曟繛鍡樺笒缁憋箑菐閸パ嶈含妤犵偘绶氶、娑樷槈濞嗘ɑ袧濠电偠鎻紞鈧繛澶嬫礋瀵?- save_memory闂備焦瀵х粙鎺楁嚌閹规劑浜圭憸搴ｇ矚閸楃偐鏀介柛鈩冪懄閹插ジ姊哄ú缁樺▏闁告柨绉瑰畷鍝勨槈閵忕姴寮烽柟鑹版彧缁叉椽鍩€椤掍緡鐒介柟顔诲嵆婵℃悂濡搁敃鈧☉褔姊哄Ч鍥у閻庢凹浜濈粚杈ㄧ節閸パ呯暢濡炪倖鐗撻崐妤冪矆婢跺ň妲堥柟鎯х－鍟稿銈傛櫔缁犳捇鐛幒妤€惟闁挎梻鏅崝鐑芥⒑闂堟稒顥滈柛濠囶棑閹广垹顫濋幍浣镐壕婵炴垶顏鍛珷闁绘娅ｉ悿鈧梺鍛婄⊕閻ｎ亪鍩€椤掆偓缁绘ê鐣峰Δ鍛唶闁靛繆鍓濆▓?ask_user 缂備胶铏庨崣搴ㄥ窗濞戙埄鏁囧┑鐘崇閺?闂備胶鎳撻悺銊╁垂婵傚壊鏁婇柛銉ｅ妽婵挳鐓崶褎鎹ｉ柛鐔凤躬閺屻劌鈽夊▎鎴炴啺闂備礁鎲￠崝鏇㈠箠鎼搭煈鏁婇柟顒勭畺閺屾洟宕卞Δ鈧埀顒佹倐椤㈡岸顢氶埀顒€鐣烽妷銉庢梻鈧綆鍓欓幆?
-  - preference闂備焦瀵х粙鎺戭潩閵娾晛鏋侀柕鍫濐槸缁狅絿鈧懓瀚伴。锕傛倿婵犲倵鏀介柛灞剧⊕閻忣喚绱?闂備胶鎳撻悺銊╁垂閻㈢鍑犻柍杞拌閺嬪酣鏌曡箛濠傚⒉闁挎稑绉撮埥澶愬箻缁涚懓浼愬銈忕畱瀵墎绮欐繝鍥ㄥ亹闁惧浚鍋呴宥夋煟?闂?  - habit闂備焦瀵х粙鎺楁嚌妤ｅ喚鏁嗛柣鏂挎憸閳绘洟鏌ｅΟ澶稿惈闁伙箑閰ｉ弻鐔碱敍閿濆懐浼堢紓?闂備胶鎳撻悺銊╁垂瀹曞洨鍗氶柡澶嬪灍閺嬪酣鏌嶉埡浣告殲濞寸姵锚椤潡鎳滈棃娑樻懙濠电偛顧€闂勫嫮绮?闂佽绻愮换鎰崲閹存繍娓?闂?  - decision闂備焦瀵х粙鎺戠暆閹间礁闂柛婵勫劜閸熷搫霉閿濆浂鐒鹃柡瀣у亾缂傚倷鐒︾粙鎺楁偋椤撶姵顫?濠德板€曢崐纭呮懌闂佸搫妫涢崰鏍箖娴犲惟闁靛鍎抽埀顒冨吹缁辨帡寮崒姣款剙鈹戦埥鍡楀箻缂侇喚鏁诲浠嬵敃閿濆棭鍚?闂?  - knowledge闂備焦瀵х粙鎺撶┍濞差亶鏁嬬€规洖娲ㄩ惌娆撴倵閿濆骸寮鹃柛姘喘閺岋綁顢樺鍐ㄥХ缂?闂備焦妞垮鍧楀礉瀹ュ鏄ユ繛鎴炵閸犲棗顭跨捄鐚村姛缂佽鐒﹂幈銊╁箳閹存績鍋撶拠宸晠闁兼祴鏅滄刊濂告煟閹寸倖鎴炵濮椻偓濮?闂?- 濠电偞鍨堕幐鍝ョ矓閻戝鈧懘鏁傞悾灞告敵濠电娀娼уΛ娑㈠箺閻樻祴妲堥柟鎯х－閹界姵淇婇悙鎻掆偓鍧楃嵁閳ь剛鎲哥仦鍓р攳濠电姴娲ょ粻鎺撱亜閺嶃儱鈧绮?濠电偛顕慨鎾晝閵堝桅濠㈣泛顑囬埢鏃傗偓骞垮劚濡宕㈤幒妤佸€垫繛鎴濈－缁辨壆绱?闂?- 濠电偞鍨堕幐鍝ョ矓閻戝鈧懘鏁傞悾灞告敵濠电娀娼уΛ娑㈠箺閻樼鍋撶憴鍕憙閻忓繑鐟ч崚鎺楁晸閻樺弶宓嶉梺闈涱煭闂勫嫬鈻撻崼鏇熺厵閻犲洠鈧櫕鐏堢紓浣靛姀妞村摜绮欐径鎰垫晣闁绘ê纾弳鐘崇箾閿濆懏绀岄柛鎾寸箖鐎靛ジ宕ㄧ€涙ɑ娅栭梺鍓插亾缂嶅棝宕甸敂鍓х＜閻庯綆浜堕崕宥夋煃瑜滈崗娑橆渻閹烘绠查柕蹇嬪€曠粈澶愬箳閹惰棄鐒垫い鎴炲缁佷即鏌嶈閸撴瑩宕幎鑺ュ剨妞ゆ牜鍋為弲?- 闁荤喐绮庢晶妤呭箰妤ｅ啫鏋侀柕鍫濐槸缁狅綁鏌ｉ妶搴＄伇闁?闂傚鍋勫ú锕佹懌闁汇埄鍨崑鎼檟x"闂備礁鎼崯鎶筋敊閹邦喗顫曟繝闈涱儐閸?recall_memory 闂備胶鎳撻悘姘跺磿閹惰棄鏄ョ€光偓閳ь剟鍩€椤掑倹鏆╅柟铏尵閼洪亶鎳犻浣割€涢梺鍝勵槼濞夋洜绮婚幘缁樼叆婵炴垶顭囬悘閬嶆煕閺傜偛娲ょ憴锕傚箹缁懓澧查柛鐔哄仱閺岋綁顢樺鍐ㄥБ闂佽桨闄嶉崐婵嬬嵁鐎ｎ亞鏆嬮柡澶婄仢濞堛儵姊洪崨濠傜濠电偐鍋撳┑?```
+- recall_memory闂傚倷鐒︾€笛呯矙閹烘鍤岄柛鎾楀懐顦柣搴秵閸犳藟閸℃稒鐓冪憸婊堝礈濞戙垹绠熼柣妤€鐗婃刊鎾煕濞戞﹫鍔熸い锔哄劦濡懘顢曢姀鈩冩倷濠碘槅鍋呴惄顖氼嚕椤愶箑围濠㈣泛锕﹂娲⒑閻愵剝澹橀柛濠傤煼椤㈡ê煤椤忓懐鍘遍梺瑙勫劤绾绢叀鍊存繝鐢靛仜閻楀﹪宕归崹顔炬殾闁硅揪绲块悿鈧梺瑙勫劤瀹曨剚绂掑ú顏呪拺闂傚牊绋掗ˉ娆愪繆閻愭潙绗х€殿啫鍥х妞ゆ牗姘ㄩ悾鎯ь渻閵堝棛澧紒瀣灴閹ê螖閸涱喚鍘遍梺褰掑亰閸撴盯鏁嶅澶嬬厽閹烘娊宕曢棃娑卞殨妞ゆ洍鍋撶€殿喚鏁诲Λ鍐ㄢ槈閹烘挾鈧ジ姊绘担瑙勩仧婵炵厧娼″畷婵囩節閸パ呭姦濡炪倖宸婚崑鎾绘煕婵犲浂妫戠紒顕呭幗瀵板嫮浠﹂幆褎姣囧┑鐐舵彧缁茶棄锕㈤崡鐐嶏綁濡搁敂鍓ь啎闂佺硶鈧磭绠氶柛瀣崌楠炲洦鎷呴崨濠庡晠闂備浇宕垫慨鏉懨洪敂鐐床闁割偁鍎辩粈鍌涗繆椤栨艾鎮戦悗姘煎墴閺屾盯骞囬崗鍝ュ嚬闂佸搫妫楃换姗€寮婚妸銉㈡婵☆垰鐏濋顓㈡偡濠婂嫬惟闁搞儜鍕ザ闂備線娼ц噹闁逞屽墴閸┾偓妞ゆ帊绶￠悞浠嬫煃瑜滈崜娆忥耿闁秴纾婚柕鍫濇噷閳ь剚甯″畷婊勬媴閻熺増姣囧┑鐐舵彧缁插潡鈥﹂崼銉ラ敜濠电姴娲﹂悡鏇熺箾閸℃ê绗掔紒鎲嬬畱鑿愰柛銉戝秷鍚Δ鐘靛仒缁舵岸銆佸☉妯锋婵炲棙蓱琚ф繝鐢靛仩閹活亞绱為埀顒佺箾婢跺绀嬬€?- save_memory闂傚倷鐒︾€笛呯矙閹烘鍤岄柟瑙勫姂娴滃湱鎲告惔锝囩煔闁告鍋愰弨浠嬫煕閳╁啰鎳勯柟鎻掋偢濮婂搫煤缂佹ê鈻忛梺鍛婃煥缁夌懓鐣烽崫鍕ㄦ闁靛繒濮村鐑芥煙閼圭増褰х紒鍙夋そ閸┾偓妞ゆ帊绶￠悞浠嬫煙椤旇宓嗗┑鈩冩倐婵℃悂鏁冮埀顒€鈽夎濮婂搫效閸パ冾瀳闁诲孩鍑规禍婵堢矚鏉堛劎绡€闁搞儜鍛殺婵＄偑鍊栭悧鎾诲磹濡ゅ啰鐭嗗璺号堝Σ鍫ユ煙閹咃紞閸熺顪冮妶鍌涙珨缂佺姵鎹囬悰顕€骞掑Δ鈧儫闂佹寧姊婚弲顐﹀礉閻戣姤鈷戦梻鍫熺⊕椤ユ粓鏌涙繝鍥舵闁瑰箍鍨归～婵嬪箥娴ｉ晲澹曞┑鐐村灦椤忣亪顢旈崨顔界彿闂佺粯顭堝▍锝夋偪閳ь剟姊洪崨濠勨姇闁伙綆浜崺鈧い鎺嗗亾缂佺粯锚閻ｅ嘲螖閸涱參鍞堕梺闈涚箚閸撴繂鈻?ask_user 缂傚倷鑳堕搹搴ㄥ矗鎼淬劌绐楁繛鎴欏焺閺佸洤鈹戦悩宕囶暡闁?闂傚倷鑳堕幊鎾绘偤閵娾晛鍨傚┑鍌氬閺佸﹪鏌涢妷锝呭濠殿垱鎸抽悡顐﹀炊瑜庨幑锝夋煕閻斿嚖韬柡灞诲妼閳藉鈻庨幋鐐村暫闂傚倷绀侀幉锟犲礉閺囥垹绠犻幖鎼厛閺佸﹪鏌熼鍕暫闁哄本娲熷畷鍗炍旈埀顒勫焵椤掍焦鍊愭い銏″哺椤㈡岸鍩€椤掆偓閻ｇ兘濡烽妷搴㈡⒒閳ь剨缍嗛崜娆撳箚?
+  - preference闂傚倷鐒︾€笛呯矙閹烘埈娼╅柕濞炬櫅閺嬩線鏌曢崼婵愭Ц缂佺媴绲块埀顒傛嚀鐎氫即銆傞敃鍌涘€垮┑鐘插€甸弨浠嬫煕鐏炲墽鈯曢柣蹇ｅ枤缁?闂傚倷鑳堕幊鎾绘偤閵娾晛鍨傞柣銏㈩焾閸戠娀鏌嶆潪鎷岊唹闁哄閰ｉ弻鏇＄疀婵犲倸鈷夐梺鎸庣☉缁夋挳鍩ユ径鎰缂佹稓鎳撴导鎰渻閵堝繒鐣辩€殿喖澧庣划娆愮節閸ャ劌浜归梺鎯ф禋閸嬪懘顢欏澶嬬厽?闂?  - habit闂傚倷鐒︾€笛呯矙閹烘鍤屽Δ锝呭枤閺佸棝鏌ｉ弬鎸庢喐闁崇粯娲熼弻锝呂熸径绋挎儓闂佷紮绠戦柊锝夊蓟閻旂⒈鏁嶉柨婵嗘噽娴煎牏绱?闂傚倷鑳堕幊鎾绘偤閵娾晛鍨傜€规洖娲ㄩ崡姘舵煛婢跺鐏嶉柡瀣叄閺屽秹鍩℃担鍛婃婵炲濮甸敋妞ゎ厼娼￠幊婊堟濞戞ɑ鎳欐繝鐢靛仜椤р偓闂傚嫬瀚划?闂備浇顕х换鎰崲閹邦喗宕查柟瀛樼箥濞?闂?  - decision闂傚倷鐒︾€笛呯矙閹烘垹鏆嗛柟闂寸闂傤垶鏌涘┑鍕姕闁哥喎鎼湁闁挎繂娴傞悞楣冩煛鐎Ｑ冧壕缂傚倸鍊烽悞锔剧矙閹烘鍋嬫い鎾跺У椤?婵犲痉鏉库偓鏇㈠磹绾懏鎳岄梻浣告惈濡盯宕伴弽顓炵畺濞寸姴顑呮儫闂侀潧顦崕鎶藉焵椤掑啫鍚圭紒杈ㄥ浮瀵噣宕掑В娆惧墮閳规垿鍩ラ崱妤€绠荤紓渚囧枤閺佽顕ｆ禒瀣垫晝闁挎繂妫崥?闂?  - knowledge闂傚倷鐒︾€笛呯矙閹烘挾鈹嶆繛宸憾閺佸鈧娲栧ú銊╂儗濞嗘挻鍊甸柨婵嗛瀵箖鏌涘顒佸枠闁哄矉缍侀、妯侯煥閸愩劌啸缂?闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰銉︾箾閹寸偟顣查柛鐘叉椤法鎹勯悮鏉戝缂備浇顔婇悞锕傚箞閵娾晛绠抽柟瀛樼妇閸嬫挾鎷犲顔兼櫊闂佸吋绁撮弲婊勫垔婵傚憡鐓熼柟瀵稿€栭幋鐐殿浄婵せ鍋撴慨?闂?- 婵犵數鍋為崹鍫曞箰閸濄儳鐭撻柣鎴濐潟閳ь剙鎳橀弫鍌炴偩鐏炲憡鏁垫繝鐢靛█濞佳兾涘☉銏犵闁绘ɑ绁村Σ鍫ユ煙閹咃紞闁圭晫濮垫穱濠囨倷閹绘巻鍋撻崸妤冨祦闁逞屽墰閹插摜浠﹂崜褉鏀虫繝鐢靛Т濞层倗绮婚幒鎾变簻闁哄秲鍎遍埀顒侇殘缁?婵犵數鍋涢顓熸叏閹绢喗鏅濋柕鍫濐槸妗呮繝銏ｆ硾椤戝洭鍩㈤弮鍌楀亾楠炲灝鍔氭俊顐ｎ殜瀹曘垽骞掑Δ浣糕偓鍨箾閹存繄锛嶇紒杈ㄥ缁?闂?- 婵犵數鍋為崹鍫曞箰閸濄儳鐭撻柣鎴濐潟閳ь剙鎳橀弫鍌炴偩鐏炲憡鏁垫繝鐢靛█濞佳兾涘☉銏犵闁绘顣介崑鎾舵喆閸曨厽鎲欓柣蹇撶箲閻熝囧礆閹烘鏅搁柣妯哄级瀹撳秹姊洪棃娑辩叚闂傚嫬瀚埢鎾诲醇閺囩喓鍘甸柣鐘叉礌閳ь剝娅曢悘鍫㈢磽娴ｉ潧濮€濡炴潙鎽滅划娆愬緞閹板灚鏅ｉ梺缁樏壕顓㈠汲閻樺磭绠鹃柨婵嗘噺缁€宀勬煕閹惧绠栭悗闈涖偢瀹曘劎鈧稒蓱濞呮牠姊洪崜鎻掍壕缂傚秴妫濆畷鐢告晜閸撗咃紲闁诲函缍嗘禍鍫曞磿瀹ュ鐓冪憸婊堝礂濞戞﹩娓婚柟鐑橆殔缁犳煡鏌曡箛瀣偓鏇犵矆婢舵劕绠抽柟鎯版閻掑灚銇勯幋鐐差嚋缂佷椒鍗抽弻宥堫檨闁告挻鐟╁畷顖炲箮閼恒儱鍓ㄥ銈嗙墱閸嬬偤寮?- 闂佽崵鍠愮划搴㈡櫠濡ゅ懎绠板Δ锝呭暙閺嬩線鏌曢崼婵愭Ц缂佺媴缍侀弻锝夊Χ鎼达紕浼囬梺?闂傚倸顭崑鍕洪敃浣规噷闂佹眹鍩勯崹顏堝磻閹兼獰x"闂傚倷绀侀幖顐﹀疮閹剁瓔鏁婇柟閭﹀枟椤洘绻濋棃娑卞剱闁?recall_memory 闂傚倷鑳堕幊鎾绘倶濮樿泛纾块柟鎯版閺勩儳鈧厜鍋撻柍褜鍓熼崺鈧い鎺戝€归弳鈺呮煙閾忣偅灏甸柤娲憾閹崇娀顢楁担鍓测偓娑㈡⒑閸濆嫷妲兼繛澶嬫礈缁骞樼紒妯煎弳濠电偞鍨堕…鍥倶闁秵鐓曢柡鍌滃仜濞层倗鎲撮敃鍌氱缂侇喚鎳撴晶鏌ユ煕閻斿搫浠遍柡宀嬬秮椤㈡ê顭ㄩ崘銊バ戦梻浣芥〃闂勫秹宕愬┑瀣祦閻庯綆浜為弳瀣煛婢跺﹦浠㈡繛鍫涘劦濮婃椽宕ㄦ繝鍌滎儌婵犵數鍋愰崑鎾斥攽?```
 
 - [ ] **Step 2: Add few-shot example for memory**
 
 Add the following as a new example after existing examples in `Agent.md`:
 
 ```markdown
-### 缂傚倷璁查崑鎾诲级閻愭潙顥嬪ù?闂備焦瀵х粙鎺撶┍濞差亶鏁婇柛銉簽閻も偓闂佺硶鍓濋悷顖炲触閳ь剟姊?
-闂備焦妞垮鍧楀礉瀹ュ鏄? "闂備胶鎳撻悺銊╁垂娴ｅ啨浜归柛宀€鍋為崑婵嬫煟濡も偓閻楀﹪鎮甸幘鏂ユ闁瑰墽顒插銉︺亜閿曗偓瀵墎绮欐繝鍥ㄥ亹闁惧浚鍋呴悵锟犳⒑缂佹鐭婃繛璇х畱鐓ら柟绋垮瘨濞堟鎱ㄥΔ鈧悧蹇曠矆婢跺⊕褰掓偐椤旂厧濮庨梺璇″枟椤ㄥ牓寮鈧、娆撴寠婢跺奔鍑介梻浣侯攰濞夋盯鏁冮妶澹﹀洭宕ｆ径灞告灆闂佺粯顭堥褔宕㈤幘顔藉€甸柣鐔煎亰濡插綊鎮介娑欏磳鐎规洜鍏樻俊鎼佹晜閻ｅ苯绲煎┑鐐村灦閹告悂鏁冮妶澶婄畾?
+### 缂傚倸鍊风拋鏌ュ磻閹捐绾ч柣鎰綑椤ュ霉?闂傚倷鐒︾€笛呯矙閹烘挾鈹嶆繛宸憾閺佸﹪鏌涢妷顔荤敖闁汇倐鍋撻梻浣虹《閸撴繈鎮烽鐐茶Е闁逞屽墴濮?
+闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰? "闂傚倷鑳堕幊鎾绘偤閵娾晛鍨傚ù锝呭暔娴滃綊鏌涘畝鈧崑鐐哄磻濠靛鐓熸俊銈傚亾闁绘锕幃鐢稿箻閺傘儲顫嶉梺鐟板⒔椤掓彃顔忛妷锔轰簻闁挎洍鍋撶€殿喖澧庣划娆愮節閸ャ劌浜归梺鎯ф禋閸嬪懘鎮甸敓鐘斥拺缂備焦顭囬惌濠冪箾鐠囇呯暠閻撱倝鏌熺粙鍨槰婵炲牊顨嗛幈銊ノ旈埀顒勬偋韫囨洜鐭嗗璺衡姇瑜版帗鍋愭い鏃傚帶婵酣姊虹拠鈥虫灍妞ゃ劌鐗撳顐︻敋閳ь剟銆佸▎鎾村癄濠㈣泛濂旈崙浠嬫⒒娴ｄ警鏀版繛澶嬬洴閺佸啴濡舵竟锕€娲畷锝嗗緞鐏炲憡鐏嗛梻浣虹帛椤牓顢氳瀹曘垽骞橀钘夆偓鐢告煟閻旂厧浜版俊鎻掔秺閹粙顢涘☉娆忕３閻庤娲滈崗妯讳繆閹间焦鏅滈柣锝呰嫰缁茬厧鈹戦悙鏉戠仸闁瑰憡鎮傞弫鍐Χ婢跺﹦鐣?
 
-闂?save_memory(category="preference", content="闂備礁鎼幊蹇涙儗椤斿墽绠旈柛灞剧☉缁剁偟鈧箍鍎辩€氼噣鎯佹惔銊︾厸濞达絽鎽滄晶銏⑩偓鍦焾閵堢顕ｉ幘顔肩妞ゆ梹鍎抽拏瀣⒑閹稿海鈽夐柤娲诲灡缁傚秹宕ㄦ繝鍕闂佸吋浜介崕鏌ユ偟閹剧粯鈷掗柛灞剧⊕缂嶆垿鏌ｉ敐鍐ㄥ妤犵偞甯￠獮鎺楀箣椤撶啘鈺傜箾?)
-闂?濠电偠鎻徊钘壩涘Δ鍛偍婵炴垶纰嶉崗婊勩亜閺冣偓椤戞瑩宕ラ崶顒佺叆婵炴垶鐟ч幗顤筴_user(type="confirm", question="闂備胶鎳撻悺銊╁垂婵傚壊鏁婇柛銉ｅ妽婵挳鐓崶褎鎹ｉ柛鐔凤躬閺屻劌鈽夊▎鎴犲彎缂傚倸绉甸敃銏狀嚕閹绘帩娼╂い鎰╁€楅幉顏呯節閵忥絾纭剧紒澶婄－瀵囧礋椤栨碍鐎梺鍓插亖閸ㄥ綊鎳為幎鑺ョ厸闁搞儯鍔嶇亸锕傛煟濠垫劕娅嶉柡浣哥Ф娴狅箓姊荤€垫悂鐎洪梻浣告啞閼瑰墽鑺遍懖鈺傤潟妞ゆ挶鍨圭粈鍌炴煕椤愶絿绠橀柡鍡樻閺岀喖鎮滃Ο铏圭懖濠电偛鎳庣€氭澘顫忔繝姘骇闁规惌鍘戒簺濠电偞鍨跺缁樻叏娴兼潙鐒垫い鎺嗗亾闁稿﹥鎮傞、姘额敋閳ь剙鐣烽妷銉庢梻鈧綆鍓欓幆?)
-闂?闂備焦妞垮鍧楀礉瀹ュ鏄ユ繛鎴炵閸忔粍銇勯弮鈧娆撳触?闂?save_memory
-闂?闂備焦鎮堕崕鎶藉磻濞戔懞? "濠电娀娼ч崐濠氬疾椤愨懇鏋旈柟杈鹃檮閺咁剟鎮橀悙鑸殿棄闁搞倖甯￠幃瑙勭瑹閳ь剟銆傞敂鍓х闁搞儺鍓欒繚闂佺鏈悷銈囪姳娴煎瓨鐓曟慨姗嗗墯閹癸綁鏌℃担瑙勫磳妤犵偛顑夐獮鍥敆婢跺瑩鈺傜箾閹寸偞鈷掑┑顕€绠栭、姗€骞栨担鍝ヮ槴闂佸湱鍎ら幐濠毸囪闇夐柛蹇氬亹閻擃垳绱掓鏍у籍鐎规洘顨婂畷鐓庘攽閸喐顓鹃梻浣告贡閸庛倗鏁Δ鈧埢宥夊礋椤栨稈鎷婚柣搴㈢⊕钃辨い蟻鍕闁割偁鍨规禒顖炴煃?
+闂?save_memory(category="preference", content="闂傚倷绀侀幖顐﹀箠韫囨稒鍎楁い鏂垮⒔缁犳棃鏌涚仦鍓р槈缂佸墎鍋熼埀顒€绠嶉崕杈┾偓姘煎櫍閹焦鎯旈妸锔惧幐婵炶揪绲介幗婊勬櫠閵忊懇鍋撻崷顓х劸闁靛牏顭堥锝夊箻椤旇偐顔掑銈嗘⒐閸庢娊鎷忕€ｎ喗鈷戦柟绋挎捣閳藉鏌ゅú璇茬仭缂佸倸绉瑰畷銊︾節閸曨垱顎嶉梻浣稿悑娴滀粙宕曢弻銉﹀仧闁瑰墽绮埛鎺楁煕鐏炲墽鈯曠紓宥嗗灴閺岋綁鏁愰崘銊ヮ潎濡ょ姷鍋炵敮锟犵嵁閹烘绠ｆい鎾跺晿閳哄倻绠?)
+闂?婵犵數鍋犻幓顏嗗緤閽樺）娑樜旈崨顓炲亶濠电偞鍨剁喊宥夊礂濠婂嫨浜滈柡鍐ｅ亾妞ゆ垶鐟╁畷銉╁炊椤掍胶鍙嗗┑鐐村灦閻熝囧箺椤ょ_user(type="confirm", question="闂傚倷鑳堕幊鎾绘偤閵娾晛鍨傚┑鍌氬閺佸﹪鏌涢妷锝呭濠殿垱鎸抽悡顐﹀炊瑜庨幑锝夋煕閻斿嚖韬柡灞诲妼閳藉鈻庨幋鐘插綆缂傚倸鍊哥粔鐢告晝閵忕媭鍤曢柟缁樺俯濞尖晜銇勯幇鈺佲偓妤呭箟椤忓懐绡€闁靛骏绲剧涵鍓х磼婢跺﹦锛嶇€殿啫鍥х妞ゆ牗纰嶉悗顒勬⒑閸撴彃浜栭柛銊ョ秺閹崇偤骞庨懞銉у幐闂佹悶鍎崝宥囦焊閿曞倹鐓熸繝鍨姇濞呭秹鏌℃担鍝バゅù鐙呯畵濮婅崵鈧灚鎮傞悗娲⒒娴ｅ憡鍟為柤鐟板⒔閼洪亶鎳栭埡鍌ゆ綗濡炪倖鎸堕崹鍦矆閸岀偞鐓曟い鎰剁悼缁犳﹢鏌￠崱妯活棃闁哄瞼鍠栭幃婊兾熼搹鍦嚃婵犵數鍋涢幊搴ｂ偓姘緲椤繑绻濆顒傞獓闂佽鎯岄崢鎴掔昂婵犵數鍋為崹璺侯潖缂佹ɑ鍙忓ù鍏兼綑閻掑灚銇勯幒鍡椾壕闂佺锕ラ幃鍌炪€佸棰濇晪闁逞屽墮閻ｇ兘濡烽妷搴㈡⒒閳ь剨缍嗛崜娆撳箚?)
+闂?闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰銉︾箾閹寸偟顣查柛蹇旂矋閵囧嫰寮埀顒勵敄濞嗘挸瑙?闂?save_memory
+闂?闂傚倷鐒﹂幃鍫曞磿閹惰棄纾绘繛鎴旀嚍? "婵犵數濞€濞佳囧磹婵犳艾鐤炬い鎰ㄦ噰閺嬫棃鏌熸潏楣冩闁哄拋鍓熼幃姗€鎮欓懜娈挎闂佹悶鍊栫敮锟犲箖鐟欏嫮鐟归柍褜鍓熼妴鍌炴晜閸撗咁槸闂佹悶鍎洪崜娆掔箽闂備胶顭堥張顒勬偡閵堝洩濮冲ù鐓庣摠閻撴洘鎱ㄥ鍡楀闁圭櫢缍侀弻鈩冩媴鐟欏嫬纾冲Δ鐘靛仜椤戝鐛崶顒夋晢濠㈣泛鐟╅埡鍌滅闁瑰鍋為埛鎺戔攽椤曗偓缁犳牠銆佸鈧獮鏍ㄦ媴閸濄儺妲撮梻浣告贡閸庛倝骞愭繝姣稿洩顦查棁澶愭煕韫囨艾浜归柣鎿冨灣缁辨帗顫戦弽褍绫嶉悗瑙勬礃椤ㄥ﹤鐣烽悡搴樻斀闁割偆鍠愰楣冩⒒娴ｅ憡璐￠柛搴涘€楅弫顔嘉旈埀顒勫煝瀹ュ绀嬫い鏍ㄧ▓閹峰鏌ｆ惔銏⑩姇閽冭鲸銇勮熁閸曨厾顔曢梺鍓插亖閸ㄨ绂掗鐐寸厓?
 
-闂備焦妞垮鍧楀礉瀹ュ鏄? "闂傚鍋勫ú锕佹懌闁汇埄鍨崑鎾寸箾閹寸偞鐓ユい鎴濇噺閺呭爼鎮╅崹顐㈢彴闁诲酣娼ч幉锟犳偩闁秵鐓涢柛鎰剁稻濞呭啰绱掑Δ鈧崐鐟邦嚗閸曨偒鍚嬮柛鏇ㄥ幘濡叉垿姊烘潪鎵妽婵犮垺锕㈤、?
+闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰? "闂傚倸顭崑鍕洪敃浣规噷闂佹眹鍩勯崹顏堝磻閹惧绠鹃柟瀵稿仦閻撱儲銇勯幋婵囧櫤闁哄懎鐖奸幃鈺呭垂椤愩垻褰撮梺璇查叄濞佳囧箟閿熺姵鍋╅梺顒€绉甸悡娑㈡煕閹板墎绋绘繛鍛暟缁辨帒螖閳ь剟宕愰悷閭﹀殫闁告洦鍋掗崥瀣煕閺囥劌骞樻俊鍙夊灴濮婄儤娼幍顔煎濠电姰鍨洪敃銏ゃ€?
 
-闂?recall_memory(query="闂備礁鎼崯鐘诲疾濞嗘垹绠旈柛灞剧☉缁剁偟鈧箍鍎辩€氼噣鎯佹惔銊︾厸濞达綀顫夌欢鍙夈亜?)
-闂?闂備胶鎳撻悘姘跺磿閹惰棄鏄ョ€光偓閳ь剟骞忕€ｎ喖绾ч悹鎭掑妿閻?闂?闂備礁鎲＄敮鐐寸箾閳ь剚绻?闂?闂備焦鎮堕崕鎶藉磻濞戔懞? "闁诲海鎳撻幉陇銇愰崘顔煎瀭鐟滅増甯楅埛鏃堟煏閸繄澧㈢紒鐘茬秺閺屸剝绔熷┃鍨偓銈夊船閸洜鍙撻柛銉戝嫷妫戦梺?
+闂?recall_memory(query="闂傚倷绀侀幖顐﹀疮閻樿鐤炬繛鍡樺灩缁犳棃鏌涚仦鍓р槈缂佸墎鍋熼埀顒€绠嶉崕杈┾偓姘煎櫍閹焦鎯旈妸锔惧幐婵炶揪缍€椤娆㈤崣澶堜簻?)
+闂?闂傚倷鑳堕幊鎾绘倶濮樿泛纾块柟鎯版閺勩儳鈧厜鍋撻柍褜鍓熼獮蹇曗偓锝庡枛缁狙囨偣閹帒濡块柣?闂?闂傚倷绀侀幉锛勬暜閻愬绠鹃柍褜鍓氱换?闂?闂傚倷鐒﹂幃鍫曞磿閹惰棄纾绘繛鎴旀嚍? "闂佽娴烽幊鎾诲箟闄囬妵鎰板礃椤旂厧鐎悷婊呭鐢鍩涢弮鍫熺厪闁割偅绻勬晶銏㈢磼閻樿尙绉洪柡灞稿墲缁旂喎鈹冮崹顔瑰亾閵堝鑸归柛顐ｆ礈閸欐捇鏌涢妷鎴濆濡垿姊?
 ```
 
 - [ ] **Step 3: Commit**
@@ -1742,8 +1742,8 @@ async def test_compress_short_history_unchanged():
     """Short conversations should not be compressed."""
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "濠电偠鎻徊鎸庢叏閹绢喖围?},
-        {"role": "assistant", "content": "濠电偠鎻徊鎸庢叏閹绢喖围濞寸姴顑嗛弲顒€霉閿濆牜娼愮紒鐘冲笒闇夐柣姗嗗亜娴滅偓绻涢幋鐐寸叆闁绘妫滈妵鎰板矗婢跺矈娴勯梺闈涱槶閸庤京鑺辩拠瑁佸綊鏁愰崶顬儲绻涢崼鐔风伌闁?},
+        {"role": "user", "content": "婵犵數鍋犻幓顏嗗緤閹稿孩鍙忛柟缁㈠枛鍥?},
+        {"role": "assistant", "content": "婵犵數鍋犻幓顏嗗緤閹稿孩鍙忛柟缁㈠枛鍥存繛瀵稿Т椤戝棝寮查鈧湁闁挎繂鐗滃鎰磼閻樺啿绗掗棁澶愭煟濮楀棗浜滃ù婊呭亾缁绘盯骞嬮悙瀵稿弳闂佺粯顨呭Λ婊堝Φ閹版澘鐭楀璺虹焾濞村嫰姊洪棃娑辨Ф闁稿氦浜懞杈╂嫚鐟佷礁缍婇弫鎰板炊椤喓鍎茬换娑㈠醇閻旈浼岄梺?},
     ]
     result = await compress_conversation_history(messages, AsyncMock(), max_messages=10)
     assert result == messages
@@ -1755,12 +1755,12 @@ async def test_compress_long_history():
     messages = [{"role": "system", "content": "System prompt"}]
     # Add 20 user/assistant pairs
     for i in range(20):
-        messages.append({"role": "user", "content": f"闂備焦妞垮鍧楀礉瀹ュ鏄ユ繛鎴炃氬Σ鍫ユ煕椤愩倕鏋嶇紒?{i}"})
-        messages.append({"role": "assistant", "content": f"闂備礁鎲￠弻锟犲疾濠婂嫭娅犳繝濠傜墕閻愬﹪鏌ｉ幇顒佲枙婵?{i}"})
+        messages.append({"role": "user", "content": f"闂傚倷鐒﹀鍨焽閸ф绀夌€广儱顦弰銉︾箾閹寸們姘ｉ崼銉︾厱妞ゆ劑鍊曢弸宥囩磼?{i}"})
+        messages.append({"role": "assistant", "content": f"闂傚倷绀侀幉锟犲蓟閿熺姴鐤炬繝濠傚濞呯姵绻濇繝鍌滃闁绘劕锕弻锝夊箛椤掍讲鏋欏┑?{i}"})
 
     mock_response = {
         "role": "assistant",
-        "content": "濠电偞鍨堕弻銊╊敄閸涱喗娅犻柣妯肩帛閸庡秹鏌涢弴銊ヤ航闁搞倗濞€閹綊宕堕妸褏鐣遍梺鐓庣仛閸ㄥ潡寮鍛殕闁逞屽墴瀵偊濡舵径濠勵吅閻庣懓瀚妯煎緤濞差亝鈷戞い鎰ㄥ墲椤﹂绱?0闂備礁鎼ˇ顐﹀礈濠靛牏鐭撻柣鎴ｆ缁犳帗銇勯弽銉モ偓妤冪矆婢舵劖鐓曢柡鍌滃劋濞呭棗顭胯缁捇寮婚崼銉﹀癄濠㈣泛顦辨す铏箾鐎涙鐭婃俊顐ｎ殔鐓ら柡宥冨妼缁剁偟鈧箍鍎遍崯鐘诲磻?,
+        "content": "婵犵數鍋為崹鍫曞蓟閵娾晩鏁勯柛娑卞枟濞呯娀鏌ｅΟ鑲╁笡闁稿骸绉归弻娑㈠即閵娿儰鑸梺鎼炲€楁繛鈧柟顔肩秺瀹曞爼濡歌閻ｉ亶姊洪悡搴ｄ粵闁搞劌娼″顐㈩吋閸涱垱娈曢梺閫炲苯澧寸€殿噮鍋婃俊鑸靛緞婵犲嫷鍚呴柣搴ｆ嚀鐎氼厼顭垮Ο鐓庣筏婵炲樊浜濋埛鎴炪亜閹般劌澧叉い锕傤棑缁?0闂傚倷绀侀幖顐λ囬锕€绀堟繝闈涚墢閻捇鏌ｉ幋锝嗩棄缂佺姵甯楅妵鍕冀閵夈儮鍋撳Δ鍐焼濠㈣埖鍔栭悡鏇㈡煛閸屾粌鍔嬫繛鍛椤儻顦崇紒顔芥崌瀵宕奸妷锕€鐧勬繝銏ｆ硾椤﹁鲸銇欓搹顐ょ閻庢稒顭囬惌濠冧繆椤愶綆娈旈悡銈夋煛瀹ュ啫濡肩紒鍓佸仧閳ь剙绠嶉崕閬嶅疮閻樿纾?,
     }
 
     with patch("app.services.context_compressor.chat_completion", new_callable=AsyncMock, return_value=mock_response):
@@ -1771,7 +1771,7 @@ async def test_compress_long_history():
     assert result[0]["content"] == "System prompt"
 
     # Should have a summary message
-    assert any("濠电偞鍨堕弻銊╊敄閸涱喗娅犻柣妯肩帛閸庡秹鏌涢弴銊ヤ航闁搞倗濞€閹? in m.get("content", "") for m in result)
+    assert any("婵犵數鍋為崹鍫曞蓟閵娾晩鏁勯柛娑卞枟濞呯娀鏌ｅΟ鑲╁笡闁稿骸绉归弻娑㈠即閵娿儰鑸梺鎼炲€楁繛鈧柟? in m.get("content", "") for m in result)
 
     # Recent messages should be preserved (last 12 non-system messages = 6 pairs)
     assert len(result) <= 14  # system + summary + 12 recent
@@ -1782,19 +1782,19 @@ async def test_compress_preserves_recent_messages():
     """The most recent messages should be kept intact."""
     messages = [{"role": "system", "content": "System prompt"}]
     for i in range(20):
-        messages.append({"role": "user", "content": f"婵犵數鍋為崹鐢告偋婵犲啫顕?{i}"})
-        messages.append({"role": "assistant", "content": f"闂備焦鎮堕崕鎶藉磻濞戔懞?{i}"})
+        messages.append({"role": "user", "content": f"濠电姷鏁搁崑鐐哄垂閻㈠憡鍋嬪┑鐘插暙椤?{i}"})
+        messages.append({"role": "assistant", "content": f"闂傚倷鐒﹂幃鍫曞磿閹惰棄纾绘繛鎴旀嚍?{i}"})
 
     mock_response = {
         "role": "assistant",
-        "content": "闂備礁鎼崯鐘诲疾濠婂喛鑰块柨娑樺閸嬫捇鎮藉▓鎸庢暞闂佷紮缂氱划娆撶嵁濡も偓铻ｆ繛鍡欏亾閻?,
+        "content": "闂傚倷绀侀幖顐﹀疮閻樿鐤炬繝濠傚枦閼板潡鏌ㄥ☉妯侯仱闁稿鎹囬幃钘夆枔閹稿孩鏆為梻浣风串缂傛氨鍒掑▎鎾跺祦婵°倐鍋撻摶锝嗙箾閸℃瑥浜鹃柣?,
     }
 
     with patch("app.services.context_compressor.chat_completion", new_callable=AsyncMock, return_value=mock_response):
         result = await compress_conversation_history(messages, AsyncMock(), max_messages=12)
 
     # Last message should be the most recent assistant reply
-    assert result[-1]["content"] == "闂備焦鎮堕崕鎶藉磻濞戔懞?19"
+    assert result[-1]["content"] == "闂傚倷鐒﹂幃鍫曞磿閹惰棄纾绘繛鎴旀嚍?19"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1809,7 +1809,7 @@ Append to `app/services/context_compressor.py`:
 ```python
 from app.agent.llm_client import chat_completion as _chat_completion
 
-_SUMMARIZE_PROMPT = """闂佽崵濮村ú顓⑺夐幘璇叉瀬?-3闂備礁鎲￠悷锝夊磿閹绢喗鍎婂ù鐘差儏缁犳垿鏌ゆ慨鎰偓妤€鈻旈姀鐘嗗綊鎮╅鐓庡缂備焦顨呴幊鎰板焵椤掑倹鏆╂い銏狅躬閹焦绂掔€ｎ亞顦ㄩ梺鍛婁緱閸欏酣宕崶顒佺厪闁糕剝顨呴埀顒€娼″畷鎶藉箹娴ｇ懓鈧兘姊洪锝囥€掔紒鐘辩矙閺岋綁鏁愰崱娆愬殏缂備礁褰夐崡鎶藉箖娴犲惟闁挎洍鍋撻柣鎾存礋閺屾稓鈧綆鍋嗛悡顖滅磼閵娿垹澧茬紒鍌涘浮閸┾偓妞ゆ帊鑳堕埢鏇㈡煕椤愩倕鏋戦柟顖涚懃闇夐柨婵嗘濞堢娀鏌嶈閸忔盯鎳楅崼鏇炵伋婵☆垰鍚嬫刊濂告煏閸繂顏柛鐔凤工闇夐柣姗嗗亜娴滅偓绻涢幋鐐寸叆闁绘瀚伴崺鈧い鎴炲缁佷即鏌曢崱妤€鏆炴繛鐓庣箻瀹曪綁濡疯閺呪晜绻涚€电袥闁稿鎸搁埥澶愬棘鐠恒劌顣烘繛瀛樼矊閹诧紕缂撻懞銉﹀弿闁硅埇鍔屾禍?""
+_SUMMARIZE_PROMPT = """闂備浇宕垫慨鏉懨洪鈶哄骞樼拠鍙夌€?-3闂傚倷绀侀幉锟犳偡閿濆纾块柟缁㈠枟閸庡﹤霉閻樺樊鍎忕紒鐘冲灴閺屻倖鎱ㄩ幇顑藉亾濡も偓閳绘棃濮€閻樺棗缍婇幃鈺咁敊閻撳骸顫掔紓鍌欑劍椤ㄥ懘骞婇幇鏉跨劦妞ゆ帒鍊归弳鈺傘亜閵忕媴韬柟顖欑劍缁傛帞鈧綆浜為ˇ銊╂⒑閸涘﹣绶遍柛娆忛叄瀹曨垶宕堕浣哄帾闂佺硶鍓濋〃鍛村焵椤掆偓濞尖€崇暦閹惰棄绠瑰ù锝囨嚀閳ь剛鍏樺娲敃閿濆洢鈧帞绱掗悩杈╃煓闁哄矉缍侀弫鎰板幢濞嗘劕娈忕紓鍌欑瑜板宕￠幎钘夌畺濞寸姴顑呮儫闂佹寧娲嶉崑鎾绘煟閹惧瓨绀嬮柡灞剧〒閳ь剨缍嗛崑鍡涙偂椤栨粎纾奸柕濞垮灩婢ц尙绱掗崒娑樻诞闁糕斁鍋撳銈嗗笂閼冲爼鍩㈤弴銏＄厱妞ゆ劑鍊曢弸鎴︽煙椤栨稓鎳冮棁澶愭煥濠靛棙顥滄繛鍫㈠█閺屽秷顧侀柛蹇旂洴閹虫宕奸弴鐐典紜濠碘槅鍨伴崥瀣垔婵傚憡鐓忛柛顐ｇ箓椤忣偊鏌涢悢鍑ゅ伐闂囧鏌ｅ鍡椾簻濞存粎鍋撶换娑㈠箣閻愬鍙嗛梺缁橆殔鐎氫即宕洪埀顒併亜閹寸偛顕滅紒浣峰嵆閺屾洟宕卞Δ鈧弳鐐寸箾閻撳海绠荤€规洩缍佹俊鐤槻闁哄應鏅滅换娑氣偓鐢殿焾琚ラ梺绋款儐閹告悂鍩ユ径鎰閻犳亽鍔岄。鐑樼箾鐎涙鐭婇柟璇х磿缂傛捇鎳為妷锕€寮块梺纭呭焽閸斿本绂?""
 
 
 async def compress_conversation_history(
@@ -1857,13 +1857,13 @@ async def compress_conversation_history(
                 {"role": "user", "content": old_text},
             ],
         )
-        summary = response.get("content", "闂備焦瀵х粙鎴︽偋婵犲伣娑㈩敇閵忕姴鐝橀梺缁樻煥椤ㄥ酣宕甸悩缁樺仯闁搞儯鍔庣粻鏍煙閹绘帞锛嶉柟鑼閹峰懏顦版惔锝嗗枓闂備礁鎲￠悷顖炲垂閹惰棄鏋侀柕鍫濐槹閺?)
+        summary = response.get("content", "闂傚倷鐒︾€笛呯矙閹达附鍋嬪┑鐘蹭迹濞戙埄鏁囬柕蹇曞Т閻濇﹢姊虹紒妯荤叆妞ゃ劌閰ｅ畷鐢告偐缂佹ê浠梺鎼炲劘閸斿海绮婚弽顓熺厵闁圭粯甯為敍宥夋煙閼碱剙顣奸柟宄版噺椤︾増鎯旈敐鍡楁灀闂傚倷绀侀幉锟犳偡椤栫偛鍨傞柟鎯版閺嬩線鏌曢崼婵愭Ч闁?)
     except Exception:
-        summary = "闂備焦瀵х粙鎴︽偋婵犲伣娑㈩敇閵忕姴鐝橀梺缁樻煥椤ㄥ酣宕甸悩缁樺仯闁搞儯鍔庣粻鏍煙閹绘帞锛嶉柟鑼閹峰懘鎮滃Ο缁橆仧闂備胶鎳撻悺銊╁礉閺囥垹桅闁瑰濮电€氬鏌曟径妯虹仯缂佲偓?
+        summary = "闂傚倷鐒︾€笛呯矙閹达附鍋嬪┑鐘蹭迹濞戙埄鏁囬柕蹇曞Т閻濇﹢姊虹紒妯荤叆妞ゃ劌閰ｅ畷鐢告偐缂佹ê浠梺鎼炲劘閸斿海绮婚弽顓熺厵闁圭粯甯為敍宥夋煙閼碱剙顣奸柟宄版嚇閹粌螣缂佹﹩浠ч梻鍌欒兌閹虫捇鎮洪妸鈺佺闁哄洢鍨规闂佺懓顕慨鐢碘偓姘煼閺屾洘寰勫Ο铏逛化缂備讲鍋?
 
     summary_msg = {
         "role": "user",
-        "content": f"[濠电偞鍨堕弻銊╊敄閸涱喗娅犻柣妯肩帛閸庡秹鏌涢弴銊ヤ航闁搞倗濞€閹綊宕堕妸褏鐣洪梺瑙勫絻绾绢參骞夐悧鍫⑩枙?{summary}",
+        "content": f"[婵犵數鍋為崹鍫曞蓟閵娾晩鏁勯柛娑卞枟濞呯娀鏌ｅΟ鑲╁笡闁稿骸绉归弻娑㈠即閵娿儰鑸梺鎼炲€楁繛鈧柟顔肩秺瀹曞爼濡歌閻ｆ椽姊虹憴鍕祷缁剧虎鍙冮獮澶愭偋閸懇鏋?{summary}",
     }
 
     return system_msgs + [summary_msg] + recent_msgs
@@ -1915,9 +1915,9 @@ git commit -m "feat: add sliding window conversation compression"
 Update the Plan 4 line and current status:
 
 ```markdown
-- [ ] Plan 4: Memory + 濠电偞鍨堕幐鎼佹晝閿濆洨绠旈柛娑欐綑濡﹢鏌涢妷銏℃珦闁告埃鍋撻梻浣藉吹閸嬫稑螞鐎靛憡顫?0 濠?task闂?```
+- [ ] Plan 4: Memory + 婵犵數鍋為崹鍫曞箰閹间焦鏅濋柨婵嗘川缁犳棃鏌涘☉娆愮稇婵☆偅锕㈤弻娑㈠Ψ閵忊剝鐝﹂梺鍛婂焹閸嬫捇姊绘担钘夊惞闁稿绋戣灋閻庨潧鎲￠～?0 婵?task闂?```
 
-Update "闁荤喐绮庢晶妤呭箰閸涘﹥娅犻柣妯烘▕濞间即鏌ㄥ┑鍡樺櫤闂婎剦鍓熼弻鐔虹箔濞戞ɑ锛嶉柡鈧? to reflect Plan 4 completion.
+Update "闂佽崵鍠愮划搴㈡櫠濡ゅ懎绠伴柛娑橈攻濞呯娀鏌ｅΟ鐑樷枙婵為棿鍗抽弻銊モ攽閸℃ê娅ら梻濠庡墻閸撶喖寮婚悢铏圭當婵炴垶蓱閿涘秹鏌￠埀? to reflect Plan 4 completion.
 
 - [ ] **Step 2: Commit**
 
