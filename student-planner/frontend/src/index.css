@@ -228,3 +228,98 @@ a {
   border-radius: 8px;
   padding: 0 10px;
 }
+
+.calendar-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.calendar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.calendar-actions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  min-height: 36px;
+}
+
+.timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 12px;
+  border-left: 4px solid #1677ff;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+  text-align: left;
+}
+
+.timeline-item--task {
+  border-left-color: #16a34a;
+}
+
+.timeline-item button,
+.sheet-form button {
+  border-radius: 8px;
+}
+
+.sheet-form {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.sheet-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.sheet-form input,
+.sheet-form textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  min-height: 38px;
+  padding: 8px;
+}
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+
+.month-grid button {
+  min-height: 44px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  margin-left: 2px;
+}
+
+.dot--course {
+  background: #1677ff;
+}
+
+.dot--task {
+  background: #16a34a;
+}

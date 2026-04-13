@@ -129,12 +129,12 @@ Run: `cd student-planner/frontend && npm install && npm run typecheck && npm tes
 - Create/modify frontend calendar store, calendar page, task sheet, calendar tests.
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Write failing calendar data and interaction tests**
-- [ ] **Step 2: Implement day timeline from courses and tasks**
-- [ ] **Step 3: Implement task add/edit/complete flows**
-- [ ] **Step 4: Implement swipe day switching and pinch month view**
-- [ ] **Step 5: Run `npm run typecheck && npm test && npm run build`**
-- [ ] **Step 6: Update AGENTS.md to Task 6 and commit**
+- [x] **Step 1: Write failing calendar data and interaction tests**
+- [x] **Step 2: Implement day timeline from courses and tasks**
+- [x] **Step 3: Implement task add/edit/complete flows**
+- [x] **Step 4: Implement swipe day switching and pinch month view**
+- [x] **Step 5: Run `npm run typecheck && npm test && npm run build`**
+- [x] **Step 6: Update AGENTS.md to Task 6 and commit**
 
 ---
 

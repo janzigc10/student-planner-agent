@@ -1,4 +1,4 @@
-import type { TokenResponse, User } from '../types/api'
+import type { Course, Task, TokenResponse, User } from '../types/api'
 
 const TOKEN_KEY = 'student-planner-token'
 
@@ -72,5 +72,30 @@ export const api = {
         body: formData,
       },
     )
+  },
+  listCourses() {
+    return request<Course[]>('/api/courses/')
+  },
+  listTasks(dateFrom: string, dateTo: string) {
+    return request<Task[]>(`/api/tasks/?date_from=${dateFrom}&date_to=${dateTo}`)
+  },
+  createTask(body: {
+    title: string
+    description?: string
+    scheduled_date: string
+    start_time: string
+    end_time: string
+    exam_id?: string
+  }) {
+    return request<Task>('/api/tasks/', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  },
+  updateTask(taskId: string, body: Partial<Pick<Task, 'title' | 'description' | 'scheduled_date' | 'start_time' | 'end_time' | 'status'>>) {
+    return request<Task>(`/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
   },
 }
