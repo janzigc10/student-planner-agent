@@ -44,3 +44,27 @@ async def test_me(auth_client: AsyncClient):
 async def test_me_no_token(client: AsyncClient):
     response = await client.get("/api/auth/me")
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_me_preferences(auth_client: AsyncClient):
+    response = await auth_client.patch(
+        "/api/auth/me",
+        json={
+            "current_semester_start": "2026-03-02",
+            "preferences": {
+                "earliest_study_time": "08:30",
+                "latest_study_time": "22:30",
+                "default_reminder_minutes": 30,
+                "period_schedule": {
+                    "1-2": {"start": "08:20", "end": "10:00"},
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["current_semester_start"] == "2026-03-02"
+    assert data["preferences"]["default_reminder_minutes"] == 30
+    assert data["preferences"]["period_schedule"]["1-2"]["start"] == "08:20"

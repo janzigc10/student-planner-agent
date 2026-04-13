@@ -19,6 +19,11 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class UserUpdate(BaseModel):
+    preferences: Optional[dict[str, Any]] = None
+    current_semester_start: Optional[date] = None
+
+
 class UserOut(BaseModel):
     id: str
     username: str

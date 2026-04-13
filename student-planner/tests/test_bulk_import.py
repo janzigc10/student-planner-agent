@@ -5,6 +5,7 @@ import pytest
 from app.agent.tool_executor import execute_tool
 from app.agent.tools import TOOL_DEFINITIONS
 from app.models.course import Course
+from app.models.reminder import Reminder
 from app.models.user import User
 
 
@@ -76,3 +77,38 @@ async def test_bulk_import_empty_list(setup_db) -> None:
         )
         assert result["status"] == "imported"
         assert result["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_uses_default_reminder_minutes_preference(setup_db) -> None:
+    from tests.conftest import TestSession
+
+    async with TestSession() as db:
+        user = User(
+            id="test-user-3",
+            username="bulktest3",
+            hashed_password="x",
+            preferences={"default_reminder_minutes": 30},
+        )
+        db.add(user)
+        await db.commit()
+
+        await execute_tool(
+            "bulk_import_courses",
+            {
+                "courses": [
+                    {
+                        "name": "概率论",
+                        "weekday": 4,
+                        "start_time": "14:00",
+                        "end_time": "15:40",
+                    }
+                ]
+            },
+            db=db,
+            user_id="test-user-3",
+        )
+
+        reminders_result = await db.execute(select(Reminder).where(Reminder.user_id == "test-user-3"))
+        reminder = reminders_result.scalar_one()
+        assert reminder.advance_minutes == 30

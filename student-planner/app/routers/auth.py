@@ -7,7 +7,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.jwt import create_access_token
 from app.database import get_db
 from app.models.user import User
-from app.schemas.user import TokenResponse, UserLogin, UserOut, UserRegister
+from app.schemas.user import TokenResponse, UserLogin, UserOut, UserRegister, UserUpdate
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -37,4 +37,19 @@ async def login(body: UserLogin, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)):
+    return user
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: UserUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    updates = body.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(user, key, value)
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
     return user

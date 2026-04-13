@@ -9,6 +9,7 @@ from app.models.course import Course
 from app.models.memory import Memory
 from app.models.reminder import Reminder
 from app.models.task import Task
+from app.models.user import User
 from app.services.calendar import TimeSlot, compute_free_slots
 from app.services.memory_service import (
     create_memory,
@@ -20,6 +21,8 @@ from app.services.reminder_scheduler import (
     resolve_fire_time,
     schedule_reminder_job,
 )
+from app.services.period_converter import DEFAULT_SCHEDULE, convert_periods
+from app.services.schedule_upload_cache import get_schedule_upload
 
 
 async def execute_tool(
@@ -354,11 +357,7 @@ async def _parse_schedule(
     file_id: str,
     **kwargs,
 ) -> dict[str, Any]:
-    return {
-        "status": "ready",
-        "message": "课表已解析，请通过 ask_user 向用户展示识别结果并确认。",
-        "file_id": file_id,
-    }
+    return await _parse_cached_schedule(db, user_id, file_id, expected_kind="spreadsheet")
 
 
 async def _parse_schedule_image(
@@ -367,11 +366,53 @@ async def _parse_schedule_image(
     file_id: str,
     **kwargs,
 ) -> dict[str, Any]:
+    return await _parse_cached_schedule(db, user_id, file_id, expected_kind="image")
+
+
+async def _parse_cached_schedule(
+    db: AsyncSession,
+    user_id: str,
+    file_id: str,
+    expected_kind: str,
+) -> dict[str, Any]:
+    cached = get_schedule_upload(user_id, file_id)
+    if cached is None:
+        return {"error": "Schedule upload not found"}
+    if cached.kind != expected_kind:
+        return {"error": f"Schedule upload kind mismatch: expected {expected_kind}, got {cached.kind}"}
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    schedule = _period_schedule_from_preferences(user.preferences if user else None)
+
+    converted: list[dict[str, Any]] = []
+    for course in cached.courses:
+        course_data = dict(course)
+        if "start_time" not in course_data or "end_time" not in course_data:
+            period = course_data.get("period")
+            times = convert_periods(str(period), schedule) if period else None
+            if times is None:
+                return {"error": f"Cannot convert period: {period}"}
+            course_data.update(times)
+        converted.append(course_data)
+
     return {
         "status": "ready",
-        "message": "课表图片已识别，请通过 ask_user 向用户展示识别结果并确认。",
+        "kind": cached.kind,
+        "courses": converted,
+        "count": len(converted),
+        "message": "课表已解析，请通过 ask_user 向用户展示识别结果并确认。",
         "file_id": file_id,
     }
+
+
+def _period_schedule_from_preferences(preferences: dict[str, Any] | None) -> dict[str, dict[str, str]]:
+    if not preferences:
+        return DEFAULT_SCHEDULE
+    schedule = preferences.get("period_schedule")
+    if isinstance(schedule, dict):
+        return schedule
+    return DEFAULT_SCHEDULE
 
 
 async def _bulk_import_courses(
@@ -382,6 +423,7 @@ async def _bulk_import_courses(
 ) -> dict[str, Any]:
     created: list[str] = []
     reminders_created = 0
+    advance_minutes = await _default_reminder_minutes(db, user_id)
     for course_data in courses:
         course = Course(
             user_id=user_id,
@@ -401,13 +443,13 @@ async def _bulk_import_courses(
             weekday=course.weekday,
             start_time=course.start_time,
         ).isoformat(timespec="seconds")
-        fire_time = resolve_fire_time(event_time, advance_minutes=15)
+        fire_time = resolve_fire_time(event_time, advance_minutes=advance_minutes)
         reminder = Reminder(
             user_id=user_id,
             target_type="course",
             target_id=course.id,
             remind_at=fire_time.isoformat(timespec="seconds"),
-            advance_minutes=15,
+            advance_minutes=advance_minutes,
         )
         db.add(reminder)
         await db.flush()
@@ -427,6 +469,17 @@ async def _bulk_import_courses(
         "courses": created,
         "reminders_created": reminders_created,
     }
+
+
+async def _default_reminder_minutes(db: AsyncSession, user_id: str) -> int:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    preferences = user.preferences if user else None
+    if isinstance(preferences, dict):
+        value = preferences.get("default_reminder_minutes")
+        if isinstance(value, int) and value > 0:
+            return value
+    return 15
 
 
 

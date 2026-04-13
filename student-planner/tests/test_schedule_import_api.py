@@ -23,6 +23,8 @@ async def test_upload_excel_returns_courses(auth_client: AsyncClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert "courses" in data
+    assert data["kind"] == "spreadsheet"
+    assert data["file_id"]
     assert len(data["courses"]) == 6
     names = {course["name"] for course in data["courses"]}
     assert "高等数学" in names

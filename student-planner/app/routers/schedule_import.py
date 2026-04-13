@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_user
 from app.database import get_db
 from app.models.user import User
+from app.services.schedule_upload_cache import store_schedule_upload
 from app.services.schedule_parser import RawCourse, parse_excel_schedule
 
 router = APIRouter(prefix="/schedule", tags=["schedule-import"])
@@ -24,7 +25,7 @@ async def upload_schedule(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    del user, db
+    del db
 
     content_type = file.content_type or ""
     if content_type not in _ALLOWED_TYPES:
@@ -35,14 +36,20 @@ async def upload_schedule(
 
     file_bytes = await file.read()
     if content_type in _EXCEL_TYPES:
+        kind = "spreadsheet"
         courses = parse_excel_schedule(BytesIO(file_bytes))
     else:
+        kind = "image"
         from app.agent.schedule_ocr import parse_schedule_image
 
         courses = await parse_schedule_image(file_bytes, content_type)
 
+    course_dicts = [_raw_course_to_dict(course) for course in courses]
+    file_id = store_schedule_upload(user.id, kind, course_dicts)
     return {
-        "courses": [_raw_course_to_dict(course) for course in courses],
+        "file_id": file_id,
+        "kind": kind,
+        "courses": course_dicts,
         "count": len(courses),
     }
 
