@@ -113,13 +113,13 @@ Run: `cd student-planner/frontend && npm install && npm run typecheck && npm tes
 - Create/modify frontend chat store, WebSocket client, chat page, ask_user cards, upload sheet, speech input, and tests.
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Write failing chat reducer, WebSocket, and ask_user card tests**
-- [ ] **Step 2: Implement WebSocket token handshake and reconnect**
-- [ ] **Step 3: Implement message list, progress card, and tool-name mapping**
-- [ ] **Step 4: Implement ask_user confirm/select/review cards**
-- [ ] **Step 5: Implement attachment upload and Web Speech fallback**
-- [ ] **Step 6: Run `npm run typecheck && npm test && npm run build`**
-- [ ] **Step 7: Update AGENTS.md to Task 5 and commit**
+- [x] **Step 1: Write failing chat reducer, WebSocket, and ask_user card tests**
+- [x] **Step 2: Implement WebSocket token handshake and reconnect**
+- [x] **Step 3: Implement message list, progress card, and tool-name mapping**
+- [x] **Step 4: Implement ask_user confirm/select/review cards**
+- [x] **Step 5: Implement attachment upload and Web Speech fallback**
+- [x] **Step 6: Run `npm run typecheck && npm test && npm run build`**
+- [x] **Step 7: Update AGENTS.md to Task 5 and commit**
 
 ---
 

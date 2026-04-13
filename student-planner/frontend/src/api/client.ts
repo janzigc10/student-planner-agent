@@ -25,10 +25,11 @@ export function clearToken() {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getStoredToken()
+  const isFormData = options.body instanceof FormData
   const response = await fetch(path, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -60,5 +61,16 @@ export const api = {
   },
   me() {
     return request<User>('/api/auth/me')
+  },
+  uploadSchedule(file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request<{ file_id: string; kind: 'spreadsheet' | 'image'; count: number; courses: unknown[] }>(
+      '/api/schedule/upload',
+      {
+        method: 'POST',
+        body: formData,
+      },
+    )
   },
 }

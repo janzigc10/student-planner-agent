@@ -99,7 +99,7 @@ async def run_agent_loop(
 
             if tool_name == "ask_user":
                 result = await execute_tool(tool_name, tool_args, db, user.id)
-                user_response = yield {"type": "ask_user", **result}
+                user_response = yield {**result, "type": "ask_user", "ask_type": result.get("type")}
                 if user_response is None:
                     user_response = "纭"
                 tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)

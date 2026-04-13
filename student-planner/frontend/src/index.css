@@ -136,3 +136,95 @@ a {
   place-items: center;
   color: #64748b;
 }
+
+.chat-page {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 12px;
+  min-height: 0;
+  padding: 0;
+}
+
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.message {
+  max-width: 82%;
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.45;
+}
+
+.message--assistant {
+  align-self: flex-start;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.message--user {
+  align-self: flex-end;
+  background: #1677ff;
+  color: #ffffff;
+}
+
+.progress-card,
+.ask-card {
+  border: 1px solid #d8e4f2;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+  text-align: left;
+}
+
+.ask-card pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: #475569;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.ask-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ask-card__actions button,
+.icon-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172033;
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.icon-button input {
+  display: none;
+}
+
+.chat-input {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.chat-input input[aria-label="输入消息"] {
+  min-width: 0;
+  height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0 10px;
+}
