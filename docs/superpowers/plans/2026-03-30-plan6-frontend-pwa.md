@@ -160,12 +160,12 @@ Run: `cd student-planner/frontend && npm install && npm run typecheck && npm tes
 - Modify frontend PWA config, public icons/service worker setup, Playwright tests.
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Write or update Playwright smoke tests**
-- [ ] **Step 2: Add manifest, icons, service worker static cache, push listener, and notification click handling**
-- [ ] **Step 3: Verify API is network-only and WebSocket is uncached**
-- [ ] **Step 4: Run frontend verification**
-- [ ] **Step 5: Run backend regression**
-- [ ] **Step 6: Update AGENTS.md final status and commit**
+- [x] **Step 1: Write or update Playwright smoke tests**
+- [x] **Step 2: Add manifest, icons, service worker static cache, push listener, and notification click handling**
+- [x] **Step 3: Verify API is network-only and WebSocket is uncached**
+- [x] **Step 4: Run frontend verification**
+- [x] **Step 5: Run backend regression**
+- [x] **Step 6: Update AGENTS.md final status and commit**
 
 Run frontend: `cd student-planner/frontend && npm run typecheck && npm test && npm run build && npm run e2e`
 
