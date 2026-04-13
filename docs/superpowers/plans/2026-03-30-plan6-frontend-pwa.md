@@ -98,12 +98,12 @@ Run: `cd student-planner/frontend && npm install && npm run typecheck && npm tes
 - Create/modify frontend API client, auth store, route guard, login/register pages, app shell, and shell tests.
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Write failing auth and routing tests**
-- [ ] **Step 2: Implement API client, DTOs, auth store, and route guards**
-- [ ] **Step 3: Implement login/register pages**
-- [ ] **Step 4: Implement mobile app shell with persistent tab state**
-- [ ] **Step 5: Run `npm run typecheck && npm test && npm run build`**
-- [ ] **Step 6: Update AGENTS.md to Task 4 and commit**
+- [x] **Step 1: Write failing auth and routing tests**
+- [x] **Step 2: Implement API client, DTOs, auth store, and route guards**
+- [x] **Step 3: Implement login/register pages**
+- [x] **Step 4: Implement mobile app shell with persistent tab state**
+- [x] **Step 5: Run `npm run typecheck && npm test && npm run build`**
+- [x] **Step 6: Update AGENTS.md to Task 4 and commit**
 
 ---
 
