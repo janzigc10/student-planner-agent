@@ -46,10 +46,20 @@ function buildAttachmentConfirmation(kind: AttachmentKind, count: number) {
 
 function detectAttachmentKind(file: File): AttachmentKind | null {
   const name = file.name.toLowerCase()
-  if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|heic)$/i.test(name)) {
+  if (
+    file.type === 'image/png' ||
+    file.type === 'image/jpeg' ||
+    file.type === 'image/jpg' ||
+    file.type === 'image/webp' ||
+    /\.(png|jpe?g|webp)$/i.test(name)
+  ) {
     return 'image'
   }
-  if (file.type.includes('spreadsheet') || file.type.includes('excel') || /\.(xls|xlsx|csv)$/i.test(name)) {
+  if (
+    file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    file.type === 'application/vnd.ms-excel' ||
+    /\.(xls|xlsx)$/i.test(name)
+  ) {
     return 'spreadsheet'
   }
   return null
@@ -151,7 +161,7 @@ export function ChatPage() {
 
     const kinds = files.map(detectAttachmentKind)
     if (kinds.some((kind) => kind === null)) {
-      setAttachmentError('暂不支持该附件类型')
+      setAttachmentError('暂不支持该附件类型，仅支持 png、jpg、jpeg、webp、xls、xlsx')
       return
     }
 

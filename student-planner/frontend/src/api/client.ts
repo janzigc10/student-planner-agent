@@ -40,7 +40,32 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!response.ok) {
-    throw new ApiError(response.statusText || '请求失败', response.status)
+    let errorMessage = response.statusText || '请求失败'
+    const contentType = response.headers.get('Content-Type') ?? ''
+
+    if (contentType.includes('application/json')) {
+      try {
+        const data = (await response.json()) as { detail?: unknown; message?: unknown }
+        if (typeof data.detail === 'string') {
+          errorMessage = data.detail
+        } else if (typeof data.message === 'string') {
+          errorMessage = data.message
+        }
+      } catch {
+        // Ignore malformed error payloads and fall back to status text.
+      }
+    } else {
+      try {
+        const text = await response.text()
+        if (text) {
+          errorMessage = text
+        }
+      } catch {
+        // Ignore unreadable text bodies and fall back to status text.
+      }
+    }
+
+    throw new ApiError(errorMessage, response.status)
   }
 
   return (await response.json()) as T

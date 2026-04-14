@@ -86,6 +86,18 @@ describe('ChatPage attachment drafting', () => {
     expect(screen.queryByText('4.png')).not.toBeInTheDocument()
   })
 
+  it('blocks unsupported attachment types before they enter the tray', async () => {
+    render(<ChatPage />)
+
+    const input = screen.getByLabelText('上传课表')
+    await userEvent.upload(input, createFile('animation.gif', 'image/gif'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('暂不支持该附件类型')
+    expect(screen.queryByRole('region', { name: '待发送附件' })).not.toBeInTheDocument()
+    expect(screen.queryByText('animation.gif')).not.toBeInTheDocument()
+    expect(api.uploadSchedule).not.toHaveBeenCalled()
+  })
+
   it('allows removing a pending attachment from the tray', async () => {
     render(<ChatPage />)
 
