@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, MutableRefObject } from 'react'
 
-import { getStoredToken } from '../api/client'
+import { api, getStoredToken } from '../api/client'
 import type { ChatServerEvent } from '../stores/chatStore'
 import { useChatStore } from '../stores/chatStore'
 
@@ -29,6 +29,16 @@ function sendJson(socketRef: MutableRefObject<WebSocket | null>, payload: unknow
   if (socketRef.current?.readyState === WebSocket.OPEN) {
     socketRef.current.send(JSON.stringify(payload))
   }
+}
+
+function buildAttachmentPrompt(fileId: string, kind: AttachmentKind) {
+  return kind === 'image'
+    ? `我上传了课表图片 file_id=${fileId}，请解析并展示确认卡片。`
+    : `我上传了课表文件 file_id=${fileId}，请解析并展示确认卡片。`
+}
+
+function buildAttachmentConfirmation(kind: AttachmentKind, count: number) {
+  return kind === 'image' ? `已发送 ${count} 张课表图片` : '已发送 1 个课表文件'
 }
 
 function detectAttachmentKind(file: File): AttachmentKind | null {
@@ -90,12 +100,33 @@ export function ChatPage() {
     }
   }, [applyServerEvent])
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault()
     const message = draft.trim()
+    const attachments = pendingAttachments
+
+    if (attachments.length > 0 && message) {
+      setAttachmentError('文字草稿和附件不能一起发送，请分开发送。')
+      return
+    }
+
+    if (attachments.length > 0) {
+      try {
+        const uploadResponse = await api.uploadSchedule(attachments.map((item) => item.file))
+        appendUserMessage(buildAttachmentConfirmation(uploadResponse.kind, uploadResponse.source_file_count))
+        sendJson(socketRef, { message: buildAttachmentPrompt(uploadResponse.file_id, uploadResponse.kind) })
+        setPendingAttachments([])
+        setAttachmentError(null)
+      } catch (error) {
+        setAttachmentError(error instanceof Error ? error.message : '课表上传失败')
+      }
+      return
+    }
+
     if (!message) {
       return
     }
+
     appendUserMessage(message)
     sendJson(socketRef, { message })
     setDraft('')

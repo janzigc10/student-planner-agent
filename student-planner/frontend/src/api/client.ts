@@ -1,4 +1,4 @@
-import type { Course, Task, TokenResponse, User } from '../types/api'
+import type { Course, ScheduleUploadResponse, Task, TokenResponse, User } from '../types/api'
 
 const TOKEN_KEY = 'student-planner-token'
 
@@ -68,16 +68,16 @@ export const api = {
       body: JSON.stringify(body),
     })
   },
-  uploadSchedule(file: File) {
+  uploadSchedule(files: File | File[]) {
     const formData = new FormData()
-    formData.append('file', file)
-    return request<{ file_id: string; kind: 'spreadsheet' | 'image'; count: number; courses: unknown[] }>(
-      '/api/schedule/upload',
-      {
-        method: 'POST',
-        body: formData,
-      },
-    )
+    const uploadFiles = Array.isArray(files) ? files : [files]
+    uploadFiles.forEach((file) => {
+      formData.append('file', file)
+    })
+    return request<ScheduleUploadResponse>('/api/schedule/upload', {
+      method: 'POST',
+      body: formData,
+    })
   },
   listCourses() {
     return request<Course[]>('/api/courses/')

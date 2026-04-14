@@ -101,4 +101,89 @@ describe('ChatPage attachment drafting', () => {
     expect(screen.queryByText('1.png')).not.toBeInTheDocument()
     expect(screen.getByText('2.png')).toBeInTheDocument()
   })
+
+  it('uploads pending images only when sending and emits the stable parse prompt', async () => {
+    const user = userEvent.setup()
+    const uploadSchedule = vi.spyOn(api, 'uploadSchedule').mockResolvedValue({
+      file_id: 'schedule-file-1',
+      kind: 'image',
+      count: 2,
+      source_file_count: 2,
+      courses: [],
+    })
+
+    render(<ChatPage />)
+
+    const input = screen.getByLabelText('上传课表')
+    await user.upload(input, [
+      createFile('math-1.png', 'image/png'),
+      createFile('math-2.jpg', 'image/jpeg'),
+    ])
+
+    expect(uploadSchedule).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '发送' }))
+
+    expect(uploadSchedule).toHaveBeenCalledTimes(1)
+    expect(uploadSchedule).toHaveBeenCalledWith([
+      expect.objectContaining({ name: 'math-1.png' }),
+      expect.objectContaining({ name: 'math-2.jpg' }),
+    ])
+    expect(MockWebSocket.instances[0]?.send).toHaveBeenLastCalledWith(
+      JSON.stringify({
+        message: '我上传了课表图片 file_id=schedule-file-1，请解析并展示确认卡片。',
+      }),
+    )
+    expect(await screen.findByText('已发送 2 张课表图片')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '待发送附件' })).not.toBeInTheDocument()
+  })
+
+  it('keeps pending attachments when upload fails on send', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'uploadSchedule').mockRejectedValue(new Error('upload failed'))
+
+    render(<ChatPage />)
+
+    const input = screen.getByLabelText('上传课表')
+    await user.upload(input, createFile('math-1.png', 'image/png'))
+
+    await user.click(screen.getByRole('button', { name: '发送' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('upload failed')
+    expect(screen.getByRole('region', { name: '待发送附件' })).toHaveTextContent('待发送附件 1')
+    expect(screen.getByText('math-1.png')).toBeInTheDocument()
+    expect(MockWebSocket.instances[0]?.send).not.toHaveBeenLastCalledWith(
+      JSON.stringify({
+        message: '我上传了课表图片 file_id=schedule-file-1，请解析并展示确认卡片。',
+      }),
+    )
+  })
+
+  it('uploads pending spreadsheet files only when sending and appends a friendly message', async () => {
+    const user = userEvent.setup()
+    const uploadSchedule = vi.spyOn(api, 'uploadSchedule').mockResolvedValue({
+      file_id: 'schedule-file-2',
+      kind: 'spreadsheet',
+      count: 1,
+      source_file_count: 1,
+      courses: [],
+    })
+
+    render(<ChatPage />)
+
+    const input = screen.getByLabelText('上传课表')
+    await user.upload(input, createFile('schedule.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))
+
+    await user.click(screen.getByRole('button', { name: '发送' }))
+
+    expect(uploadSchedule).toHaveBeenCalledTimes(1)
+    expect(uploadSchedule).toHaveBeenCalledWith([expect.objectContaining({ name: 'schedule.xlsx' })])
+    expect(MockWebSocket.instances[0]?.send).toHaveBeenLastCalledWith(
+      JSON.stringify({
+        message: '我上传了课表文件 file_id=schedule-file-2，请解析并展示确认卡片。',
+      }),
+    )
+    expect(await screen.findByText('已发送 1 个课表文件')).toBeInTheDocument()
+    expect(screen.queryByText('schedule.xlsx')).not.toBeInTheDocument()
+  })
 })

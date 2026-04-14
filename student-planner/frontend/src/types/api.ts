@@ -34,3 +34,11 @@ export interface Task {
   end_time: string
   status: 'pending' | 'completed' | 'skipped'
 }
+
+export interface ScheduleUploadResponse {
+  file_id: string
+  kind: 'spreadsheet' | 'image'
+  count: number
+  source_file_count: number
+  courses: unknown[]
+}
