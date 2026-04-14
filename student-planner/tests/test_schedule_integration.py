@@ -28,6 +28,7 @@ async def test_full_excel_import_flow(auth_client: AsyncClient) -> None:
     assert upload_response.status_code == 200
     parsed = upload_response.json()
     assert parsed["count"] == 6
+    assert parsed["source_file_count"] == 1
 
     courses_for_import = []
     for raw in parsed["courses"]:
@@ -64,7 +65,6 @@ async def test_full_excel_import_flow(auth_client: AsyncClient) -> None:
         db_courses = await db.execute(select(Course).where(Course.user_id == user_id))
         courses = db_courses.scalars().all()
         assert len(courses) == 6
-
         gaoshu = next(course for course in courses if course.name == "高等数学")
         assert gaoshu.start_time == "08:00"
         assert gaoshu.end_time == "09:40"
