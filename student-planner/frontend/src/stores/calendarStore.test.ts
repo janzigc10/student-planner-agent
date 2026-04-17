@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { eventsForDate } from './calendarStore'
+import { api } from '../api/client'
+import { eventsForDate, useCalendarStore } from './calendarStore'
 
 describe('calendar events', () => {
   it('combines matching courses and tasks sorted by start time', () => {
@@ -36,5 +37,35 @@ describe('calendar events', () => {
     )
 
     expect(events.map((event) => event.title)).toEqual(['高等数学', '复习线代'])
+  })
+})
+
+describe('calendar date shifting', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'listCourses').mockResolvedValue([])
+    vi.spyOn(api, 'listTasks').mockResolvedValue([])
+    useCalendarStore.setState({
+      currentDate: '2026-03-30',
+      courses: [],
+      tasks: [],
+      isLoading: false,
+      error: null,
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('moves to the next day once when shifting forward by one day', () => {
+    useCalendarStore.getState().shiftDate(1)
+
+    expect(useCalendarStore.getState().currentDate).toBe('2026-03-31')
+  })
+
+  it('moves to the previous day once when shifting backward by one day', () => {
+    useCalendarStore.getState().shiftDate(-1)
+
+    expect(useCalendarStore.getState().currentDate).toBe('2026-03-29')
   })
 })

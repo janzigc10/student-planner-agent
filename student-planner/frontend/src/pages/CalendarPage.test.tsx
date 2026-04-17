@@ -71,4 +71,35 @@ describe('Calendar page integration', () => {
       expect(api.listTasks).toHaveBeenLastCalledWith('2026-03-01', '2026-03-01')
     })
   })
+
+  it('changes day by exactly one day when tapping previous and next buttons', async () => {
+    const user = userEvent.setup()
+    const { container } = renderCalendarShell()
+
+    await waitFor(() => {
+      expect(api.listTasks).toHaveBeenCalledWith('2026-03-30', '2026-03-30')
+    })
+
+    const dayButtons = container.querySelectorAll<HTMLButtonElement>('.calendar-actions button')
+    const previousButton = dayButtons[0]
+    const nextButton = dayButtons[1]
+
+    expect(previousButton).toBeDefined()
+    expect(nextButton).toBeDefined()
+
+    await user.click(nextButton)
+
+    expect(screen.getByText('2026-03-31')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(api.listTasks).toHaveBeenLastCalledWith('2026-03-31', '2026-03-31')
+    })
+
+    await user.click(previousButton)
+
+    expect(screen.getByText('2026-03-30')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(api.listTasks).toHaveBeenLastCalledWith('2026-03-30', '2026-03-30')
+    })
+  })
+
 })

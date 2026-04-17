@@ -10,6 +10,13 @@ function toDateString(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+function isInteractiveTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) {
+    return false
+  }
+  return target.closest('button, input, textarea, select, a, label') !== null
+}
+
 export function CalendarPage() {
   const {
     completeTask,
@@ -81,6 +88,11 @@ export function CalendarPage() {
   }
 
   function handleTouchStart(event: TouchEvent<HTMLElement>) {
+    if (isInteractiveTarget(event.target)) {
+      touchStartXRef.current = null
+      return
+    }
+
     if (event.touches.length >= 2) {
       setIsMonthView(true)
       return
@@ -89,6 +101,11 @@ export function CalendarPage() {
   }
 
   function handleTouchEnd(event: TouchEvent<HTMLElement>) {
+    if (isInteractiveTarget(event.target)) {
+      touchStartXRef.current = null
+      return
+    }
+
     const startX = touchStartXRef.current
     const endX = event.changedTouches[0]?.clientX
     touchStartXRef.current = null
@@ -120,7 +137,7 @@ export function CalendarPage() {
   }
 
   return (
-    <main className="page calendar-page" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+    <main className="page calendar-page">
       <div className="calendar-actions">
         <button type="button" onClick={() => shiftDate(-1)}>
           前一天
@@ -138,7 +155,7 @@ export function CalendarPage() {
       </div>
       {isLoading ? <p>正在加载...</p> : null}
       {error ? <p role="alert">{error}</p> : null}
-      <section className="timeline" aria-label="日视图">
+      <section className="timeline" aria-label="日视图" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {events.length === 0 ? <p>今天还没有安排。</p> : null}
         {events.map((event) => (
           <article className={`timeline-item timeline-item--${event.kind}`} key={`${event.kind}-${event.id}`}>
