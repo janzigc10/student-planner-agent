@@ -5,17 +5,35 @@ from __future__ import annotations
 import re
 
 
+DEFAULT_SCHEDULE: dict[str, dict[str, str]] = {
+    "1-2": {"start": "08:00", "end": "09:40"},
+    "3-4": {"start": "10:00", "end": "11:40"},
+    "5-6": {"start": "14:00", "end": "15:40"},
+    "7-8": {"start": "16:00", "end": "17:40"},
+    "9-10": {"start": "19:00", "end": "20:40"},
+}
+
 _PERIOD_RE = re.compile(r"^\d{1,2}-\d{1,2}$")
 _TIME_RANGE_RE = re.compile(
     r"^\s*([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)\s*$"
 )
 
 
+def _normalize_period_token(period: str) -> str:
+    return (
+        period.strip()
+        .replace("—", "-")
+        .replace("–", "-")
+        .replace("〞", "-")
+        .replace("每", "-")
+    )
+
+
 def convert_periods(
     period: str,
     schedule: dict[str, dict[str, str]],
 ) -> dict[str, str] | None:
-    normalized = period.strip().replace("〞", "-").replace("每", "-")
+    normalized = _normalize_period_token(period)
     times = schedule.get(normalized)
     if times is None:
         return None
@@ -23,7 +41,7 @@ def convert_periods(
 
 
 def normalize_period(period: str) -> str:
-    normalized = period.strip().replace("〞", "-").replace("每", "-")
+    normalized = _normalize_period_token(period)
     if not _PERIOD_RE.match(normalized):
         raise ValueError(f"非法节次: {period}")
     return normalized
