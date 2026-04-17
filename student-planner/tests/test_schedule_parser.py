@@ -1,5 +1,5 @@
-from pathlib import Path
 from io import BytesIO
+from pathlib import Path
 from zipfile import BadZipFile
 
 import openpyxl
@@ -146,3 +146,24 @@ def test_parse_uses_sheet_with_most_courses() -> None:
     assert len(courses) == 1
     assert courses[0].name == "大学英语"
     assert courses[0].weekday == 3
+
+
+def test_parse_cell_with_blank_line_keeps_single_course_block() -> None:
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "course-table"
+    sheet["A1"] = "period"
+    sheet["B1"] = "friday"
+    sheet["A2"] = "7-8"
+    sheet["B2"] = "体育\n\n操场\n1-16周"
+
+    stream = BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    stream.seek(0)
+
+    courses = parse_excel_schedule(stream)
+    assert len(courses) == 1
+    assert courses[0].name == "体育"
+    assert courses[0].location == "操场"
+    assert courses[0].period == "7-8"

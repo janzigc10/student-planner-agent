@@ -61,6 +61,7 @@ _WEEK_RANGE_RE = re.compile(r"(\d+)\s*[-~～—–]\s*(\d+)\s*周")
 _WEEK_EXPR_RE = re.compile(r"([0-9,，\s\-~～—–]+)\s*(?:\(\s*\[?周\]?\s*\)|\[\s*周\s*\]|周)")
 _PERIOD_RE = re.compile(r"(?<![\d:])(?:第\s*)?(\d{1,2})\s*[-~～—–]\s*(\d{1,2})(?:\s*节)?(?![\d:])")
 _BRACKET_PERIOD_RE = re.compile(r"\[(\d{1,2})\s*[-~～—–]\s*(\d{1,2})\s*节?\]")
+_INLINE_PERIOD_RE = re.compile(r"(?:第\s*)?(\d{1,2})\s*[-~～—–]\s*(\d{1,2})\s*节")
 _TEACHER_RE = re.compile(r"老师|教授|讲师|teacher|lecturer|prof", re.IGNORECASE)
 _MAX_HEADER_SCAN_ROWS = 12
 _MAX_PERIOD_SCAN_ROWS = 24
@@ -344,7 +345,8 @@ def _looks_like_period_cell(text: str) -> bool:
 
 
 def _parse_cell(text: str, weekday: int, period: str) -> list[RawCourse]:
-    blocks = [block.strip() for block in re.split(r"\n\s*\n+", text) if block.strip()]
+    raw_blocks = [block.strip() for block in re.split(r"\n\s*\n+", text) if block.strip()]
+    blocks = _merge_fragmented_blocks(raw_blocks)
     if not blocks:
         return []
 
@@ -402,6 +404,44 @@ def _parse_cell(text: str, weekday: int, period: str) -> list[RawCourse]:
     return courses
 
 
+def _merge_fragmented_blocks(blocks: list[str]) -> list[str]:
+    merged: list[str] = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines:
+            continue
+
+        if merged:
+            previous_lines = [line.strip() for line in merged[-1].splitlines() if line.strip()]
+            if _should_merge_with_previous_block(previous_lines, lines):
+                merged[-1] = f"{merged[-1]}\n{block}"
+                continue
+
+        merged.append(block)
+
+    return merged
+
+
+def _should_merge_with_previous_block(previous_lines: list[str], current_lines: list[str]) -> bool:
+    if not previous_lines or not current_lines:
+        return False
+
+    if any(_parse_week_range(line) is not None for line in previous_lines):
+        return False
+
+    if len(previous_lines) != 1:
+        return False
+
+    first_current_line = current_lines[0]
+    continuation_hint = (
+        _parse_week_range(first_current_line) is not None
+        or bool(_TEACHER_RE.search(first_current_line))
+        or _looks_like_location(first_current_line)
+        or bool(re.search(r"(场|馆|中心|校区|机房)$", first_current_line))
+    )
+    return continuation_hint
+
+
 def _parse_week_range(text: str) -> tuple[int, int] | None:
     week_match = _WEEK_RANGE_RE.search(text)
     if week_match:
@@ -435,7 +475,11 @@ def _parse_period_from_text(text: str) -> str | None:
     bracket_match = _BRACKET_PERIOD_RE.search(text)
     if bracket_match:
         return f"{int(bracket_match.group(1))}-{int(bracket_match.group(2))}"
-    return _extract_period(text)
+
+    inline_match = _INLINE_PERIOD_RE.search(text)
+    if inline_match:
+        return f"{int(inline_match.group(1))}-{int(inline_match.group(2))}"
+    return None
 
 
 def _looks_like_teacher(line: str, idx: int) -> bool:
@@ -450,7 +494,7 @@ def _looks_like_teacher(line: str, idx: int) -> bool:
 
 def _looks_like_location(line: str) -> bool:
     lowered = line.lower()
-    if any(keyword in line for keyword in ("楼", "室", "教", "实验")):
+    if any(keyword in line for keyword in ("楼", "室", "教", "实验", "馆", "场", "机房", "中心", "校区")):
         return True
     if "-" in line and any(char.isdigit() for char in line):
         return True
