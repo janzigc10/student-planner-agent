@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { api } from '../api/client'
+import { BellIcon } from '../components/icons'
 
 function urlBase64ToUint8Array(value: string) {
   const padding = '='.repeat((4 - (value.length % 4)) % 4)
@@ -36,9 +37,12 @@ export function NotificationsPage() {
   return (
     <main className="page">
       <section className="notification-settings">
-        <h2>通知设置</h2>
+        <h2 className="notification-settings__title">
+          <BellIcon className="icon" />
+          <span>通知设置</span>
+        </h2>
         <p>当前状态：{status}</p>
-        {status === 'denied' ? <p>请在浏览器设置中重新开启通知权限。</p> : null}
+        {status === 'denied' ? <p className="status-inline status-inline--warning">请在浏览器设置中重新开启通知权限。</p> : null}
         <button className="primary-button" type="button" onClick={() => void subscribe()}>
           开启推送通知
         </button>

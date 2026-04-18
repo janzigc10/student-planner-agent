@@ -7,6 +7,8 @@ export type CalendarEvent =
   | { kind: 'course'; id: string; title: string; detail: string; start_time: string; end_time: string; source: Course }
   | { kind: 'task'; id: string; title: string; detail: string; start_time: string; end_time: string; source: Task }
 
+export type CalendarViewMode = 'day' | 'month'
+
 function weekdayForDate(date: string) {
   const day = new Date(`${date}T00:00:00`).getDay()
   return day === 0 ? 7 : day
@@ -49,10 +51,12 @@ function toDateString(date: Date) {
 
 interface CalendarStore {
   currentDate: string
+  viewMode: CalendarViewMode
   courses: Course[]
   tasks: Task[]
   isLoading: boolean
   error: string | null
+  setViewMode: (mode: CalendarViewMode) => void
   setCurrentDate: (date: string) => void
   shiftDate: (days: number) => void
   load: () => Promise<void>
@@ -62,10 +66,14 @@ interface CalendarStore {
 
 export const useCalendarStore = create<CalendarStore>((set, get) => ({
   currentDate: toDateString(new Date()),
+  viewMode: 'day',
   courses: [],
   tasks: [],
   isLoading: false,
   error: null,
+  setViewMode(mode) {
+    set({ viewMode: mode })
+  },
   setCurrentDate(date) {
     set({ currentDate: date })
   },

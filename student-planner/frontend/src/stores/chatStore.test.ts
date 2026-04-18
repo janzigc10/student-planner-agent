@@ -74,4 +74,63 @@ describe('chat event reducer', () => {
     expect(state.progress).toEqual([])
     expect(state.isSending).toBe(false)
   })
+
+  it('hides progress immediately when ask_user arrives', () => {
+    let state = createInitialChatState()
+
+    state = reduceChatEvent(state, { type: 'tool_call', name: 'parse_schedule', args: {} })
+    expect(state.progress.length).toBeGreaterThan(0)
+    expect(state.isSending).toBe(true)
+
+    state = reduceChatEvent(state, {
+      type: 'ask_user',
+      question: '请确认导入',
+      ask_type: 'confirm',
+      options: ['确认', '取消'],
+      data: { count: 1 },
+    })
+
+    expect(state.progress).toEqual([])
+    expect(state.progressAnchorMessageId).toBeNull()
+    expect(state.isSending).toBe(false)
+    expect(state.pendingAsk).not.toBeNull()
+  })
+
+  it('clears answered pending ask after follow-up assistant text', () => {
+    let state = createInitialChatState()
+
+    state = reduceChatEvent(state, {
+      type: 'ask_user',
+      question: '请确认导入',
+      ask_type: 'confirm',
+      options: ['确认', '取消'],
+      data: { count: 1 },
+    })
+    state = {
+      ...state,
+      pendingAsk: state.pendingAsk ? { ...state.pendingAsk, answered: '确认' } : null,
+    }
+
+    state = reduceChatEvent(state, { type: 'text', content: '已为你完成导入。' })
+    expect(state.pendingAsk).toBeNull()
+  })
+
+  it('clears answered pending ask on done event', () => {
+    let state = createInitialChatState()
+
+    state = reduceChatEvent(state, {
+      type: 'ask_user',
+      question: '请确认导入',
+      ask_type: 'confirm',
+      options: ['确认', '取消'],
+      data: { count: 1 },
+    })
+    state = {
+      ...state,
+      pendingAsk: state.pendingAsk ? { ...state.pendingAsk, answered: '确认' } : null,
+    }
+
+    state = reduceChatEvent(state, { type: 'done' })
+    expect(state.pendingAsk).toBeNull()
+  })
 })

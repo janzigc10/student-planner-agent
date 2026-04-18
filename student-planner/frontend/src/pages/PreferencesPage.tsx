@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { api } from '../api/client'
+import { SlidersIcon } from '../components/icons'
 import { useAuthStore } from '../stores/authStore'
 
 export function parsePeriodSchedule(text: string) {
@@ -48,7 +49,10 @@ export function PreferencesPage() {
   return (
     <main className="page">
       <form className="sheet-form" onSubmit={submit}>
-        <h2>偏好设置</h2>
+        <h2 className="sheet-form__title">
+          <SlidersIcon className="icon" />
+          <span>偏好设置</span>
+        </h2>
         <label>
           学期开始日期
           <input type="date" value={semesterStart} onChange={(event) => setSemesterStart(event.target.value)} />

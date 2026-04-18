@@ -46,6 +46,7 @@ describe('calendar date shifting', () => {
     vi.spyOn(api, 'listTasks').mockResolvedValue([])
     useCalendarStore.setState({
       currentDate: '2026-03-30',
+      viewMode: 'day',
       courses: [],
       tasks: [],
       isLoading: false,

@@ -25,6 +25,7 @@ export function LoginPage() {
   return (
     <main className="auth-page">
       <h1>登录</h1>
+      <p className="auth-page__subtitle">欢迎回来，继续你的学习计划。</p>
       <form className="auth-form" onSubmit={submit}>
         <label>
           用户名
@@ -39,7 +40,7 @@ export function LoginPage() {
           登录
         </button>
       </form>
-      <p>
+      <p className="auth-page__link">
         还没有账号？<Link to="/register">注册</Link>
       </p>
     </main>

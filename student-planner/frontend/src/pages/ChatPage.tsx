@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, MutableRefObject } from 'react'
 
 import { api, getStoredToken } from '../api/client'
-import type { ChatServerEvent } from '../stores/chatStore'
+import { MicIcon, PlusIcon, SendIcon } from '../components/icons'
+import type { ChatServerEvent, PendingAsk, ToolProgress } from '../stores/chatStore'
 import { useChatStore } from '../stores/chatStore'
 
 type SpeechRecognitionInstance = {
@@ -20,7 +21,15 @@ interface PendingAttachment {
   kind: AttachmentKind
 }
 
-const CHAT_RESPONSE_TIMEOUT_MS = 15000
+interface CoursePreview {
+  name: string
+  timeLine: string | null
+  metaLine: string | null
+}
+
+const CHAT_RESPONSE_TIMEOUT_MS = 30000
+const DEFAULT_CONFIRM_OPTIONS = ['确认', '取消']
+const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 function wsUrl() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -32,7 +41,6 @@ function sendJson(socketRef: MutableRefObject<WebSocket | null>, payload: unknow
     socketRef.current.send(JSON.stringify(payload))
     return true
   }
-
   return false
 }
 
@@ -67,23 +75,217 @@ function detectAttachmentKind(file: File): AttachmentKind | null {
   return null
 }
 
+function asText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed ? trimmed : null
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return null
+}
+
+function pickText(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const maybe = asText(record[key])
+    if (maybe) {
+      return maybe
+    }
+  }
+  return null
+}
+
+function normalizeWeekday(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 7) {
+    return WEEKDAY_LABELS[value - 1] ?? null
+  }
+  const numeric = Number(value)
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 7) {
+    return WEEKDAY_LABELS[numeric - 1] ?? null
+  }
+  return asText(value)
+}
+
+function formatWeekRange(record: Record<string, unknown>) {
+  const weekStart = Number(record.week_start)
+  const weekEnd = Number(record.week_end)
+  if (Number.isFinite(weekStart) && Number.isFinite(weekEnd)) {
+    return `${weekStart}-${weekEnd}周`
+  }
+  return pickText(record, ['week_range', 'week', 'week_text', '周次', '周数'])
+}
+
+function getCourseEntries(data: unknown): unknown[] | null {
+  if (Array.isArray(data)) {
+    return data
+  }
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+  const courses = (data as { courses?: unknown }).courses
+  return Array.isArray(courses) ? courses : null
+}
+
+function toCoursePreview(entry: unknown, index: number): CoursePreview {
+  if (typeof entry === 'string') {
+    return { name: entry.trim() || `课程 ${index + 1}`, timeLine: null, metaLine: null }
+  }
+  if (!entry || typeof entry !== 'object') {
+    return {
+      name: asText(entry) ?? `课程 ${index + 1}`,
+      timeLine: null,
+      metaLine: null,
+    }
+  }
+
+  const record = entry as Record<string, unknown>
+  const name =
+    pickText(record, ['name', 'course_name', 'title', '课程', '课程名', '课程名称', '名称', '科目']) ??
+    `课程 ${index + 1}`
+  const startTime = pickText(record, ['start_time', 'startTime', '开始时间'])
+  const endTime = pickText(record, ['end_time', 'endTime', '结束时间'])
+  const weekdayLabel = normalizeWeekday(record.weekday)
+
+  let timeLine: string | null = null
+  if (weekdayLabel && startTime && endTime) {
+    timeLine = `${weekdayLabel} · ${startTime}-${endTime}`
+  } else {
+    const rowSegments = Object.entries(record)
+      .filter(([key]) => /^周[一二三四五六日天]/.test(key))
+      .map(([key, value]) => {
+        const text = asText(value)
+        return text ? `${key} ${text}` : null
+      })
+      .filter((segment): segment is string => segment !== null)
+    if (rowSegments.length > 0) {
+      timeLine = rowSegments.join(' · ')
+    } else {
+      timeLine = pickText(record, ['time', '时间'])
+    }
+  }
+
+  const metaParts = [
+    pickText(record, ['location', 'classroom', 'place', '地点', '教室', '上课地点']),
+    pickText(record, ['teacher', '教师', '老师']),
+    formatWeekRange(record),
+  ].filter((part): part is string => Boolean(part))
+  const metaLine = metaParts.length > 0 ? metaParts.join(' · ') : null
+
+  return { name, timeLine, metaLine }
+}
+
+function stringifyDetailValue(value: unknown): string {
+  if (value == null) {
+    return '—'
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stringifyDetailValue(item)).join('，')
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, nested]) => `${key}: ${stringifyDetailValue(nested)}`)
+      .join('；')
+  }
+  return String(value)
+}
+
+function isInlineTextAsk(pendingAsk: PendingAsk | null) {
+  return pendingAsk !== null && pendingAsk.type === 'review' && pendingAsk.options.length === 0 && pendingAsk.data == null
+}
+
+function anchorOrder(anchorMessageId: string | null, messageOrderMap: Map<string, number>, tailOrder: number, offset: number) {
+  if (anchorMessageId && messageOrderMap.has(anchorMessageId)) {
+    return (messageOrderMap.get(anchorMessageId) ?? tailOrder) + offset
+  }
+  return tailOrder + offset
+}
+
+function progressSummary(progress: ToolProgress[]) {
+  const total = progress.length
+  const done = progress.filter((item) => item.status === 'done').length
+  const running = progress.find((item) => item.status === 'running') ?? null
+  const current = running ?? progress.at(-1) ?? null
+  const hasRunning = running !== null
+  const fillRaw = total > 0 ? (done / total) * 100 : 0
+  const fillPercent = hasRunning ? Math.max(fillRaw, 40) : fillRaw
+
+  return {
+    total,
+    done,
+    currentLabel: current?.label ?? null,
+    ratio: `${done}/${total}`,
+    fillPercent,
+    hasRunning,
+  }
+}
+
 export function ChatPage() {
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef(0)
   const reconnectTimerRef = useRef<number | null>(null)
   const responseTimeoutRef = useRef<number | null>(null)
-  const { answerAsk, appendUserMessage, applyServerEvent, error, isSending, messages, pendingAsk, progress } =
-    useChatStore()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const {
+    answerAsk,
+    appendUserMessage,
+    applyServerEvent,
+    error,
+    isSending,
+    messages,
+    pendingAsk,
+    progress,
+    progressAnchorMessageId,
+  } = useChatStore()
   const [draft, setDraft] = useState('')
   const [askDraft, setAskDraft] = useState('')
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const hasSpeech = typeof window !== 'undefined' && 'webkitSpeechRecognition' in window
-  const inlineTextAsk =
-    pendingAsk !== null &&
-    pendingAsk.type === 'review' &&
-    pendingAsk.options.length === 0 &&
-    pendingAsk.data == null
+  const inlineTextAsk = isInlineTextAsk(pendingAsk)
+  const shouldRenderAskCard = pendingAsk !== null && !inlineTextAsk && !(pendingAsk.answered && progress.length > 0)
+
+  const messageOrderMap = useMemo(
+    () => new Map(messages.map((message, index) => [message.id, (index + 1) * 10])),
+    [messages],
+  )
+  const tailOrder = messages.length > 0 ? messages.length * 10 : 0
+  const askCardOrder = shouldRenderAskCard ? anchorOrder(pendingAsk.anchorMessageId, messageOrderMap, tailOrder, 0.2) : null
+  const progressCardOrder =
+    progress.length > 0 ? anchorOrder(progressAnchorMessageId, messageOrderMap, tailOrder, 0.1) : null
+  const progressInfo = useMemo(() => progressSummary(progress), [progress])
+  const canSend = draft.trim().length > 0 || pendingAttachments.length > 0
+
+  const coursePreviews = useMemo(() => {
+    if (!pendingAsk || pendingAsk.type !== 'review' || pendingAsk.data == null) {
+      return null
+    }
+    const courseEntries = getCourseEntries(pendingAsk.data)
+    if (!courseEntries) {
+      return null
+    }
+    return courseEntries.map((entry, index) => toCoursePreview(entry, index))
+  }, [pendingAsk])
+
+  const reviewCount = useMemo(() => {
+    if (!pendingAsk || pendingAsk.type !== 'review' || pendingAsk.data == null || !coursePreviews) {
+      return coursePreviews?.length ?? 0
+    }
+    if (typeof pendingAsk.data === 'object' && pendingAsk.data !== null) {
+      const rawCount = (pendingAsk.data as { count?: unknown }).count
+      const numericCount = Number(rawCount)
+      if (Number.isFinite(numericCount) && numericCount > 0) {
+        return numericCount
+      }
+    }
+    return coursePreviews.length
+  }, [coursePreviews, pendingAsk])
 
   function clearResponseTimeout() {
     if (responseTimeoutRef.current !== null) {
@@ -136,7 +338,7 @@ export function ChatPage() {
     connect()
     return () => {
       closed = true
-      if (reconnectTimerRef.current) {
+      if (reconnectTimerRef.current !== null) {
         window.clearTimeout(reconnectTimerRef.current)
       }
       clearResponseTimeout()
@@ -170,8 +372,8 @@ export function ChatPage() {
         setPendingAttachments([])
         setAttachmentError(null)
         startResponseTimeout()
-      } catch (error) {
-        setAttachmentError(error instanceof Error ? error.message : '课表上传失败')
+      } catch (uploadError) {
+        setAttachmentError(uploadError instanceof Error ? uploadError.message : '课表上传失败')
       }
       return
     }
@@ -180,27 +382,18 @@ export function ChatPage() {
       return
     }
 
-    if (inlineTextAsk && !pendingAsk.answered) {
-      const sent = sendJson(socketRef, { answer: message })
-      if (!sent) {
-        applyServerEvent({ type: 'error', message: '聊天连接不可用，请稍后重试' })
-        return
-      }
-
-      appendUserMessage(message)
-      answerAsk(message)
-      setDraft('')
-      startResponseTimeout()
-      return
-    }
-
-    const sent = sendJson(socketRef, { message })
+    const shouldAnswerPendingAsk = pendingAsk !== null && !pendingAsk.answered
+    const payload = shouldAnswerPendingAsk ? { answer: message } : { message }
+    const sent = sendJson(socketRef, payload)
     if (!sent) {
       applyServerEvent({ type: 'error', message: '聊天连接不可用，请稍后重试' })
       return
     }
 
     appendUserMessage(message)
+    if (shouldAnswerPendingAsk) {
+      answerAsk(message)
+    }
     setDraft('')
     startResponseTimeout()
   }
@@ -210,6 +403,7 @@ export function ChatPage() {
     if (!normalized) {
       return
     }
+
     const sent = sendJson(socketRef, { answer: normalized })
     if (!sent) {
       applyServerEvent({ type: 'error', message: '聊天连接不可用，请稍后重试' })
@@ -243,14 +437,14 @@ export function ChatPage() {
       return
     }
 
-    if (nextKind === 'image' && pendingAttachments.filter((attachment) => attachment.kind === 'image').length + files.length > 3) {
+    if (nextKind === 'image' && pendingAttachments.filter((item) => item.kind === 'image').length + files.length > 3) {
       setAttachmentError('最多只能添加 3 张图片')
       return
     }
 
     if (
       nextKind === 'spreadsheet' &&
-      pendingAttachments.filter((attachment) => attachment.kind === 'spreadsheet').length + files.length > 1
+      pendingAttachments.filter((item) => item.kind === 'spreadsheet').length + files.length > 1
     ) {
       setAttachmentError('最多只能添加 1 个表格')
       return
@@ -290,32 +484,109 @@ export function ChatPage() {
     recognition.start()
   }
 
+  function openAttachmentPicker() {
+    fileInputRef.current?.click()
+  }
+
   return (
     <main className="page chat-page">
       <div className="message-list">
-        {messages.map((message) => (
-          <div className={`message message--${message.role}`} key={message.id}>
+        {messages.map((message, index) => (
+          <div
+            className={`message message--${message.role}`}
+            key={message.id}
+            style={{ order: (index + 1) * 10 }}
+          >
             {message.content}
           </div>
         ))}
-        {progress.length > 0 ? (
-          <section className="progress-card" aria-label="处理进度">
-            <strong>{isSending ? '正在处理...' : '处理完成'}</strong>
+
+        {progress.length > 0 && progressCardOrder !== null ? (
+          <section className="progress-card" aria-label="处理进度" style={{ order: progressCardOrder }}>
+            <div className="progress-card__header">
+              <strong>{isSending ? '正在处理...' : '处理完成'}</strong>
+              <span className="progress-card__ratio">{progressInfo.ratio}</span>
+            </div>
+            <div
+              className="progress-card__track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={progressInfo.total}
+              aria-valuenow={progressInfo.done}
+            >
+              <span
+                className={`progress-card__fill${progressInfo.hasRunning ? ' progress-card__fill--running' : ''}`}
+                style={{ width: `${progressInfo.fillPercent}%` }}
+              />
+            </div>
+            <p className="progress-card__hint">
+              当前：{progressInfo.currentLabel ?? (isSending ? '等待确认' : '已完成')}
+            </p>
             {progress.map((item) => (
-              <div key={item.name}>{item.status === 'done' ? '✓' : '…'} {item.label}</div>
+              <div className="progress-card__item" key={item.name}>
+                <span
+                  className={`progress-card__status ${
+                    item.status === 'done' ? 'progress-card__status--done' : 'progress-card__status--running'
+                  }`}
+                  aria-hidden="true"
+                >
+                  {item.status === 'done' ? '✓' : '…'}
+                </span>
+                <span>{item.label}</span>
+              </div>
             ))}
           </section>
         ) : null}
-        {pendingAsk && !inlineTextAsk ? (
-          <section className="ask-card" aria-label="需要确认">
+
+        {shouldRenderAskCard && askCardOrder !== null && pendingAsk ? (
+          <section className="ask-card" aria-label="需要确认" style={{ order: askCardOrder }}>
             <p>{pendingAsk.question}</p>
-            {pendingAsk.data ? <pre>{JSON.stringify(pendingAsk.data, null, 2)}</pre> : null}
+
+            {pendingAsk.type === 'review' && pendingAsk.data != null ? (
+              coursePreviews ? (
+                <section className="ask-card__schedule">
+                  <header className="ask-card__schedule-head">
+                    <strong>识别课程 {reviewCount}</strong>
+                    <span>请确认信息是否正确</span>
+                  </header>
+                  <div className="ask-card__schedule-list" aria-label="识别课程列表">
+                    {coursePreviews.length > 0 ? (
+                      coursePreviews.map((course, index) => (
+                        <article className="ask-card__schedule-item" key={`${course.name}-${index}`}>
+                          <p className="ask-card__schedule-name">{course.name}</p>
+                          {course.timeLine ? <p className="ask-card__schedule-line">{course.timeLine}</p> : null}
+                          {course.metaLine ? (
+                            <p className="ask-card__schedule-line ask-card__schedule-line--muted">{course.metaLine}</p>
+                          ) : null}
+                        </article>
+                      ))
+                    ) : (
+                      <p className="ask-card__schedule-empty">未识别到课程内容，请返回检查文件。</p>
+                    )}
+                  </div>
+                </section>
+              ) : pendingAsk.data && typeof pendingAsk.data === 'object' && !Array.isArray(pendingAsk.data) ? (
+                <dl className="ask-card__kv" aria-label="确认详情">
+                  {Object.entries(pendingAsk.data as Record<string, unknown>)
+                    .filter(([key]) => key !== 'courses')
+                    .map(([key, value]) => (
+                      <div className="ask-card__kv-row" key={key}>
+                        <dt>{key}</dt>
+                        <dd>{stringifyDetailValue(value)}</dd>
+                      </div>
+                    ))}
+                </dl>
+              ) : (
+                <p className="ask-card__plain">{stringifyDetailValue(pendingAsk.data)}</p>
+              )
+            ) : null}
+
             {pendingAsk.answered ? (
               <p>已选择：{pendingAsk.answered}</p>
             ) : (
               <div className="ask-card__actions">
                 {pendingAsk.type === 'confirm' ? (
-                  (pendingAsk.options.length > 0 ? pendingAsk.options : ['确认', '取消']).map((option) => (
+                  (pendingAsk.options.length > 0 ? pendingAsk.options : DEFAULT_CONFIRM_OPTIONS).map((option) => (
                     <button type="button" key={option} onClick={() => submitAnswer(option)}>
                       {option}
                     </button>
@@ -328,10 +599,12 @@ export function ChatPage() {
                       </button>
                     ))
                   ) : (
-                    <p role="alert">选项缺失，请重新发送或联系管理员。</p>
+                    <p role="alert" className="status-inline status-inline--warning">
+                      选项缺失，请重新发送或联系管理员。
+                    </p>
                   )
                 ) : pendingAsk.type === 'review' && pendingAsk.data ? (
-                  (pendingAsk.options.length > 0 ? pendingAsk.options : ['确认', '取消']).map((option) => (
+                  (pendingAsk.options.length > 0 ? pendingAsk.options : DEFAULT_CONFIRM_OPTIONS).map((option) => (
                     <button type="button" key={option} onClick={() => submitAnswer(option)}>
                       {option}
                     </button>
@@ -353,7 +626,12 @@ export function ChatPage() {
             )}
           </section>
         ) : null}
-        {error ? <p role="alert">{error}</p> : null}
+
+        {error ? (
+          <p role="alert" className="status-inline status-inline--error" style={{ order: tailOrder + 9 }}>
+            {error}
+          </p>
+        ) : null}
       </div>
 
       {pendingAttachments.length > 0 ? (
@@ -372,27 +650,47 @@ export function ChatPage() {
         </section>
       ) : null}
 
-      {attachmentError ? <p role="alert">{attachmentError}</p> : null}
+      {attachmentError ? (
+        <p role="alert" className="status-inline status-inline--error">
+          {attachmentError}
+        </p>
+      ) : null}
 
       <form className="chat-input" onSubmit={submit}>
-        <label className="icon-button">
-          附件
-          <input
-            aria-label="上传课表"
-            type="file"
-            accept="image/*,.xls,.xlsx"
-            capture="environment"
-            multiple
-            onChange={uploadSchedule}
-          />
-        </label>
-        <button type="button" className="icon-button" onClick={startSpeech} disabled={!hasSpeech}>
-          语音
+        <button
+          type="button"
+          className="icon-button chat-input__icon-btn"
+          aria-label="语音输入"
+          onClick={startSpeech}
+          disabled={!hasSpeech}
+        >
+          <MicIcon className="icon" />
         </button>
         <input aria-label="输入消息" value={draft} onChange={(event) => setDraft(event.target.value)} />
-        <button type="submit" className="primary-button">
-          发送
-        </button>
+        {canSend ? (
+          <button type="submit" className="primary-button chat-input__action-btn" aria-label="发送消息">
+            <SendIcon className="icon" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="icon-button chat-input__action-btn"
+            aria-label="添加附件"
+            onClick={openAttachmentPicker}
+          >
+            <PlusIcon className="icon" />
+          </button>
+        )}
+        <input
+          ref={fileInputRef}
+          className="chat-input__file-input"
+          aria-label="上传课表"
+          type="file"
+          accept="image/*,.xls,.xlsx"
+          capture="environment"
+          multiple
+          onChange={uploadSchedule}
+        />
       </form>
     </main>
   )

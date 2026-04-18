@@ -19,6 +19,7 @@ export function RegisterPage() {
   return (
     <main className="auth-page">
       <h1>注册</h1>
+      <p className="auth-page__subtitle">创建账号，开启更智能的时间规划。</p>
       <form className="auth-form" onSubmit={submit}>
         <label>
           用户名
@@ -32,7 +33,7 @@ export function RegisterPage() {
           注册
         </button>
       </form>
-      <p>
+      <p className="auth-page__link">
         已有账号？<Link to="/login">登录</Link>
       </p>
     </main>
