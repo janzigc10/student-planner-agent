@@ -4,6 +4,13 @@ import pytest
 
 from app.services.context_compressor import compress_tool_result
 
+LIST_COURSES_PREFIX = "[TOOL_SUMMARY:list_courses:v1] "
+
+
+def _parse_list_courses_summary(compressed: str) -> dict:
+    assert compressed.startswith(LIST_COURSES_PREFIX)
+    return json.loads(compressed[len(LIST_COURSES_PREFIX) :])
+
 
 def test_compress_get_free_slots():
     result = {
@@ -39,15 +46,113 @@ def test_compress_get_free_slots():
 def test_compress_list_courses():
     result = {
         "courses": [
-            {"id": "1", "name": "高数", "teacher": "张", "weekday": 1, "start_time": "08:00", "end_time": "09:40"},
-            {"id": "2", "name": "线代", "teacher": "李", "weekday": 3, "start_time": "10:00", "end_time": "11:40"},
-            {"id": "3", "name": "英语", "teacher": "王", "weekday": 2, "start_time": "08:00", "end_time": "09:40"},
+            {
+                "id": "c3",
+                "name": "自然语言处理",
+                "teacher": "张",
+                "location": "会展-324",
+                "weekday": 4,
+                "start_time": "08:30",
+                "end_time": "10:05",
+            },
+            {
+                "id": "c2",
+                "name": "自然语言处理",
+                "teacher": "李",
+                "location": "会展-305",
+                "weekday": 3,
+                "start_time": "08:30",
+                "end_time": "10:05",
+            },
+            {
+                "id": "c1",
+                "name": "高等数学",
+                "teacher": "王",
+                "location": "厚德楼C206",
+                "weekday": 1,
+                "start_time": "10:20",
+                "end_time": "11:55",
+            },
         ],
         "count": 3,
     }
     compressed = compress_tool_result("list_courses", result)
-    assert "3" in compressed
-    assert "高数" in compressed
+    payload = _parse_list_courses_summary(compressed)
+    assert payload["total"] == 3
+    assert payload["truncated"] is False
+    assert payload["omitted_groups"] == 0
+    assert payload["omitted_options"] == 0
+    assert [group["name"] for group in payload["groups"]] == ["自然语言处理", "高等数学"]
+    options = payload["groups"][0]["options"]
+    assert [option["location"] for option in options] == ["会展-305", "会展-324"]
+    assert set(options[0].keys()) == {
+        "id",
+        "name",
+        "location",
+        "weekday",
+        "start_time",
+        "end_time",
+    }
+
+
+def test_compress_list_courses_is_deterministic_for_same_data():
+    courses = [
+        {
+            "id": "c3",
+            "name": "自然语言处理",
+            "location": "会展-324",
+            "weekday": 4,
+            "start_time": "08:30",
+            "end_time": "10:05",
+        },
+        {
+            "id": "c2",
+            "name": "自然语言处理",
+            "location": "会展-305",
+            "weekday": 3,
+            "start_time": "08:30",
+            "end_time": "10:05",
+        },
+        {
+            "id": "c1",
+            "name": "高等数学",
+            "location": "厚德楼C206",
+            "weekday": 1,
+            "start_time": "10:20",
+            "end_time": "11:55",
+        },
+    ]
+    first = compress_tool_result("list_courses", {"courses": courses, "count": len(courses)})
+    second = compress_tool_result(
+        "list_courses",
+        {"courses": list(reversed(courses)), "count": len(courses)},
+    )
+    assert first == second
+
+
+def test_compress_list_courses_marks_truncated_with_counts():
+    courses = []
+    for group_index in range(12):
+        for option_index in range(3):
+            courses.append(
+                {
+                    "id": f"c-{group_index:02d}-{option_index:02d}",
+                    "name": f"课程{group_index:02d}",
+                    "location": f"教学楼{option_index}",
+                    "weekday": option_index + 1,
+                    "start_time": "08:30",
+                    "end_time": "10:05",
+                }
+            )
+
+    compressed = compress_tool_result("list_courses", {"courses": courses, "count": len(courses)})
+    payload = _parse_list_courses_summary(compressed)
+    assert payload["total"] == len(courses)
+    assert payload["total_groups"] == 12
+    assert payload["returned_groups"] < payload["total_groups"]
+    assert payload["omitted_groups"] == payload["total_groups"] - payload["returned_groups"]
+    assert payload["truncated"] is True
+    assert payload["omitted_options"] > 0
 
 
 def test_compress_list_tasks():

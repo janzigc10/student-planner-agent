@@ -1,8 +1,11 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from app.agent.loop import run_agent_loop
+from app.models.conversation_message import ConversationMessage
+from app.models.course import Course
 from app.models.user import User
 from tests.conftest import TestSession
 
@@ -155,3 +158,126 @@ async def test_ask_user_without_options_or_data_defaults_to_review(setup_db):
             ask_event = await generator.__anext__()
             assert ask_event["type"] == "ask_user"
             assert ask_event["ask_type"] == "review"
+
+
+@pytest.mark.asyncio
+async def test_continue_message_can_reuse_persisted_list_course_summary(setup_db):
+    mock_client = AsyncMock()
+    llm_call_count = 0
+    session_id = "session-delete-continue"
+    target_course_id = "course-target"
+
+    async def mock_chat_completion(client, messages, tools=None):
+        nonlocal llm_call_count
+        llm_call_count += 1
+        if llm_call_count == 1:
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_list",
+                        "type": "function",
+                        "function": {"name": "list_courses", "arguments": "{}"},
+                    }
+                ],
+            }
+        if llm_call_count == 2:
+            return {"role": "assistant", "content": "已经找到了候选课程。"}
+        if llm_call_count == 3:
+            summaries = [
+                str(message.get("content") or "")
+                for message in messages
+                if message.get("role") == "assistant"
+                and str(message.get("content") or "").startswith("[TOOL_SUMMARY:list_courses:v1] ")
+            ]
+            assert summaries, "第二轮没有看到 list_courses 摘要"
+            latest_summary = summaries[-1]
+            assert target_course_id in latest_summary
+            assert "会展-305" in latest_summary
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_delete",
+                        "type": "function",
+                        "function": {
+                            "name": "delete_course",
+                            "arguments": '{"course_id": "course-target"}',
+                        },
+                    }
+                ],
+            }
+        return {"role": "assistant", "content": "已删除会展-305的自然语言处理。"}
+
+    with patch("app.agent.loop.chat_completion", side_effect=mock_chat_completion):
+        async with TestSession() as db:
+            user = User(id="u6", username="test6", hashed_password="x")
+            db.add(user)
+            db.add_all(
+                [
+                    Course(
+                        id=target_course_id,
+                        user_id="u6",
+                        name="自然语言处理",
+                        location="会展-305",
+                        weekday=3,
+                        start_time="08:30",
+                        end_time="10:05",
+                    ),
+                    Course(
+                        id="course-other",
+                        user_id="u6",
+                        name="自然语言处理",
+                        location="会展-324",
+                        weekday=4,
+                        start_time="08:30",
+                        end_time="10:05",
+                    ),
+                ]
+            )
+            await db.commit()
+
+            first_round_events = []
+            generator = run_agent_loop(
+                "帮我删除自然语言处理里会展-305这门课",
+                user,
+                session_id,
+                db,
+                mock_client,
+            )
+            async for event in generator:
+                first_round_events.append(event)
+
+            second_round_events = []
+            generator = run_agent_loop("你继续", user, session_id, db, mock_client)
+            async for event in generator:
+                second_round_events.append(event)
+
+            first_types = [event["type"] for event in first_round_events]
+            assert first_types == ["tool_call", "tool_result", "text", "done"]
+
+            second_types = [event["type"] for event in second_round_events]
+            assert "tool_call" in second_types
+            delete_call = next(
+                event
+                for event in second_round_events
+                if event["type"] == "tool_call" and event["name"] == "delete_course"
+            )
+            assert delete_call["args"] == {"course_id": target_course_id}
+
+            message_result = await db.execute(
+                select(ConversationMessage)
+                .where(ConversationMessage.session_id == session_id)
+                .order_by(ConversationMessage.timestamp)
+            )
+            stored_messages = list(message_result.scalars().all())
+            persisted_summaries = [
+                message
+                for message in stored_messages
+                if message.role == "assistant"
+                and message.is_compressed
+                and message.content.startswith("[TOOL_SUMMARY:list_courses:v1] ")
+            ]
+            assert persisted_summaries

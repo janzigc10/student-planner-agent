@@ -40,6 +40,12 @@ def _normalize_ask_type(result: dict[str, Any]) -> str:
     return ask_type
 
 
+def _to_persisted_tool_summary(tool_name: str, tool_result_content: str) -> str:
+    if tool_result_content.startswith("[TOOL_SUMMARY:"):
+        return tool_result_content
+    return f"[TOOL_SUMMARY:{tool_name}:v1] {tool_result_content}"
+
+
 async def run_agent_loop(
     user_message: str,
     user: User,
@@ -126,6 +132,13 @@ async def run_agent_loop(
                 if "error" in result:
                     error_count[tool_name] = error_count.get(tool_name, 0) + 1
                 yield {"type": "tool_result", "name": tool_name, "result": result}
+                await _save_message(
+                    db,
+                    session_id,
+                    "assistant",
+                    _to_persisted_tool_summary(tool_name, tool_result_content),
+                    is_compressed=True,
+                )
 
             messages.append(
                 {
@@ -143,8 +156,20 @@ async def run_agent_loop(
     yield {"type": "done"}
 
 
-async def _save_message(db: AsyncSession, session_id: str, role: str, content: str) -> None:
-    message = ConversationMessage(session_id=session_id, role=role, content=content)
+async def _save_message(
+    db: AsyncSession,
+    session_id: str,
+    role: str,
+    content: str,
+    *,
+    is_compressed: bool = False,
+) -> None:
+    message = ConversationMessage(
+        session_id=session_id,
+        role=role,
+        content=content,
+        is_compressed=is_compressed,
+    )
     db.add(message)
     await db.commit()
 

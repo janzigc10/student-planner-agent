@@ -1,16 +1,24 @@
 """Compression helpers for tool results and long conversation histories."""
 
 import json
+from collections import defaultdict
+from typing import Any
 
 from app.agent.llm_client import chat_completion
 
 _SMALL_THRESHOLD = 300
 _SUMMARIZE_PROMPT = """请用 1 到 3 句话总结以下较早的对话内容，保留用户做了什么、确认了什么、表达了什么偏好。"""
+_LIST_COURSES_PREFIX = "[TOOL_SUMMARY:list_courses:v1] "
+_MAX_LIST_COURSE_GROUPS = 8
+_MAX_LIST_COURSE_OPTIONS_PER_GROUP = 8
 
 
 def compress_tool_result(tool_name: str, result: dict) -> str:
     if "error" in result:
         return json.dumps(result, ensure_ascii=False)
+
+    if tool_name == "list_courses":
+        return _compress_list_courses(result)
 
     raw = json.dumps(result, ensure_ascii=False)
     if len(raw) < _SMALL_THRESHOLD:
@@ -75,11 +83,49 @@ def _compress_get_free_slots(result: dict) -> str:
 
 def _compress_list_courses(result: dict) -> str:
     courses = result.get("courses", [])
-    count = result.get("count", len(courses))
-    names = ", ".join(course.get("name", "") for course in courses[:5] if course.get("name"))
-    if names:
-        return f"[课程列表] 共 {count} 门课：{names}"
-    return f"[课程列表] 共 {count} 门课"
+    grouped_options: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for course in courses:
+        course_name = _normalize_text(course.get("name"), default="未命名课程")
+        grouped_options[course_name].append(
+            {
+                "id": _normalize_text(course.get("id"), default=""),
+                "name": course_name,
+                "location": _normalize_text(course.get("location"), default="未提供"),
+                "weekday": _normalize_weekday(course.get("weekday")),
+                "start_time": _normalize_text(course.get("start_time"), default=""),
+                "end_time": _normalize_text(course.get("end_time"), default=""),
+            }
+        )
+
+    sorted_group_names = sorted(grouped_options.keys())
+    total_groups = len(sorted_group_names)
+    selected_group_names = sorted_group_names[:_MAX_LIST_COURSE_GROUPS]
+    omitted_groups = max(total_groups - len(selected_group_names), 0)
+    omitted_options = sum(
+        len(grouped_options[group_name]) for group_name in sorted_group_names[len(selected_group_names) :]
+    )
+
+    groups: list[dict[str, Any]] = []
+    for group_name in selected_group_names:
+        options = sorted(grouped_options[group_name], key=_list_course_option_sort_key)
+        if len(options) > _MAX_LIST_COURSE_OPTIONS_PER_GROUP:
+            omitted_options += len(options) - _MAX_LIST_COURSE_OPTIONS_PER_GROUP
+            options = options[:_MAX_LIST_COURSE_OPTIONS_PER_GROUP]
+        groups.append({"name": group_name, "options": options})
+
+    count_value = _normalize_count(result.get("count"), fallback=len(courses))
+    truncated = omitted_groups > 0 or omitted_options > 0
+    summary = {
+        "total": count_value,
+        "total_groups": total_groups,
+        "returned_groups": len(groups),
+        "omitted_groups": omitted_groups,
+        "omitted_options": omitted_options,
+        "truncated": truncated,
+        "groups": groups,
+    }
+    payload = json.dumps(summary, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return f"{_LIST_COURSES_PREFIX}{payload}"
 
 
 def _compress_list_tasks(result: dict) -> str:
@@ -104,3 +150,40 @@ _COMPRESSORS = {
     "list_tasks": _compress_list_tasks,
     "create_study_plan": _compress_create_study_plan,
 }
+
+
+def _normalize_text(value: Any, default: str) -> str:
+    if not isinstance(value, str):
+        return default
+    stripped = value.strip()
+    return stripped or default
+
+
+def _normalize_weekday(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
+def _normalize_count(value: Any, fallback: int) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return fallback
+
+
+def _list_course_option_sort_key(option: dict[str, Any]) -> tuple[str, int, str, str, str]:
+    weekday = option.get("weekday")
+    weekday_value = weekday if isinstance(weekday, int) else 999
+    return (
+        _normalize_text(option.get("location"), default=""),
+        weekday_value,
+        _normalize_text(option.get("start_time"), default=""),
+        _normalize_text(option.get("end_time"), default=""),
+        _normalize_text(option.get("id"), default=""),
+    )
