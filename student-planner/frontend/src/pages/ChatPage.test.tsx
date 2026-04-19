@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -214,7 +214,12 @@ describe('ChatPage attachment drafting', () => {
     fireEvent.click(sendButton)
 
     expect(uploadSchedule).toHaveBeenCalledTimes(1)
-    expect(screen.getByText('正在发送，请稍候…')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'image-parse-bridge' })).toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '18')
+    expect(screen.queryByText('正在发送，请稍候…')).not.toBeInTheDocument()
+    expect(screen.queryByText('已上传，正在调用视觉模型识别课表。')).not.toBeInTheDocument()
+    expect(screen.queryByText('视觉模型处理中')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '待发送附件' })).not.toBeInTheDocument()
 
     await act(async () => {
       if (!resolveUpload) {
@@ -228,6 +233,10 @@ describe('ChatPage attachment drafting', () => {
         courses: [],
       })
       await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: 'image-parse-bridge' })).not.toBeInTheDocument()
     })
   })
 

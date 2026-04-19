@@ -28,6 +28,10 @@ interface CoursePreview {
 }
 
 const CHAT_RESPONSE_TIMEOUT_MS = 30000
+const IMAGE_PARSE_BRIDGE_START = 18
+const IMAGE_PARSE_BRIDGE_MAX = 92
+const IMAGE_PARSE_BRIDGE_TICK_MS = 260
+const IMAGE_PARSE_BRIDGE_FINISH_DELAY_MS = 180
 const DEFAULT_CONFIRM_OPTIONS = ['确认', '取消']
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const COURSE_ENTRY_KEYS = ['courses', 'course_list', 'courseList', '课程列表', '课程清单', '课表列表'] as const
@@ -39,6 +43,11 @@ interface UploadReceiptMeta {
   kind: UploadReceiptKind
   count: number
   text: string
+}
+
+interface ImageParseBridgeState {
+  count: number
+  progress: number
 }
 
 function wsUrl() {
@@ -338,6 +347,7 @@ export function ChatPage() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [isBusySending, setIsBusySending] = useState(false)
+  const [imageParseBridge, setImageParseBridge] = useState<ImageParseBridgeState | null>(null)
   const hasSpeech = typeof window !== 'undefined' && 'webkitSpeechRecognition' in window
   const inlineTextAsk = isInlineTextAsk(pendingAsk)
   const shouldRenderAskCard = pendingAsk !== null && !inlineTextAsk && !(pendingAsk.answered && progress.length > 0)
@@ -352,6 +362,7 @@ export function ChatPage() {
   const askCardOrder = shouldRenderAskCard ? anchorOrder(pendingAsk.anchorMessageId, messageOrderMap, tailOrder, 2) : null
   const progressCardOrder =
     progress.length > 0 ? anchorOrder(progressAnchorMessageId, messageOrderMap, tailOrder, 1) : null
+  const imageParseBridgeOrder = imageParseBridge ? tailOrder + 1 : null
   const progressInfo = useMemo(() => progressSummary(progress), [progress])
   const canSend = draft.trim().length > 0 || pendingAttachments.length > 0
 
@@ -376,6 +387,25 @@ export function ChatPage() {
     }
     return coursePreviews.length
   }, [coursePreviews, pendingAsk])
+
+  useEffect(() => {
+    if (!imageParseBridge) {
+      return
+    }
+    const timerId = window.setInterval(() => {
+      setImageParseBridge((current) => {
+        if (!current) {
+          return current
+        }
+        const delta = current.progress < 48 ? 6 : current.progress < 74 ? 4 : 2
+        const nextProgress = Math.min(IMAGE_PARSE_BRIDGE_MAX, current.progress + delta)
+        return nextProgress === current.progress ? current : { ...current, progress: nextProgress }
+      })
+    }, IMAGE_PARSE_BRIDGE_TICK_MS)
+    return () => {
+      window.clearInterval(timerId)
+    }
+  }, [imageParseBridge?.count])
 
   function clearResponseTimeout() {
     if (responseTimeoutRef.current !== null) {
@@ -468,22 +498,40 @@ export function ChatPage() {
     }
 
     if (attachments.length > 0) {
+      const isImageBatch = attachments[0]?.kind === 'image'
+      let bridgeShouldComplete = false
       lockSending()
+      setPendingAttachments([])
+      if (isImageBatch) {
+        setImageParseBridge({ count: attachments.length, progress: IMAGE_PARSE_BRIDGE_START })
+      }
       try {
         const uploadResponse = await api.uploadSchedule(attachments.map((item) => item.file))
         const sent = sendJson(socketRef, { message: buildAttachmentPrompt(uploadResponse.file_id, uploadResponse.kind) })
         if (!sent) {
+          setPendingAttachments(attachments)
           setAttachmentError('聊天连接不可用，请稍后重试')
           unlockSending()
           return
         }
         appendUserMessage(buildAttachmentConfirmation(uploadResponse.kind, uploadResponse.source_file_count))
-        setPendingAttachments([])
         setAttachmentError(null)
         startResponseTimeout()
+        bridgeShouldComplete = true
       } catch (uploadError) {
+        setPendingAttachments(attachments)
         setAttachmentError(uploadError instanceof Error ? uploadError.message : '课表上传失败')
         unlockSending()
+      } finally {
+        if (isImageBatch) {
+          if (bridgeShouldComplete) {
+            setImageParseBridge((current) => (current ? { ...current, progress: 100 } : current))
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, IMAGE_PARSE_BRIDGE_FINISH_DELAY_MS)
+            })
+          }
+          setImageParseBridge(null)
+        }
       }
       return
     }
@@ -639,6 +687,24 @@ export function ChatPage() {
           })()
         ))}
 
+        {imageParseBridge && imageParseBridgeOrder !== null ? (
+          <section className="progress-card progress-card--image-bridge" aria-label="image-parse-bridge" style={{ order: imageParseBridgeOrder }}>
+            <div className="progress-card__header">
+              <strong>{`正在解析图片${imageParseBridge.count > 1 ? ` (${imageParseBridge.count} 张)` : ''}...`}</strong>
+              <span className="progress-card__ratio">{`${Math.round(imageParseBridge.progress)}%`}</span>
+            </div>
+            <div
+              className="progress-card__track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(imageParseBridge.progress)}
+            >
+              <span className="progress-card__fill progress-card__fill--running" style={{ width: `${imageParseBridge.progress}%` }} />
+            </div>
+          </section>
+        ) : null}
+
         {progress.length > 0 && progressCardOrder !== null ? (
           <section className="progress-card" aria-label="处理进度" style={{ order: progressCardOrder }}>
             <div className="progress-card__header">
@@ -784,7 +850,7 @@ export function ChatPage() {
         ) : null}
       </div>
 
-      {pendingAttachments.length > 0 ? (
+      {pendingAttachments.length > 0 && !imageParseBridge ? (
         <section className="attachment-tray" aria-label="待发送附件">
           <strong>待发送附件 {pendingAttachments.length}</strong>
           <div className="attachment-tray__items">
@@ -806,7 +872,7 @@ export function ChatPage() {
         </p>
       ) : null}
 
-      {isBusySending ? (
+      {isBusySending && !imageParseBridge ? (
         <p role="status" className="status-inline">
           正在发送，请稍候…
         </p>

@@ -460,6 +460,18 @@ a {
   gap: var(--space-2);
 }
 
+.progress-card--image-bridge {
+  box-shadow: none;
+  border-color: rgba(92, 130, 182, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  gap: 6px;
+  padding: 12px 16px;
+}
+
+.progress-card--image-bridge .progress-card__track {
+  height: 4px;
+}
+
 .progress-card__header {
   display: flex;
   align-items: center;
