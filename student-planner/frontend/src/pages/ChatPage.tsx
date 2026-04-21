@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, MutableRefObject } from 'react'
 
 import { api, getStoredToken } from '../api/client'
+import { createClientId } from '../createClientId'
 import { MicIcon, PaperclipIcon, PlusIcon, SendIcon } from '../components/icons'
 import type { ChatServerEvent, PendingAsk, ToolProgress } from '../stores/chatStore'
 import type { ScheduleUploadStatusResponse } from '../types/api'
@@ -778,7 +779,7 @@ export function ChatPage() {
     setPendingAttachments((current) => [
       ...current,
       ...files.map((file) => ({
-        id: crypto.randomUUID(),
+        id: createClientId(),
         file,
         kind: nextKind,
       })),

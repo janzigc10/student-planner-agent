@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createInitialChatState, reduceChatEvent } from './chatStore'
+import { createInitialChatState, reduceChatEvent, useChatStore } from './chatStore'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  useChatStore.setState(createInitialChatState())
+})
 
 describe('chat event reducer', () => {
   it('tracks tool progress from tool_call and tool_result events', () => {
@@ -156,5 +161,30 @@ describe('chat event reducer', () => {
     const streamedMessages = state.messages.filter((message) => message.id === 'stream-2')
     expect(streamedMessages).toHaveLength(1)
     expect(streamedMessages[0]?.content).toBe('Hello world!')
+  })
+
+  it('appends a user message even when crypto.randomUUID is unavailable', () => {
+    vi.stubGlobal('crypto', {} as Crypto)
+
+    expect(() => useChatStore.getState().appendUserMessage('测试消息')).not.toThrow()
+
+    const lastMessage = useChatStore.getState().messages.at(-1)
+    expect(lastMessage).toMatchObject({
+      role: 'user',
+      content: '测试消息',
+    })
+    expect(lastMessage?.id).toMatch(/^client-/)
+  })
+
+  it('creates assistant message ids without crypto.randomUUID when text arrives without message_id', () => {
+    vi.stubGlobal('crypto', {} as Crypto)
+
+    const state = reduceChatEvent(createInitialChatState(), { type: 'text', content: '补充反馈' })
+
+    expect(state.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '补充反馈',
+    })
+    expect(state.messages.at(-1)?.id).toMatch(/^client-/)
   })
 })

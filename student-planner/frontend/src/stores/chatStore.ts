@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+import { createClientId } from '../createClientId'
+
 export type MessageRole = 'assistant' | 'user'
 export type ToolStatus = 'running' | 'done'
 export type AskType = 'confirm' | 'select' | 'review'
@@ -115,7 +117,7 @@ export function reduceChatEvent(state: ChatStateSnapshot, event: ChatServerEvent
       return state
     }
 
-    const messageId = event.message_id ?? state.streamingMessageId ?? crypto.randomUUID()
+    const messageId = event.message_id ?? state.streamingMessageId ?? createClientId()
     const shouldClearAnsweredAsk = Boolean(state.pendingAsk?.answered)
     const messageIndex = state.messages.findIndex((message) => message.id === messageId)
     const nextMessages: ChatMessage[] =
@@ -137,7 +139,7 @@ export function reduceChatEvent(state: ChatStateSnapshot, event: ChatServerEvent
   }
 
   if (event.type === 'text') {
-    const messageId = event.message_id ?? state.streamingMessageId ?? crypto.randomUUID()
+    const messageId = event.message_id ?? state.streamingMessageId ?? createClientId()
     const shouldClearAnsweredAsk = Boolean(state.pendingAsk?.answered)
     const messageIndex = state.messages.findIndex((message) => message.id === messageId)
     const nextMessages: ChatMessage[] =
@@ -166,7 +168,7 @@ export function reduceChatEvent(state: ChatStateSnapshot, event: ChatServerEvent
       progressAnchorMessageId: null,
       isSending: false,
       messages: inlineReviewAsk
-        ? [...state.messages, { id: crypto.randomUUID(), role: 'assistant' as const, content: event.question }]
+        ? [...state.messages, { id: createClientId(), role: 'assistant' as const, content: event.question }]
         : state.messages,
       pendingAsk: {
         question: event.question,
@@ -213,7 +215,7 @@ export const useChatStore = create<ChatStore>((set) => ({
   ...createInitialChatState(),
   appendUserMessage(content) {
     set((state) => ({
-      messages: [...state.messages, { id: crypto.randomUUID(), role: 'user' as const, content }],
+      messages: [...state.messages, { id: createClientId(), role: 'user' as const, content }],
       isSending: true,
       streamingMessageId: null,
       error: null,
