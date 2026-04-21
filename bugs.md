@@ -6,6 +6,7 @@
 - Python 3.12 环境需要保留 `openai` 依赖，认证相关依赖需保持 `bcrypt<5`。
 - 后端全量 `py -3.12 -m pytest -q` 若与前端 `npm test` / `npm run build` 并行执行，测试共享的 SQLite `test.db` 偶发会在 teardown 报 `database is locked`；基线验证请串行跑，若遇到该报错先单独重跑后端全量确认。
 - PWA 真机安装不能直接依赖局域网 HTTP 地址；`http://<LAN-IP>:4173` 下 `navigator.serviceWorker` 不可用，后续 Task 3 需要先准备 HTTPS origin（临时隧道、同域 HTTPS 环境或受信本地证书）。
+- 当前临时 HTTPS 方案使用 Cloudflare Quick Tunnel：地址是随机的 `trycloudflare.com` 子域名，服务重启后 URL 可能变化，且官方明确说明这类 account-less tunnel 没有 uptime guarantee，不适合作为长期正式入口。
 - `rg.exe` 在当前环境可能无法执行，检索时改用 PowerShell 的 `Get-ChildItem` 与 `Select-String`。
 - PowerShell 写文件要避免 UTF-8 with BOM，防止 `pyproject.toml` 等文件解析失败。
 - 首次在该仓库执行 git 操作时，若触发 `dubious ownership`，需要先把 `D:\student_time_plan` 加入 git `safe.directory`。
