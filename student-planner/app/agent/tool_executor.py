@@ -17,10 +17,11 @@ from app.services.memory_service import (
     recall_memories,
 )
 from app.services.reminder_scheduler import (
-    compute_next_course_occurrence,
+    cancel_reminder_job,
     resolve_fire_time,
     schedule_reminder_job,
 )
+from app.services.course_occurrence import course_occurs_on_date, next_course_occurrence
 from app.services.period_converter import convert_periods, normalize_period, parse_time_range
 from app.services.schedule_upload_cache import get_schedule_upload, update_schedule_upload_state
 
@@ -162,6 +163,9 @@ async def _get_free_slots(
 ) -> dict[str, Any]:
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    semester_start = user.current_semester_start if user else None
     weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     days: list[dict[str, Any]] = []
 
@@ -173,7 +177,11 @@ async def _get_free_slots(
         course_result = await db.execute(
             select(Course).where(Course.user_id == user_id, Course.weekday == weekday)
         )
-        courses = list(course_result.scalars().all())
+        courses = [
+            course
+            for course in course_result.scalars().all()
+            if course_occurs_on_date(course, current, semester_start)
+        ]
 
         task_result = await db.execute(
             select(Task).where(
@@ -296,19 +304,248 @@ async def _list_tasks(
     }
 
 
+async def _find_task_conflict(
+    db: AsyncSession,
+    user_id: str,
+    scheduled_date: str,
+    start_time: str,
+    end_time: str,
+    exclude_task_id: str | None = None,
+) -> Task | None:
+    query = select(Task).where(
+        Task.user_id == user_id,
+        Task.scheduled_date == scheduled_date,
+        Task.start_time < end_time,
+        Task.end_time > start_time,
+        Task.status != "skipped",
+    )
+    if exclude_task_id:
+        query = query.where(Task.id != exclude_task_id)
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+def _normalize_reminder_advance_minutes(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("reminder_advance_minutes must be an integer") from exc
+    if minutes < 0:
+        raise ValueError("reminder_advance_minutes must be non-negative")
+    return minutes
+
+
+def _task_event_time(task: Task) -> str:
+    return f"{task.scheduled_date}T{task.start_time}:00"
+
+
+def _task_payload(task: Task) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "description": task.description,
+        "scheduled_date": task.scheduled_date,
+        "start_time": task.start_time,
+        "end_time": task.end_time,
+        "status": task.status,
+    }
+
+
+def _reminder_payload(reminder: Reminder) -> dict[str, Any]:
+    return {
+        "id": reminder.id,
+        "target_type": reminder.target_type,
+        "target_id": reminder.target_id,
+        "remind_at": reminder.remind_at,
+        "advance_minutes": reminder.advance_minutes,
+        "status": reminder.status,
+    }
+
+
+async def _list_task_reminders(
+    db: AsyncSession,
+    user_id: str,
+    task_id: str,
+) -> list[Reminder]:
+    result = await db.execute(
+        select(Reminder).where(
+            Reminder.user_id == user_id,
+            Reminder.target_type == "task",
+            Reminder.target_id == task_id,
+        )
+    )
+    return list(result.scalars().all())
+
+
+def _set_task_reminder_time(
+    reminder: Reminder,
+    task: Task,
+    advance_minutes: int,
+    user_id: str,
+) -> None:
+    fire_time = resolve_fire_time(_task_event_time(task), advance_minutes=advance_minutes)
+    reminder.remind_at = fire_time.isoformat(timespec="seconds")
+    reminder.advance_minutes = advance_minutes
+    reminder.status = "pending"
+    schedule_reminder_job(
+        reminder_id=reminder.id,
+        fire_time=fire_time,
+        user_id=user_id,
+    )
+
+
+async def _sync_task_reminders(
+    db: AsyncSession,
+    user_id: str,
+    task: Task,
+    reminder_advance_minutes: int | None,
+) -> list[Reminder]:
+    reminders = await _list_task_reminders(db, user_id, task.id)
+    if reminder_advance_minutes is None:
+        for reminder in reminders:
+            cancel_reminder_job(reminder.id)
+            await db.delete(reminder)
+        return []
+
+    if not reminders:
+        reminder = Reminder(
+            user_id=user_id,
+            target_type="task",
+            target_id=task.id,
+            remind_at="",
+            advance_minutes=reminder_advance_minutes,
+            status="pending",
+        )
+        db.add(reminder)
+        await db.flush()
+        reminders = [reminder]
+
+    for reminder in reminders:
+        _set_task_reminder_time(
+            reminder=reminder,
+            task=task,
+            advance_minutes=reminder_advance_minutes,
+            user_id=user_id,
+        )
+    return reminders
+
+
+async def _reschedule_existing_task_reminders(
+    db: AsyncSession,
+    user_id: str,
+    task: Task,
+) -> list[Reminder]:
+    reminders = await _list_task_reminders(db, user_id, task.id)
+    for reminder in reminders:
+        _set_task_reminder_time(
+            reminder=reminder,
+            task=task,
+            advance_minutes=reminder.advance_minutes,
+            user_id=user_id,
+        )
+    return reminders
+
+
+async def _create_task(
+    db: AsyncSession,
+    user_id: str,
+    title: str,
+    scheduled_date: str,
+    start_time: str,
+    end_time: str,
+    description: str | None = None,
+    reminder_advance_minutes: int | None = None,
+    **kwargs,
+) -> dict[str, Any]:
+    reminder_minutes = _normalize_reminder_advance_minutes(reminder_advance_minutes)
+    conflict = await _find_task_conflict(
+        db,
+        user_id,
+        scheduled_date=scheduled_date,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    if conflict is not None:
+        return {
+            "error": f"Time conflict with '{conflict.title}' ({conflict.start_time}-{conflict.end_time})"
+        }
+
+    task = Task(
+        user_id=user_id,
+        title=title,
+        description=description,
+        scheduled_date=scheduled_date,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    db.add(task)
+    await db.flush()
+    reminders: list[Reminder] = []
+    if reminder_minutes is not None:
+        reminders = await _sync_task_reminders(db, user_id, task, reminder_minutes)
+    await db.commit()
+    await db.refresh(task)
+    task_summary = _task_payload(task)
+    return {
+        **task_summary,
+        "status": "created",
+        "task": task_summary,
+        "reminders": [_reminder_payload(reminder) for reminder in reminders],
+    }
+
+
 async def _update_task(db: AsyncSession, user_id: str, task_id: str, **kwargs) -> dict[str, Any]:
     result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
     task = result.scalar_one_or_none()
     if task is None:
+        if str(task_id).strip().lower() == "new":
+            return {"error": "Task not found. Use create_task to create a new task first."}
         return {"error": "Task not found"}
+
+    reminder_minutes_was_explicit = "reminder_advance_minutes" in kwargs
+    reminder_minutes = _normalize_reminder_advance_minutes(
+        kwargs.pop("reminder_advance_minutes", None)
+    )
+    new_date = kwargs.get("scheduled_date", task.scheduled_date)
+    new_start = kwargs.get("start_time", task.start_time)
+    new_end = kwargs.get("end_time", task.end_time)
+    time_changed = any(key in kwargs for key in ("scheduled_date", "start_time", "end_time"))
+    if time_changed:
+        conflict = await _find_task_conflict(
+            db,
+            user_id,
+            scheduled_date=new_date,
+            start_time=new_start,
+            end_time=new_end,
+            exclude_task_id=task_id,
+        )
+        if conflict is not None:
+            return {
+                "error": f"Time conflict with '{conflict.title}' ({conflict.start_time}-{conflict.end_time})"
+            }
 
     for key, value in kwargs.items():
         if hasattr(task, key):
             setattr(task, key, value)
 
+    if reminder_minutes_was_explicit:
+        reminders = await _sync_task_reminders(db, user_id, task, reminder_minutes)
+    elif time_changed:
+        reminders = await _reschedule_existing_task_reminders(db, user_id, task)
+    else:
+        reminders = await _list_task_reminders(db, user_id, task.id)
+
     await db.commit()
     await db.refresh(task)
-    return {"id": task.id, "title": task.title, "status": "updated"}
+    task_summary = _task_payload(task)
+    return {
+        **task_summary,
+        "status": "updated",
+        "task": task_summary,
+        "reminders": [_reminder_payload(reminder) for reminder in reminders],
+    }
 
 
 async def _complete_task(db: AsyncSession, user_id: str, task_id: str, **kwargs) -> dict[str, Any]:
@@ -330,6 +567,9 @@ async def _set_reminder(
     advance_minutes: int = 15,
     **kwargs,
 ) -> dict[str, Any]:
+    advance_minutes = _normalize_reminder_advance_minutes(advance_minutes)
+    if advance_minutes is None:
+        advance_minutes = 15
     if target_type == "course":
         result = await db.execute(
             select(Course).where(Course.id == target_id, Course.user_id == user_id)
@@ -337,10 +577,15 @@ async def _set_reminder(
         target = result.scalar_one_or_none()
         if target is None:
             return {"error": "Course not found"}
-        event_time = compute_next_course_occurrence(
-            weekday=target.weekday,
-            start_time=target.start_time,
-        ).isoformat(timespec="seconds")
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+        occurrence = next_course_occurrence(
+            target,
+            user.current_semester_start if user else None,
+        )
+        if occurrence is None:
+            return {"error": "Course has no upcoming active occurrence"}
+        event_time = occurrence.isoformat(timespec="seconds")
     else:
         result = await db.execute(
             select(Task).where(Task.id == target_id, Task.user_id == user_id)
@@ -348,7 +593,16 @@ async def _set_reminder(
         target = result.scalar_one_or_none()
         if target is None:
             return {"error": "Task not found"}
-        event_time = f"{target.scheduled_date}T{target.start_time}:00"
+        reminders = await _sync_task_reminders(db, user_id, target, advance_minutes)
+        await db.commit()
+        reminder = reminders[0] if reminders else None
+        if reminder is None:
+            return {"status": "reminder_removed", "target_type": "task", "target_id": target_id}
+        return {
+            **_reminder_payload(reminder),
+            "status": "reminder_set",
+            "reminder": _reminder_payload(reminder),
+        }
 
     fire_time = resolve_fire_time(event_time, advance_minutes=advance_minutes)
     remind_at = fire_time.isoformat(timespec="seconds")
@@ -372,8 +626,11 @@ async def _set_reminder(
     return {
         "id": reminder.id,
         "status": "reminder_set",
+        "target_type": reminder.target_type,
+        "target_id": reminder.target_id,
         "remind_at": remind_at,
         "advance_minutes": advance_minutes,
+        "reminder": _reminder_payload(reminder),
     }
 
 
@@ -462,6 +719,23 @@ async def _parse_cached_schedule(
             "file_id": file_id,
             "error": cached.error or "\u8bfe\u8868\u89e3\u6790\u5931\u8d25",
             "message": "\u8bfe\u8868\u56fe\u7247\u89e3\u6790\u5931\u8d25\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u540e\u91cd\u8bd5\u3002",
+        }
+    if not cached.courses:
+        update_schedule_upload_state(
+            user_id,
+            file_id,
+            status="READY",
+            missing_periods=[],
+            missing_semester_fields=[],
+            courses=[],
+        )
+        return {
+            "status": "ready",
+            "kind": cached.kind,
+            "courses": [],
+            "count": 0,
+            "message": "没有从这张图片里识别到课程信息，请上传清晰的课表截图后重试。",
+            "file_id": file_id,
         }
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -590,6 +864,8 @@ def _normalize_course_weeks(course_data: dict[str, Any], total_weeks: int) -> No
     if pattern not in {"all", "odd", "even"}:
         pattern = "all"
     course_data["week_pattern"] = pattern
+    if course_data.get("week_text"):
+        return
     if pattern == "odd":
         course_data["week_text"] = f"\u7b2c{start}-{end}\u5468(\u5355\u5468)"
     elif pattern == "even":
@@ -721,7 +997,10 @@ async def _bulk_import_courses(
 ) -> dict[str, Any]:
     created: list[str] = []
     reminders_created = 0
-    advance_minutes = await _default_reminder_minutes(db, user_id)
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    semester_start = user.current_semester_start if user else None
+    advance_minutes = _default_reminder_minutes_from_user(user)
     for course_data in courses:
         start_time = course_data.get("start_time")
         end_time = course_data.get("end_time")
@@ -748,28 +1027,29 @@ async def _bulk_import_courses(
         db.add(course)
         await db.flush()
 
-        event_time = compute_next_course_occurrence(
-            weekday=course.weekday,
-            start_time=course.start_time,
-        ).isoformat(timespec="seconds")
-        fire_time = resolve_fire_time(event_time, advance_minutes=advance_minutes)
-        reminder = Reminder(
-            user_id=user_id,
-            target_type="course",
-            target_id=course.id,
-            remind_at=fire_time.isoformat(timespec="seconds"),
-            advance_minutes=advance_minutes,
-        )
-        db.add(reminder)
-        await db.flush()
+        occurrence = next_course_occurrence(course, semester_start)
+        if occurrence is not None:
+            fire_time = resolve_fire_time(
+                occurrence.isoformat(timespec="seconds"),
+                advance_minutes=advance_minutes,
+            )
+            reminder = Reminder(
+                user_id=user_id,
+                target_type="course",
+                target_id=course.id,
+                remind_at=fire_time.isoformat(timespec="seconds"),
+                advance_minutes=advance_minutes,
+            )
+            db.add(reminder)
+            await db.flush()
 
-        schedule_reminder_job(
-            reminder_id=reminder.id,
-            fire_time=fire_time,
-            user_id=user_id,
-        )
+            schedule_reminder_job(
+                reminder_id=reminder.id,
+                fire_time=fire_time,
+                user_id=user_id,
+            )
+            reminders_created += 1
         created.append(course_data["name"])
-        reminders_created += 1
 
     await db.commit()
     return {
@@ -783,6 +1063,10 @@ async def _bulk_import_courses(
 async def _default_reminder_minutes(db: AsyncSession, user_id: str) -> int:
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
+    return _default_reminder_minutes_from_user(user)
+
+
+def _default_reminder_minutes_from_user(user: User | None) -> int:
     preferences = user.preferences if user else None
     if isinstance(preferences, dict):
         value = preferences.get("default_reminder_minutes")
@@ -854,6 +1138,7 @@ TOOL_HANDLERS = {
     "get_free_slots": _get_free_slots,
     "create_study_plan": _create_study_plan,
     "list_tasks": _list_tasks,
+    "create_task": _create_task,
     "update_task": _update_task,
     "complete_task": _complete_task,
     "set_reminder": _set_reminder,

@@ -176,8 +176,35 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "create_task",
+            "description": "Create one new task in the user's schedule after confirmation. If the user asks for a reminder for this new task, pass reminder_advance_minutes in this same call.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "scheduled_date": {"type": "string", "description": "Date in YYYY-MM-DD format"},
+                    "start_time": {"type": "string", "description": "Start time in HH:MM format"},
+                    "end_time": {"type": "string", "description": "End time in HH:MM format"},
+                    "reminder_advance_minutes": {
+                        "type": "integer",
+                        "description": "Optional lead time in minutes for a task reminder. Use 0 for an at-time reminder.",
+                        "minimum": 0,
+                    },
+                },
+                "required": ["title", "scheduled_date", "start_time", "end_time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_task",
-            "description": "Update one task by task ID.",
+            "description": (
+                "Update one existing task by task ID. Never use this to create a new task. "
+                "Use reminder_advance_minutes to create or change the task reminder; "
+                "pass null to remove/cancel an existing task reminder when the user says no reminder."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -188,6 +215,16 @@ TOOL_DEFINITIONS: list[dict] = [
                     "start_time": {"type": "string", "description": "Start time in HH:MM format"},
                     "end_time": {"type": "string", "description": "End time in HH:MM format"},
                     "status": {"type": "string", "enum": ["pending", "completed", "skipped"]},
+                    "reminder_advance_minutes": {
+                        "type": "integer",
+                        "description": (
+                            "Optional lead time in minutes for the task reminder. "
+                            "Use 0 for an at-time reminder. Pass null to remove/cancel "
+                            "the existing task reminder."
+                        ),
+                        "minimum": 0,
+                        "nullable": True,
+                    },
                 },
                 "required": ["task_id"],
             },

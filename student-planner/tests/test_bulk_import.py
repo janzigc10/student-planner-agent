@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from sqlalchemy import select
 
 import pytest
@@ -149,3 +151,42 @@ async def test_bulk_import_preserves_week_pattern_and_text(setup_db) -> None:
         course = courses_result.scalar_one()
         assert course.week_pattern == "odd"
         assert course.week_text == "Week 1-18 (odd)"
+
+
+@pytest.mark.asyncio
+@patch("app.agent.tool_executor.next_course_occurrence", return_value=None)
+async def test_bulk_import_skips_reminder_when_course_has_no_active_occurrence(
+    mock_occurrence,
+    setup_db,
+) -> None:
+    from tests.conftest import TestSession
+
+    async with TestSession() as db:
+        user = User(id="test-user-5", username="bulktest5", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        result = await execute_tool(
+            "bulk_import_courses",
+            {
+                "courses": [
+                    {
+                        "name": "ended-course",
+                        "weekday": 1,
+                        "start_time": "08:00",
+                        "end_time": "09:40",
+                        "week_start": 1,
+                        "week_end": 1,
+                    }
+                ]
+            },
+            db=db,
+            user_id="test-user-5",
+        )
+
+        assert result["status"] == "imported"
+        assert result["reminders_created"] == 0
+        mock_occurrence.assert_called_once()
+
+        reminders_result = await db.execute(select(Reminder).where(Reminder.user_id == "test-user-5"))
+        assert list(reminders_result.scalars().all()) == []

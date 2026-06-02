@@ -17,6 +17,7 @@ async def chat_completion(
     client: AsyncOpenAI,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: str = "auto",
 ) -> dict[str, Any]:
     """Call the LLM and normalize the response into a serializable dict."""
     kwargs: dict[str, Any] = {
@@ -53,6 +54,7 @@ async def chat_completion_stream(
     client: AsyncOpenAI,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: str = "auto",
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Stream chat completion chunks and emit a normalized final response."""
     kwargs: dict[str, Any] = {
@@ -64,7 +66,7 @@ async def chat_completion_stream(
     }
     if tools:
         kwargs["tools"] = tools
-        kwargs["tool_choice"] = "auto"
+        kwargs["tool_choice"] = tool_choice
 
     stream = await client.chat.completions.create(**kwargs)
 

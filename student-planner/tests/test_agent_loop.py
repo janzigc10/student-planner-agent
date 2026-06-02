@@ -89,6 +89,85 @@ async def test_simple_text_response(setup_db):
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_compresses_persisted_history_before_current_turn(setup_db):
+    mock_client = AsyncMock()
+    session_id = "session-history-compression"
+    llm_messages_by_call: list[list[dict]] = []
+    call_count = 0
+
+    compressed_history = [
+        {"role": "system", "content": "compressed system prompt"},
+        {"role": "user", "content": "[之前的对话摘要] 用户之前持续调整过任务和提醒。"},
+        {"role": "assistant", "content": "最近一轮保留的助手回复。"},
+    ]
+
+    def mock_chat_completion_stream(client, messages, tools=None):
+        nonlocal call_count
+        call_count += 1
+        llm_messages_by_call.append(messages)
+        if call_count == 1:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "list_courses", "arguments": "{}"},
+                        }
+                    ],
+                }
+            )
+        return stream_response_chunks(
+            response={"role": "assistant", "content": "当前没有课程。"},
+        )
+
+    with (
+        patch(
+            "app.agent.loop.compress_conversation_history",
+            new_callable=AsyncMock,
+            return_value=compressed_history,
+        ) as mock_compress,
+        patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
+    ):
+        async with TestSession() as db:
+            user = User(id="u-history-compression", username="history-compression", hashed_password="x")
+            db.add(user)
+            db.add_all(
+                [
+                    ConversationMessage(
+                        session_id=session_id,
+                        role="user" if index % 2 == 0 else "assistant",
+                        content=f"旧消息 {index}",
+                    )
+                    for index in range(30)
+                ]
+            )
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop("看一下当前课表", user, session_id, db, mock_client)
+            async for event in generator:
+                events.append(event)
+
+    assert mock_compress.await_count == 1
+    compressor_input = mock_compress.await_args.args[0]
+    assert any(message.get("content") == "旧消息 0" for message in compressor_input)
+    assert not any(message.get("content") == "看一下当前课表" for message in compressor_input)
+
+    first_llm_messages = llm_messages_by_call[0]
+    assert any("[之前的对话摘要]" in str(message.get("content")) for message in first_llm_messages)
+    assert any(message.get("role") == "user" and message.get("content") == "看一下当前课表" for message in first_llm_messages)
+    assert not any(message.get("content") == "旧消息 0" for message in first_llm_messages)
+
+    second_llm_messages = llm_messages_by_call[1]
+    assert any(message.get("role") == "tool" for message in second_llm_messages)
+    assert any(event["type"] == "tool_call" and event["name"] == "list_courses" for event in events)
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.asyncio
 async def test_tool_call_then_text(setup_db):
     """LLM calls a tool, gets result, then responds with text."""
     mock_client = AsyncMock()
@@ -808,3 +887,53 @@ async def legacy_schedule_import_shortcut_collects_missing_info_and_imports_with
                 ("楂樼瓑鏁板", "08:30", "10:15", "all"),
                 ("鑷劧璇█澶勭悊", "10:20", "11:55", "odd"),
             ]
+
+
+@pytest.mark.asyncio
+async def test_schedule_import_shortcut_handles_empty_image_parse_without_review_card(setup_db):
+    mock_client = AsyncMock()
+
+    with patch(
+        "app.agent.loop.chat_completion_stream",
+        side_effect=AssertionError("LLM should not be called for local schedule import shortcut"),
+    ), patch(
+        "app.agent.loop.chat_completion",
+        side_effect=AssertionError("LLM fallback should not be called for local schedule import shortcut"),
+    ):
+        async with TestSession() as db:
+            user = User(id="u-empty-image", username="empty-image", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            file_id = store_schedule_upload(
+                user_id="u-empty-image",
+                kind="image",
+                courses=[],
+                status="PARSED",
+                progress=100,
+                source_file_count=1,
+            )
+
+            generator = run_agent_loop(
+                f"我上传了一张课表图片 file_id={file_id}，请解析并展示确认卡片。",
+                user,
+                "session-empty-image",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            assert event["type"] == "tool_call"
+            assert event["name"] == "parse_schedule_image"
+
+            event = await generator.__anext__()
+            assert event["type"] == "tool_result"
+            assert event["result"]["status"] == "ready"
+            assert event["result"]["count"] == 0
+
+            text_event = await generator.__anext__()
+            assert text_event["type"] == "text"
+            assert "没有从这张图片里识别到课程信息" in text_event["content"]
+
+            done_event = await generator.__anext__()
+            assert done_event["type"] == "done"
