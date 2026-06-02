@@ -44,7 +44,7 @@ export type ChatServerEvent =
   | { type: 'text_delta'; delta: string; message_id?: string }
   | { type: 'text'; content: string; message_id?: string }
   | { type: 'ask_user'; question: string; ask_type?: AskType; mode?: AskType; options?: string[]; data?: unknown }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: string; recoverable?: boolean }
   | { type: 'done' }
 
 const toolLabels: Record<string, string> = {
@@ -54,6 +54,9 @@ const toolLabels: Record<string, string> = {
   parse_schedule_image: '识别课表图片',
   list_courses: '查看课表',
   list_tasks: '查看任务',
+  create_task: '创建任务',
+  update_task: '更新任务',
+  complete_task: '完成任务',
   set_reminder: '设置提醒',
   recall_memory: '检索记忆',
   ask_user: '等待确认',

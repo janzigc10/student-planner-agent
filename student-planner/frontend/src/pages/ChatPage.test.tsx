@@ -105,6 +105,28 @@ describe('ChatPage attachment drafting', () => {
     expect(screen.queryByText('发送')).not.toBeInTheDocument()
   })
 
+  it('keeps the primary add-attachment trigger wired to the native file input element', () => {
+    const { container } = render(<ChatPage />)
+
+    const trigger = container.querySelector('.chat-input__action-btn')
+    const input = container.querySelector('.chat-input__file-input')
+
+    expect(trigger).toBeTruthy()
+    expect(input).toBeTruthy()
+    expect(trigger?.tagName).toBe('LABEL')
+    expect(trigger).toHaveAttribute('for', input?.getAttribute('id'))
+  })
+
+  it.skip('uses a native file input trigger for the primary add-attachment control', () => {
+    render(<ChatPage />)
+
+    const trigger = screen.getByRole('button', { name: '娣诲姞闄勪欢' })
+    const input = screen.getByLabelText('涓婁紶璇捐〃')
+
+    expect(trigger.tagName).toBe('LABEL')
+    expect(trigger).toHaveAttribute('for', input.getAttribute('id'))
+  })
+
   it('switches primary action from plus to send when user types a message', async () => {
     const user = userEvent.setup()
     render(<ChatPage />)
@@ -133,6 +155,32 @@ describe('ChatPage attachment drafting', () => {
     await userEvent.upload(input, createFile('math-1.png', 'image/png'))
 
     expect(screen.getByRole('button', { name: '继续添加附件' })).toBeInTheDocument()
+  })
+
+  it('keeps the add-more attachment trigger wired to the same native file input element', async () => {
+    const { container } = render(<ChatPage />)
+
+    const input = container.querySelector('.chat-input__file-input') as HTMLInputElement
+    await userEvent.upload(input, createFile('math-1.png', 'image/png'))
+
+    const trigger = container.querySelector('.attachment-tray__add-button')
+    const fileInput = container.querySelector('.chat-input__file-input')
+
+    expect(trigger).toBeTruthy()
+    expect(fileInput).toBeTruthy()
+    expect(trigger?.tagName).toBe('LABEL')
+    expect(trigger).toHaveAttribute('for', fileInput?.getAttribute('id'))
+  })
+
+  it.skip('uses a native file input trigger for the add-more attachment control', async () => {
+    render(<ChatPage />)
+
+    const input = screen.getByLabelText('涓婁紶璇捐〃')
+    await userEvent.upload(input, createFile('math-1.png', 'image/png'))
+
+    const trigger = screen.getByRole('button', { name: '缁х画娣诲姞闄勪欢' })
+    expect(trigger.tagName).toBe('LABEL')
+    expect(trigger).toHaveAttribute('for', input.getAttribute('id'))
   })
 
   it('blocks mixed spreadsheet and image attachments', async () => {

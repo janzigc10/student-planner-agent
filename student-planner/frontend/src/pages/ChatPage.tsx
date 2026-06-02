@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, FormEvent, MutableRefObject } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
 
 import { api, getStoredToken } from '../api/client'
 import { createClientId } from '../createClientId'
@@ -41,6 +41,7 @@ const IMAGE_PARSE_BRIDGE_TICK_MS = 260
 const IMAGE_PARSE_BRIDGE_FINISH_DELAY_MS = 180
 const IMAGE_PARSE_POLL_INTERVAL_MS = 1500
 const IMAGE_PARSE_POLL_TIMEOUT_MS = 90000
+const ATTACHMENT_INPUT_ID = 'chat-attachment-input'
 const DEFAULT_CONFIRM_OPTIONS = ['确认', '取消']
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const COURSE_ENTRY_KEYS = ['courses', 'course_list', 'courseList', '课程列表', '课程清单', '课表列表'] as const
@@ -810,8 +811,31 @@ export function ChatPage() {
     recognition.start()
   }
 
-  function openAttachmentPicker() {
-    fileInputRef.current?.click()
+  function preventAttachmentPicker(event: MouseEvent<HTMLLabelElement>) {
+    event.preventDefault()
+  }
+
+  function handleAttachmentTriggerKeyDown(event: KeyboardEvent<HTMLLabelElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+
+    event.preventDefault()
+    if (isBusySending) {
+      return
+    }
+
+    const input = fileInputRef.current
+    if (!input) {
+      return
+    }
+
+    if (typeof input.showPicker === 'function') {
+      input.showPicker()
+      return
+    }
+
+    input.click()
   }
 
   async function waitForImageParseReady(fileId: string) {
@@ -1054,14 +1078,18 @@ export function ChatPage() {
           <div className="attachment-tray__head">
             <strong>待发送附件 {pendingAttachments.length}</strong>
             {canAddMoreAttachments ? (
-              <button
-                type="button"
+              <label
+                htmlFor={isBusySending ? undefined : ATTACHMENT_INPUT_ID}
                 className="attachment-tray__add-button"
                 aria-label="继续添加附件"
-                onClick={openAttachmentPicker}
+                role="button"
+                aria-disabled={isBusySending}
+                tabIndex={isBusySending ? -1 : 0}
+                onClick={isBusySending ? preventAttachmentPicker : undefined}
+                onKeyDown={handleAttachmentTriggerKeyDown}
               >
                 继续添加
-              </button>
+              </label>
             ) : null}
           </div>
           <div className="attachment-tray__items">
@@ -1105,17 +1133,21 @@ export function ChatPage() {
             <SendIcon className="icon" />
           </button>
         ) : (
-          <button
-            type="button"
-            className="icon-button chat-input__action-btn"
+          <label
+            htmlFor={isBusySending ? undefined : ATTACHMENT_INPUT_ID}
+            className="icon-button chat-input__action-btn chat-input__file-trigger"
             aria-label="添加附件"
-            onClick={openAttachmentPicker}
-            disabled={isBusySending}
+            role="button"
+            aria-disabled={isBusySending}
+            tabIndex={isBusySending ? -1 : 0}
+            onClick={isBusySending ? preventAttachmentPicker : undefined}
+            onKeyDown={handleAttachmentTriggerKeyDown}
           >
             <PlusIcon className="icon" />
-          </button>
+          </label>
         )}
         <input
+          id={ATTACHMENT_INPUT_ID}
           ref={fileInputRef}
           className="chat-input__file-input"
           aria-label="上传课表"

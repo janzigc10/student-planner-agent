@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createInitialChatState, reduceChatEvent, useChatStore } from './chatStore'
+import { createInitialChatState, reduceChatEvent, toolLabel, useChatStore } from './chatStore'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -16,6 +16,12 @@ describe('chat event reducer', () => {
 
     state = reduceChatEvent(state, { type: 'tool_result', name: 'get_free_slots', result: { count: 1 } })
     expect(state.progress[0].status).toBe('done')
+  })
+
+  it('uses concrete labels for task mutation progress', () => {
+    expect(toolLabel('create_task')).toBe('创建任务')
+    expect(toolLabel('update_task')).toBe('更新任务')
+    expect(toolLabel('complete_task')).toBe('完成任务')
   })
 
   it('adds assistant text and stores ask_user cards', () => {
@@ -43,6 +49,19 @@ describe('chat event reducer', () => {
     state = reduceChatEvent(state, { type: 'tool_call', name: 'get_free_slots', args: {} })
     expect(state.error).toBeNull()
     expect(state.progress).toEqual([{ name: 'get_free_slots', label: '查询空闲时间', status: 'running' }])
+  })
+
+  it('accepts recoverable provider error metadata while showing the message', () => {
+    const state = reduceChatEvent(createInitialChatState(), {
+      type: 'error',
+      code: 'llm_provider_unavailable',
+      recoverable: true,
+      message: '模型服务暂时连接不上，刚才的操作还没有执行。请稍后重试，或检查当前网络/模型服务配置。',
+    })
+
+    expect(state.error).toBe('模型服务暂时连接不上，刚才的操作还没有执行。请稍后重试，或检查当前网络/模型服务配置。')
+    expect(state.isSending).toBe(false)
+    expect(state.progress).toEqual([])
   })
 
   it('renders review follow-up asks as assistant text when there is no structured payload', () => {
