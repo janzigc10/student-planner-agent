@@ -50,7 +50,9 @@ async def test_no_memories_still_works(setup_db):
         await db.commit()
 
         context = await build_dynamic_context(user, db)
-        assert "褰撳墠鏃堕棿" in context
+        assert "当前时间" in context
+        assert "褰撳墠鏃堕棿" not in context
+        assert "浠婂ぉ鐨勬棩绋嬶細" not in context
 
 
 @pytest.mark.asyncio

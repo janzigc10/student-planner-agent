@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Iterator
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -11,6 +12,70 @@ from app.database import get_db
 from app.models.user import User
 
 router = APIRouter(tags=["chat"])
+
+LLM_PROVIDER_UNAVAILABLE_CODE = "llm_provider_unavailable"
+LLM_PROVIDER_UNAVAILABLE_MESSAGE = (
+    "模型服务暂时连接不上，刚才的操作还没有执行。"
+    "请稍后重试，或检查当前网络/模型服务配置。"
+)
+GENERIC_CHAT_ERROR_MESSAGE = "聊天暂时不可用，请稍后重试"
+
+
+def _iter_exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _is_llm_provider_unavailable(exc: BaseException) -> bool:
+    provider_error_names = {
+        "APIConnectionError",
+        "APITimeoutError",
+        "APIStatusError",
+        "APIError",
+        "RateLimitError",
+        "InternalServerError",
+    }
+    network_markers = (
+        "apiconnectionerror",
+        "apitimeouterror",
+        "failed to establish",
+        "network is unreachable",
+        "connection refused",
+        "connection reset",
+        "temporary failure",
+        "timed out",
+        "timeout",
+        "winerror 5",
+    )
+
+    for item in _iter_exception_chain(exc):
+        class_name = item.__class__.__name__
+        module_name = item.__class__.__module__
+        if module_name.startswith("openai") and class_name in provider_error_names:
+            return True
+        if isinstance(item, TimeoutError | ConnectionError):
+            return True
+
+        text = f"{class_name}: {item}".lower()
+        if any(marker in text for marker in network_markers):
+            return True
+
+    return False
+
+
+def _chat_error_event(exc: BaseException) -> dict[str, object]:
+    if _is_llm_provider_unavailable(exc):
+        return {
+            "type": "error",
+            "code": LLM_PROVIDER_UNAVAILABLE_CODE,
+            "recoverable": True,
+            "message": LLM_PROVIDER_UNAVAILABLE_MESSAGE,
+        }
+    return {"type": "error", "message": GENERIC_CHAT_ERROR_MESSAGE}
 
 
 @router.websocket("/ws/chat")
@@ -103,11 +168,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     pass
                 except WebSocketDisconnect:
                     return
-                except Exception:
+                except Exception as exc:
                     try:
-                        await websocket.send_json(
-                            {"type": "error", "message": "聊天暂时不可用，请稍后重试"}
-                        )
+                        await websocket.send_json(_chat_error_event(exc))
                     except (RuntimeError, WebSocketDisconnect):
                         return
     except WebSocketDisconnect:

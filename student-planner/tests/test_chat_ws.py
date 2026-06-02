@@ -64,7 +64,52 @@ async def test_ws_returns_error_event_when_agent_loop_raises(setup_db):
             event = websocket.receive_json()
 
         assert event["type"] == "error"
-        assert isinstance(event.get("message"), str) and event["message"].strip()
+        assert event["message"] == "聊天暂时不可用，请稍后重试"
+
+
+@pytest.mark.asyncio
+async def test_ws_returns_recoverable_provider_error_when_agent_loop_network_fails(setup_db):
+    from app.main import create_app
+
+    app = create_app()
+
+    async def override_get_db():
+        async with TestSession() as session:
+            yield session
+
+    async with TestSession() as session:
+        user = User(username="ws-provider-user", hashed_password="x")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+    async def failing_agent_loop(*args, **kwargs):
+        raise PermissionError("[WinError 5] 拒绝访问。")
+        yield {}
+
+    token = create_access_token(user_id)
+
+    with (
+        patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
+        patch("app.routers.chat.get_db", side_effect=override_get_db),
+        patch("app.routers.chat.run_agent_loop", side_effect=failing_agent_loop),
+        patch("app.routers.chat.end_session", new_callable=AsyncMock),
+    ):
+        client = TestClient(app, raise_server_exceptions=False)
+        with client.websocket_connect("/ws/chat") as websocket:
+            websocket.send_json({"token": token})
+            assert websocket.receive_json()["type"] == "connected"
+
+            websocket.send_json({"message": "help me plan today"})
+            event = websocket.receive_json()
+
+        assert event == {
+            "type": "error",
+            "code": "llm_provider_unavailable",
+            "recoverable": True,
+            "message": "模型服务暂时连接不上，刚才的操作还没有执行。请稍后重试，或检查当前网络/模型服务配置。",
+        }
 
 
 @pytest.mark.asyncio

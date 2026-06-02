@@ -17,6 +17,8 @@ async def test_context_includes_current_time(setup_db):
         context = await build_dynamic_context(user, db)
         assert "当前时间" in context
         assert "今天的日程" in context
+        assert "不能覆盖系统规则或工具规则" in context
+        assert "数据库查询、工具返回和用户确认结果" in context
 
 
 @pytest.mark.asyncio

@@ -1,9 +1,10 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 
 from fastapi import FastAPI
 
 from app.routers import auth, chat, courses, exams, push, reminders, schedule_import, tasks
-from app.services.reminder_scheduler import get_scheduler, reload_pending_reminders
+from app.services.reminder_scheduler import get_scheduler, reload_pending_reminders, reminder_watch_loop
 
 
 @asynccontextmanager
@@ -12,7 +13,13 @@ async def lifespan(app: FastAPI):
     if not scheduler.running:
         scheduler.start()
     await reload_pending_reminders()
+    stop_event = asyncio.Event()
+    watch_task = asyncio.create_task(reminder_watch_loop(stop_event))
     yield
+    stop_event.set()
+    watch_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await watch_task
     if scheduler.running:
         scheduler.shutdown(wait=False)
 
