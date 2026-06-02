@@ -1,0 +1,555 @@
+import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
+
+interface DbTask {
+  id: string
+  title: string
+  description: string | null
+  scheduled_date: string
+  start_time: string
+  end_time: string
+  status: string
+}
+
+interface DbReminder {
+  id: string
+  target_type: string
+  target_id: string
+  remind_at: string
+  advance_minutes: number
+  status: string
+}
+
+interface DbSnapshot {
+  username: string
+  user: { id: string; username: string } | null
+  tasks: DbTask[]
+  reminders: DbReminder[]
+  agent_logs: Array<Record<string, unknown>>
+  messages: Array<Record<string, unknown>>
+}
+
+const backendDir = path.resolve(process.cwd(), '..')
+const dbHelper = path.join(backendDir, 'scripts', 'agent_loop_e2e_db.py')
+const python = process.env.AGENT_E2E_PYTHON ?? (process.platform === 'win32' ? 'C:\\Users\\Chen\\anaconda3\\python.exe' : 'python')
+const databaseUrl = process.env.AGENT_E2E_DATABASE_URL ?? 'sqlite+aiosqlite:///./agent_loop_e2e.db'
+const outputDir = path.resolve(process.cwd(), '..', '..', 'output', 'playwright')
+
+function db(command: 'cleanup' | 'snapshot', username: string) {
+  const output = execFileSync(python, [dbHelper, command, username], {
+    cwd: backendDir,
+    env: {
+      ...process.env,
+      SP_DATABASE_URL: databaseUrl,
+      PYTHONIOENCODING: 'utf-8',
+    },
+    encoding: 'utf8',
+  })
+  return output.trim()
+}
+
+function cleanupUser(username: string) {
+  db('cleanup', username)
+}
+
+function snapshot(username: string): DbSnapshot {
+  const raw = db('snapshot', username)
+  return JSON.parse(raw) as DbSnapshot
+}
+
+function scenarioUsername(scenario: string) {
+  const stamp = Date.now().toString(36)
+  return `agent_e2e_${scenario}_${stamp}`
+}
+
+async function installWebSocketRecorder(page: Page) {
+  await page.addInitScript(() => {
+    type RecordedEvent = { direction: 'client' | 'server'; at: string; payload: unknown }
+    const events: RecordedEvent[] = []
+    Object.defineProperty(window, '__agentE2eEvents', {
+      value: events,
+      configurable: true,
+    })
+
+    const NativeWebSocket = window.WebSocket
+    class RecordingWebSocket extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols)
+        this.addEventListener('message', (event) => {
+          let payload: unknown = event.data
+          if (typeof event.data === 'string') {
+            try {
+              payload = JSON.parse(event.data)
+            } catch {
+              payload = event.data
+            }
+          }
+          events.push({ direction: 'server', at: new Date().toISOString(), payload })
+        })
+
+        const originalSend = this.send.bind(this)
+        this.send = ((data: Parameters<WebSocket['send']>[0]) => {
+          let payload: unknown = data
+          if (typeof data === 'string') {
+            try {
+              payload = JSON.parse(data)
+            } catch {
+              payload = data
+            }
+          }
+          events.push({ direction: 'client', at: new Date().toISOString(), payload })
+          return originalSend(data)
+        }) as WebSocket['send']
+      }
+    }
+    window.WebSocket = RecordingWebSocket
+  })
+}
+
+async function registerAndLogin(page: Page, username: string) {
+  const password = 'agent-loop-e2e-password'
+  await page.goto('/register')
+  await page.getByLabel('用户名').fill(username)
+  await page.getByLabel('密码').fill(password)
+  await page.getByRole('button', { name: '注册' }).click()
+  await expect(page.getByRole('heading', { name: '登录' })).toBeVisible()
+
+  await page.getByLabel('用户名').fill(username)
+  await page.getByLabel('密码').fill(password)
+  await page.getByRole('button', { name: '登录' }).click()
+  await expect(page.getByLabel('输入消息')).toBeVisible()
+}
+
+async function sendMessage(page: Page, message: string) {
+  await page.getByLabel('输入消息').fill(message)
+  await page.getByRole('button', { name: '发送消息' }).click()
+}
+
+async function hasInlineAsk(page: Page) {
+  const assistantMessages = page.locator('.message--assistant')
+  const count = await assistantMessages.count()
+  if (count === 0) {
+    return false
+  }
+  const latest = (await assistantMessages.nth(count - 1).innerText()).trim()
+  return /确认|请.*(告诉|补充|输入|确认)|需要.*(日期|时间|提醒|信息)|哪天|几点|是否|吗[？?]?|[？?]$/.test(latest)
+}
+
+async function waitForAskPrompt(page: Page, timeout = 30_000) {
+  const start = Date.now()
+  const askCard = page.locator('section[aria-label="需要确认"]:not(.ask-card--answered)').first()
+  while (Date.now() - start < timeout) {
+    if (await askCard.isVisible().catch(() => false)) {
+      return true
+    }
+    if (await hasInlineAsk(page)) {
+      return true
+    }
+    await page.waitForTimeout(1_000)
+  }
+  return false
+}
+
+async function answerVisibleAsk(page: Page, answer: string, timeout = 20_000) {
+  const askCard = page.locator('section[aria-label="需要确认"]:not(.ask-card--answered)').first()
+  try {
+    await askCard.waitFor({ state: 'visible', timeout })
+  } catch {
+    if (!(await hasInlineAsk(page))) {
+      return false
+    }
+    const mainInput = page.getByLabel('输入消息')
+    if (await mainInput.isVisible().catch(() => false)) {
+      await mainInput.fill(answer)
+      await page.getByRole('button', { name: '发送消息' }).click()
+      return true
+    }
+    return false
+  }
+
+  const answerInput = askCard.getByLabel('回复内容')
+  if (await answerInput.isVisible().catch(() => false)) {
+    await answerInput.fill(answer)
+    await askCard.getByRole('button', { name: '提交' }).click()
+    return true
+  }
+
+  const preferred = askCard.getByRole('button', { name: /^(确认|可以|确定|是)$/ }).first()
+  if (await preferred.isVisible().catch(() => false)) {
+    await preferred.click()
+    return true
+  }
+
+  const firstButton = askCard.getByRole('button').first()
+  if (await firstButton.isVisible().catch(() => false)) {
+    await firstButton.click()
+    return true
+  }
+
+  return false
+}
+
+async function waitForSnapshot(
+  username: string,
+  predicate: (snapshot: DbSnapshot) => boolean,
+  options: { timeout?: number; interval?: number } = {},
+) {
+  const timeout = options.timeout ?? 120_000
+  const interval = options.interval ?? 2_000
+  const start = Date.now()
+  let last = snapshot(username)
+  while (Date.now() - start < timeout) {
+    last = snapshot(username)
+    if (predicate(last)) {
+      return last
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval))
+  }
+  throw new Error(`Timed out waiting for DB invariant. Last snapshot: ${JSON.stringify(last, null, 2)}`)
+}
+
+async function driveUntilDbInvariant(
+  page: Page,
+  username: string,
+  responses: string[],
+  predicate: (snapshot: DbSnapshot) => boolean,
+) {
+  let responseIndex = 0
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const current = snapshot(username)
+    if (predicate(current)) {
+      return current
+    }
+    const answer = responses[Math.min(responseIndex, responses.length - 1)] ?? '确认'
+    const answered = await answerVisibleAsk(page, answer, 15_000)
+    if (answered) {
+      responseIndex += 1
+      continue
+    }
+    await page.waitForTimeout(2_000)
+  }
+  return waitForSnapshot(username, predicate)
+}
+
+async function createTaskFromBrowser(page: Page, body: Record<string, unknown>) {
+  return page.evaluate(async (payload) => {
+    const token = window.localStorage.getItem('student-planner-token')
+    const response = await fetch('/api/tasks/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token ?? ''}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      throw new Error(await response.text())
+    }
+    return response.json()
+  }, body)
+}
+
+async function writeEvidence(
+  page: Page,
+  testInfo: TestInfo,
+  scenario: string,
+  username: string,
+  dbSnapshot: DbSnapshot,
+  assertions: Record<string, unknown>,
+  extraEvidence: Record<string, unknown> = {},
+) {
+  fs.mkdirSync(outputDir, { recursive: true })
+  const safeTitle = testInfo.title.replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '')
+  const baseName = `agent-loop-e2e-${scenario}-${safeTitle}`
+  const screenshotPath = path.join(outputDir, `${baseName}.png`)
+  await page.screenshot({ path: screenshotPath, fullPage: true })
+  const websocketEvents = await page.evaluate(() => {
+    return (window as unknown as { __agentE2eEvents?: unknown[] }).__agentE2eEvents ?? []
+  })
+  const evidencePath = path.join(outputDir, `${baseName}.json`)
+  fs.writeFileSync(
+    evidencePath,
+    JSON.stringify(
+      {
+        scenario,
+        username,
+        assertions,
+        db: dbSnapshot,
+        websocketEvents,
+        screenshotPath,
+        capturedAt: new Date().toISOString(),
+        ...extraEvidence,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+  testInfo.attachments.push({ name: `${scenario} evidence`, path: evidencePath, contentType: 'application/json' })
+}
+
+test.describe('Agent Loop E2E', () => {
+  test('creates a task with an integrated reminder', async ({ page }, testInfo) => {
+    const username = scenarioUsername('create')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    await sendMessage(page, '请帮我创建一个任务：2026年7月26日下午3点到4点复习线性代数，提前30分钟提醒。')
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认'], (state) => {
+      const tasks = state.tasks.filter((task) => task.title.includes('线性代数'))
+      if (tasks.length !== 1) return false
+      const [task] = tasks
+      const reminders = state.reminders.filter((reminder) => reminder.target_id === task.id)
+      return (
+        task.scheduled_date === '2026-07-26' &&
+        task.start_time === '15:00' &&
+        task.end_time === '16:00' &&
+        reminders.length === 1 &&
+        reminders[0]?.advance_minutes === 30 &&
+        reminders[0]?.remind_at === '2026-07-26T14:30:00'
+      )
+    })
+
+    const tasks = dbSnapshot.tasks.filter((task) => task.title.includes('线性代数'))
+    expect(tasks).toHaveLength(1)
+    const reminders = dbSnapshot.reminders.filter((reminder) => reminder.target_id === tasks[0]!.id)
+    expect(reminders).toHaveLength(1)
+    await writeEvidence(page, testInfo, 'create-task-reminder', username, dbSnapshot, {
+      taskId: tasks[0]!.id,
+      reminderId: reminders[0]!.id,
+      expectedReminder: '2026-07-26T14:30:00',
+    })
+  })
+
+  test('updates an existing task and rewrites the old reminder', async ({ page }, testInfo) => {
+    const username = scenarioUsername('update')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+    const seededTask = (await createTaskFromBrowser(page, {
+      title: '线性代数复习',
+      scheduled_date: '2026-07-26',
+      start_time: '15:00',
+      end_time: '16:00',
+      reminder_advance_minutes: 30,
+    })) as { id: string }
+
+    await sendMessage(page, '把刚才那个线性代数复习任务改到2026年7月27日下午4点到5点，提前15分钟提醒。')
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认'], (state) => {
+      const matchingTasks = state.tasks.filter((task) => task.title.includes('线性代数'))
+      if (matchingTasks.length !== 1) return false
+      const [task] = matchingTasks
+      const reminders = state.reminders.filter((reminder) => reminder.target_id === task.id)
+      const hasOldReminder = state.reminders.some((reminder) => reminder.remind_at === '2026-07-26T14:30:00')
+      return (
+        task.id === seededTask.id &&
+        task.scheduled_date === '2026-07-27' &&
+        task.start_time === '16:00' &&
+        task.end_time === '17:00' &&
+        reminders.length === 1 &&
+        reminders[0]?.advance_minutes === 15 &&
+        reminders[0]?.remind_at === '2026-07-27T15:45:00' &&
+        !hasOldReminder
+      )
+    })
+
+    const matchingTasks = dbSnapshot.tasks.filter((task) => task.title.includes('线性代数'))
+    expect(matchingTasks).toHaveLength(1)
+    expect(dbSnapshot.reminders.filter((reminder) => reminder.target_id === seededTask.id)).toHaveLength(1)
+    expect(dbSnapshot.reminders.some((reminder) => reminder.remind_at === '2026-07-26T14:30:00')).toBe(false)
+    await writeEvidence(page, testInfo, 'update-task-reminder', username, dbSnapshot, {
+      taskId: seededTask.id,
+      expectedReminder: '2026-07-27T15:45:00',
+      oldReminderRemoved: true,
+    })
+  })
+
+  test('keeps one task stable across repeated task and reminder updates', async ({ page }, testInfo) => {
+    const username = scenarioUsername('repeated')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+    const seededTask = (await createTaskFromBrowser(page, {
+      title: '概率论复习',
+      scheduled_date: '2026-07-26',
+      start_time: '15:00',
+      end_time: '16:00',
+      reminder_advance_minutes: 30,
+    })) as { id: string }
+    const seededSnapshot = snapshot(username)
+
+    await sendMessage(page, '把概率论复习任务改到2026年7月27日下午4点到5点，提前15分钟提醒。')
+    const afterFirstUpdate = await driveUntilDbInvariant(page, username, ['确认'], (state) => {
+      const matchingTasks = state.tasks.filter((task) => task.title.includes('概率论'))
+      if (matchingTasks.length !== 1) return false
+      const [task] = matchingTasks
+      const reminders = state.reminders.filter((reminder) => reminder.target_id === task.id)
+      const hasSeedReminder = state.reminders.some((reminder) => reminder.remind_at === '2026-07-26T14:30:00')
+      return (
+        task.id === seededTask.id &&
+        task.scheduled_date === '2026-07-27' &&
+        task.start_time === '16:00' &&
+        task.end_time === '17:00' &&
+        reminders.length === 1 &&
+        reminders[0]?.advance_minutes === 15 &&
+        reminders[0]?.remind_at === '2026-07-27T15:45:00' &&
+        !hasSeedReminder
+      )
+    })
+
+    await sendMessage(page, '再把这个概率论复习任务改到2026年7月28日上午9点到10点，不提醒。')
+    const afterSecondUpdate = await driveUntilDbInvariant(page, username, ['确认'], (state) => {
+      const matchingTasks = state.tasks.filter((task) => task.title.includes('概率论'))
+      if (matchingTasks.length !== 1) return false
+      const [task] = matchingTasks
+      const reminders = state.reminders.filter((reminder) => reminder.target_id === task.id)
+      const hasAnyOldReminder = state.reminders.some((reminder) =>
+        ['2026-07-26T14:30:00', '2026-07-27T15:45:00'].includes(reminder.remind_at),
+      )
+      return (
+        task.id === seededTask.id &&
+        task.scheduled_date === '2026-07-28' &&
+        task.start_time === '09:00' &&
+        task.end_time === '10:00' &&
+        reminders.length === 0 &&
+        !hasAnyOldReminder
+      )
+    })
+
+    const matchingTasks = afterSecondUpdate.tasks.filter((task) => task.title.includes('概率论'))
+    expect(matchingTasks).toHaveLength(1)
+    expect(matchingTasks[0]!.id).toBe(seededTask.id)
+    expect(afterSecondUpdate.reminders.filter((reminder) => reminder.target_id === seededTask.id)).toHaveLength(0)
+    expect(
+      afterSecondUpdate.reminders.some((reminder) =>
+        ['2026-07-26T14:30:00', '2026-07-27T15:45:00'].includes(reminder.remind_at),
+      ),
+    ).toBe(false)
+
+    await writeEvidence(
+      page,
+      testInfo,
+      'repeated-task-reminder-updates',
+      username,
+      afterSecondUpdate,
+      {
+        taskId: seededTask.id,
+        reusedSingleTask: true,
+        finalReminderCount: 0,
+        oldRemindersRemoved: true,
+      },
+      {
+        snapshots: {
+          seeded: seededSnapshot,
+          afterFirstUpdate,
+          afterSecondUpdate,
+        },
+      },
+    )
+  })
+
+  test('recovers from missing task parameters before writing to the database', async ({ page }, testInfo) => {
+    const username = scenarioUsername('missing')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    await sendMessage(page, '帮我创建一个复习英语的任务。')
+    const dbSnapshot = await driveUntilDbInvariant(
+      page,
+      username,
+      ['2026年7月28日晚上7点到8点复习英语，提前15分钟提醒。', '确认'],
+      (state) => {
+        const tasks = state.tasks.filter((task) => task.title.includes('英语'))
+        if (tasks.length !== 1) return false
+        const [task] = tasks
+        const reminders = state.reminders.filter((reminder) => reminder.target_id === task.id)
+        return (
+          task.scheduled_date === '2026-07-28' &&
+          task.start_time === '19:00' &&
+          task.end_time === '20:00' &&
+          reminders.length === 1 &&
+          reminders[0]?.advance_minutes === 15 &&
+          reminders[0]?.remind_at === '2026-07-28T18:45:00'
+        )
+      },
+    )
+
+    const tasks = dbSnapshot.tasks.filter((task) => task.title.includes('英语'))
+    expect(tasks).toHaveLength(1)
+    expect(dbSnapshot.reminders.filter((reminder) => reminder.target_id === tasks[0]!.id)).toHaveLength(1)
+    await writeEvidence(page, testInfo, 'missing-params-recovery', username, dbSnapshot, {
+      taskId: tasks[0]!.id,
+      expectedReminder: '2026-07-28T18:45:00',
+    })
+  })
+
+  test('asks for missing exam details before decomposing a vague study plan request', async ({ page }, testInfo) => {
+    const username = scenarioUsername('studyplan-missing')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    await sendMessage(page, '下周有一门考试，帮我拆一下复习任务。')
+    const askedForMoreInfo = await waitForAskPrompt(page)
+    const dbSnapshot = snapshot(username)
+
+    expect(askedForMoreInfo).toBe(true)
+    expect(dbSnapshot.tasks).toHaveLength(0)
+    expect(dbSnapshot.reminders).toHaveLength(0)
+    await writeEvidence(page, testInfo, 'study-plan-missing-details', username, dbSnapshot, {
+      askedForMoreInfo,
+      taskCount: dbSnapshot.tasks.length,
+      reminderCount: dbSnapshot.reminders.length,
+    })
+  })
+
+  test('generates a study plan and writes confirmed review tasks', async ({ page }, testInfo) => {
+    const username = scenarioUsername('studyplan')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    await sendMessage(page, '下周四（2026-06-11）有大学英语3考试，帮我做一个复习计划。')
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认', '确认', '确认'], (state) => {
+      const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
+      const englishTasks = state.tasks.filter((task) => {
+        const haystack = `${task.title}\n${task.description ?? ''}`
+        return /大学英语|英语/.test(haystack)
+      })
+      return (
+        toolNames.includes('get_free_slots') &&
+        toolNames.includes('create_study_plan') &&
+        toolNames.includes('create_task') &&
+        englishTasks.length >= 2 &&
+        englishTasks.every((task) => {
+          return (
+            task.scheduled_date >= '2026-06-03' &&
+            task.scheduled_date <= '2026-06-10' &&
+            /^([01]\d|2[0-3]):[0-5]\d$/.test(task.start_time) &&
+            /^([01]\d|2[0-3]):[0-5]\d$/.test(task.end_time)
+          )
+        })
+      )
+    })
+
+    const toolNames = dbSnapshot.agent_logs.map((log) => String(log.tool_called ?? ''))
+    const englishTasks = dbSnapshot.tasks.filter((task) => /大学英语|英语/.test(`${task.title}\n${task.description ?? ''}`))
+    expect(toolNames).toContain('get_free_slots')
+    expect(toolNames).toContain('create_study_plan')
+    expect(toolNames).toContain('create_task')
+    expect(englishTasks.length).toBeGreaterThanOrEqual(2)
+    expect(
+      englishTasks.every((task) => task.scheduled_date >= '2026-06-03' && task.scheduled_date <= '2026-06-10'),
+    ).toBe(true)
+    await writeEvidence(page, testInfo, 'study-plan-confirmed-write', username, dbSnapshot, {
+      taskCount: englishTasks.length,
+      taskIds: englishTasks.map((task) => task.id),
+      toolSequence: toolNames,
+      expectedExamDate: '2026-06-11',
+    })
+  })
+})

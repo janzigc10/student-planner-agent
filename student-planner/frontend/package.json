@@ -8,6 +8,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:agent-loop": "playwright test -c playwright.agent-loop.config.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

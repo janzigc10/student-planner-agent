@@ -4,8 +4,11 @@ __pycache__/
 *.egg-info/
 test.db
 .runlogs/
+output/
 student-planner/test.db
 student-planner/student_planner.db
+student-planner/agent_loop_e2e*.db
+student-planner/agent_loop_e2e*.db-*
 student-planner/.env
 student-planner/.env.local
 student-planner/frontend/.env
@@ -15,3 +18,7 @@ student-planner/frontend/dist/
 student-planner/frontend/coverage/
 student-planner/frontend/playwright-report/
 student-planner/frontend/test-results/
+student-planner/frontend/smoke-*.err
+student-planner/frontend/smoke-*.log
+student-planner/smoke-*.err
+student-planner/smoke-*.log
