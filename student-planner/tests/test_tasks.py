@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient
+from unittest.mock import patch
 
 
 @pytest.mark.asyncio
@@ -87,3 +88,62 @@ async def test_update_task_conflict(auth_client: AsyncClient):
     task_id = create.json()["id"]
     response = await auth_client.patch(f"/api/tasks/{task_id}", json={"start_time": "15:00", "end_time": "17:00"})
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+@patch("app.routers.tasks.schedule_reminder_job")
+async def test_create_task_with_reminder_creates_task_reminder(mock_schedule, auth_client: AsyncClient):
+    response = await auth_client.post(
+        "/api/tasks/",
+        json={
+            "title": "去吃饭",
+            "scheduled_date": "2026-05-03",
+            "start_time": "10:20",
+            "end_time": "11:00",
+            "reminder_advance_minutes": 0,
+        },
+    )
+    assert response.status_code == 201
+
+    reminders = await auth_client.get("/api/reminders/")
+    assert reminders.status_code == 200
+    payload = reminders.json()
+    assert len(payload) == 1
+    assert payload[0]["target_type"] == "task"
+    assert payload[0]["target_id"] == response.json()["id"]
+    assert payload[0]["remind_at"] == "2026-05-03T10:20:00"
+    assert payload[0]["advance_minutes"] == 0
+    mock_schedule.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("app.routers.tasks.schedule_reminder_job")
+async def test_update_task_time_reschedules_existing_task_reminder(mock_schedule, auth_client: AsyncClient):
+    create = await auth_client.post(
+        "/api/tasks/",
+        json={
+            "title": "去洗澡",
+            "scheduled_date": "2026-05-03",
+            "start_time": "11:01",
+            "end_time": "11:31",
+            "reminder_advance_minutes": 0,
+        },
+    )
+    assert create.status_code == 201
+    task_id = create.json()["id"]
+    mock_schedule.reset_mock()
+
+    response = await auth_client.patch(
+        f"/api/tasks/{task_id}",
+        json={"scheduled_date": "2026-05-03", "start_time": "11:20", "end_time": "11:50"},
+    )
+    assert response.status_code == 200
+
+    reminders = await auth_client.get("/api/reminders/")
+    assert reminders.status_code == 200
+    payload = reminders.json()
+    assert len(payload) == 1
+    assert payload[0]["target_id"] == task_id
+    assert payload[0]["remind_at"] == "2026-05-03T11:20:00"
+    assert payload[0]["advance_minutes"] == 0
+    mock_schedule.assert_called_once()

@@ -26,6 +26,8 @@ def test_send_push_success(mock_webpush):
     assert result.ok is True
     assert result.status_code == 201
     mock_webpush.assert_called_once()
+    assert mock_webpush.call_args.kwargs["timeout"] == 8.0
+    assert mock_webpush.call_args.kwargs["ttl"] == 60 * 60
 
 
 @patch("app.services.push_service.webpush")
@@ -68,3 +70,19 @@ def test_send_push_other_failure(mock_webpush):
 def test_send_push_no_subscription():
     result = send_push(subscription=None, title="Test", body="Test body")
     assert result == PushResult(ok=False, error="No subscription")
+
+
+@patch("app.services.push_service.webpush")
+def test_send_push_generic_exception(mock_webpush):
+    mock_webpush.side_effect = TimeoutError("push timed out")
+
+    result = send_push(
+        subscription=_make_subscription(),
+        title="Test",
+        body="Test body",
+    )
+
+    assert result.ok is False
+    assert result.should_unsubscribe is False
+    assert result.status_code == 0
+    assert "timed out" in result.error

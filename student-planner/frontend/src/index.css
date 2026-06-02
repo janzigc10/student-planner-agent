@@ -130,7 +130,7 @@ a {
 
 .top-bar__calendar-title {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
   align-items: center;
   gap: var(--space-2);
 }
@@ -155,8 +155,8 @@ a {
 }
 
 .top-bar__nav {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -791,7 +791,12 @@ a {
   border-radius: var(--radius-pill);
   font-size: var(--fs-sm);
   font-weight: 600;
+  min-height: 40px;
   padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .attachment-tray__items {
@@ -827,14 +832,36 @@ a {
 }
 
 .chat-input__file-input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chat-input__file-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chat-input__file-trigger[aria-disabled='true'],
+.attachment-tray__add-button[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .chat-input__icon-btn,
 .chat-input__action-btn {
-  width: 42px;
-  height: 42px;
-  min-height: 42px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
   padding: 0;
   border-radius: var(--radius-pill);
 }
@@ -949,8 +976,8 @@ a {
 }
 
 .task-sheet__close {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 1px solid rgba(92, 130, 182, 0.28);
   border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.92);
@@ -1178,8 +1205,14 @@ a {
 .notification-settings button {
   border: 1px solid rgba(92, 130, 182, 0.28);
   border-radius: var(--radius-sm);
-  min-height: 40px;
+  min-height: 44px;
   background: rgba(255, 255, 255, 0.86);
+}
+
+.notification-settings .primary-button {
+  border-color: transparent;
+  background: linear-gradient(140deg, #2f88ff, #1f6fff 60%, #1768ff);
+  color: #fff;
 }
 
 .notification-settings {

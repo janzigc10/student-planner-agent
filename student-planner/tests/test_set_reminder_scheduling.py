@@ -69,7 +69,7 @@ async def test_set_reminder_task_schedules_job(mock_schedule, setup_course_and_t
 
 
 @pytest.mark.asyncio
-@patch("app.agent.tool_executor.compute_next_course_occurrence")
+@patch("app.agent.tool_executor.next_course_occurrence")
 @patch("app.agent.tool_executor.schedule_reminder_job")
 async def test_set_reminder_course_uses_next_occurrence(mock_schedule, mock_occurrence, setup_course_and_task):
     from tests.conftest import TestSession

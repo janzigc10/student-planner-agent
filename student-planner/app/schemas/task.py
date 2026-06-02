@@ -10,6 +10,7 @@ class TaskCreate(BaseModel):
     scheduled_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     start_time: str = Field(pattern=r"^\d{2}:\d{2}$")
     end_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    reminder_advance_minutes: Optional[int] = Field(default=None, ge=0)
 
 
 class TaskUpdate(BaseModel):
@@ -19,6 +20,7 @@ class TaskUpdate(BaseModel):
     start_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     end_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     status: Optional[str] = Field(default=None, pattern=r"^(pending|completed|skipped)$")
+    reminder_advance_minutes: Optional[int] = Field(default=None, ge=0)
 
 
 class TaskOut(BaseModel):

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +9,7 @@ from app.database import get_db
 from app.models.reminder import Reminder
 from app.models.user import User
 from app.schemas.reminder import ReminderCreate, ReminderOut
+from app.services.reminder_scheduler import cancel_reminder_job, schedule_reminder_job
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
 
@@ -21,6 +24,14 @@ async def create_reminder(
     db.add(reminder)
     await db.commit()
     await db.refresh(reminder)
+    fire_time = datetime.fromisoformat(reminder.remind_at)
+    if fire_time <= datetime.now():
+        fire_time = datetime.now()
+    schedule_reminder_job(
+        reminder_id=reminder.id,
+        fire_time=fire_time,
+        user_id=user.id,
+    )
     return reminder
 
 
@@ -45,3 +56,4 @@ async def delete_reminder(
         raise HTTPException(status_code=404, detail="Reminder not found")
     await db.delete(reminder)
     await db.commit()
+    cancel_reminder_job(reminder_id)

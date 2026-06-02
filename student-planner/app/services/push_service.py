@@ -8,6 +8,9 @@ from pywebpush import WebPushException, webpush
 
 from app.config import settings
 
+DEFAULT_PUSH_TIMEOUT_SECONDS = 8.0
+DEFAULT_PUSH_TTL_SECONDS = 60 * 60
+
 
 @dataclass(eq=True)
 class PushResult:
@@ -33,6 +36,8 @@ def send_push(
             data=payload,
             vapid_private_key=settings.vapid_private_key,
             vapid_claims={"sub": settings.vapid_claims_email},
+            timeout=DEFAULT_PUSH_TIMEOUT_SECONDS,
+            ttl=DEFAULT_PUSH_TTL_SECONDS,
         )
         return PushResult(ok=True, status_code=response.status_code)
     except WebPushException as exc:
@@ -41,5 +46,12 @@ def send_push(
             ok=False,
             status_code=status,
             should_unsubscribe=(status == 410),
+            error=str(exc),
+        )
+    except Exception as exc:
+        return PushResult(
+            ok=False,
+            status_code=0,
+            should_unsubscribe=False,
             error=str(exc),
         )

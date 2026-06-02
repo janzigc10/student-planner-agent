@@ -36,3 +36,11 @@ async def unsubscribe(
 @router.get("/vapid-key")
 async def get_vapid_key(user: User = Depends(get_current_user)):
     return {"public_key": settings.vapid_public_key}
+
+
+@router.get("/status")
+async def get_push_status(user: User = Depends(get_current_user)):
+    return {
+        "subscribed": user.push_subscription is not None,
+        "vapid_configured": bool(settings.vapid_public_key and settings.vapid_private_key),
+    }

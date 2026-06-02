@@ -27,7 +27,7 @@ async def setup_import_user(setup_db):
 
 
 @pytest.mark.asyncio
-@patch("app.agent.tool_executor.compute_next_course_occurrence")
+@patch("app.agent.tool_executor.next_course_occurrence")
 @patch("app.agent.tool_executor.schedule_reminder_job")
 async def test_bulk_import_creates_reminders(mock_schedule, mock_occurrence, setup_import_user):
     from tests.conftest import TestSession
@@ -76,7 +76,7 @@ async def test_bulk_import_creates_reminders(mock_schedule, mock_occurrence, set
 
 
 @pytest.mark.asyncio
-@patch("app.agent.tool_executor.compute_next_course_occurrence")
+@patch("app.agent.tool_executor.next_course_occurrence")
 @patch("app.agent.tool_executor.schedule_reminder_job")
 async def test_bulk_import_reminder_stores_trigger_time(mock_schedule, mock_occurrence, setup_import_user):
     from tests.conftest import TestSession

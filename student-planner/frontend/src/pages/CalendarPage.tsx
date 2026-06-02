@@ -22,7 +22,8 @@ function isInteractiveTarget(target: EventTarget | null) {
 const WEEK_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 
 export function CalendarPage() {
-  const semesterStart = useAuthStore((state) => state.user?.current_semester_start ?? null)
+  const user = useAuthStore((state) => state.user)
+  const semesterStart = user?.current_semester_start ?? null
   const {
     completeTask,
     courses,
@@ -44,6 +45,14 @@ export function CalendarPage() {
   const [startTime, setStartTime] = useState('10:00')
   const [endTime, setEndTime] = useState('11:00')
   const [description, setDescription] = useState('')
+  const initialReminderValue = useMemo(() => {
+    const value = user?.preferences?.default_reminder_minutes
+    if (typeof value === 'number' && value >= 0) {
+      return String(value)
+    }
+    return 'none'
+  }, [user?.preferences])
+  const [reminderAdvanceMinutes, setReminderAdvanceMinutes] = useState(initialReminderValue)
   const dayTouchStartXRef = useRef<number | null>(null)
   const monthTouchStartXRef = useRef<number | null>(null)
   const events = useMemo(
@@ -126,9 +135,11 @@ export function CalendarPage() {
       scheduled_date: currentDate,
       start_time: startTime,
       end_time: endTime,
+      reminder_advance_minutes: reminderAdvanceMinutes === 'none' ? null : Number(reminderAdvanceMinutes),
     })
     setTitle('')
     setDescription('')
+    setReminderAdvanceMinutes(initialReminderValue)
     setIsAdding(false)
   }
 
@@ -291,6 +302,16 @@ export function CalendarPage() {
             <label>
               描述
               <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+            </label>
+            <label>
+              提醒
+              <select value={reminderAdvanceMinutes} onChange={(event) => setReminderAdvanceMinutes(event.target.value)}>
+                <option value="none">不提醒</option>
+                <option value="0">准点提醒</option>
+                <option value="15">提前15分钟</option>
+                <option value="30">提前30分钟</option>
+                <option value="60">提前1小时</option>
+              </select>
             </label>
             <button className="primary-button" type="submit">
               保存

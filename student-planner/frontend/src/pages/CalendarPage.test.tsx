@@ -64,6 +64,53 @@ describe('Calendar page integration', () => {
     expect(screen.getByRole('dialog', { name: '添加任务' })).toBeInTheDocument()
   })
 
+  it('submits reminder_advance_minutes together with a new task', async () => {
+    const user = userEvent.setup()
+    const createTaskSpy = vi.spyOn(api, 'createTask').mockResolvedValue({
+      id: 'task-1',
+      user_id: 'user-1',
+      exam_id: null,
+      title: '去洗澡',
+      description: '',
+      scheduled_date: '2026-03-30',
+      start_time: '11:01',
+      end_time: '11:31',
+      status: 'pending',
+    })
+    const { container } = renderCalendarShell()
+
+    await waitFor(() => {
+      expect(api.listTasks).toHaveBeenCalled()
+    })
+
+    await user.click(screen.getByLabelText('添加任务'))
+
+    const panel = container.querySelector('.task-sheet__panel')
+    expect(panel).toBeTruthy()
+    const inputs = panel!.querySelectorAll('input')
+    const textarea = panel!.querySelector('textarea')
+    const select = panel!.querySelector('select')
+    const form = panel as HTMLFormElement
+
+    fireEvent.change(inputs[0]!, { target: { value: '去洗澡' } })
+    fireEvent.change(inputs[1]!, { target: { value: '11:01' } })
+    fireEvent.change(inputs[2]!, { target: { value: '11:31' } })
+    fireEvent.change(textarea!, { target: { value: '' } })
+    fireEvent.change(select!, { target: { value: '0' } })
+    fireEvent.submit(form!)
+
+    await waitFor(() => {
+      expect(createTaskSpy).toHaveBeenCalledWith({
+        title: '去洗澡',
+        description: '',
+        scheduled_date: '2026-03-30',
+        start_time: '11:01',
+        end_time: '11:31',
+        reminder_advance_minutes: 0,
+      })
+    })
+  })
+
   it('switches to the selected day from month view and reloads that day timeline', async () => {
     const user = userEvent.setup()
     renderCalendarShell()

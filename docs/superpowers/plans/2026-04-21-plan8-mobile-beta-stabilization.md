@@ -202,7 +202,7 @@ npm --prefix student-planner/frontend run build
 npm --prefix student-planner/frontend run preview -- --host 0.0.0.0 --port 4173
 ```
 
-- [ ] **Step 2: 在手机上完整验证 PWA 安装链路**
+- [x] **Step 2: 在手机上完整验证 PWA 安装链路**
 
 手机检查项：
 
@@ -212,7 +212,7 @@ npm --prefix student-planner/frontend run preview -- --host 0.0.0.0 --port 4173
 4. 冷启动落到 `/chat`。
 5. 重新构建后能拿到新版本，不会长时间卡旧缓存。
 
-- [ ] **Step 3: 如果 PWA 行为不对，先判断是配置问题还是应用问题**
+- [x] **Step 3: 如果 PWA 行为不对，先判断是配置问题还是应用问题**
 
 判断规则：
 
@@ -230,7 +230,7 @@ self.addEventListener('message', (event) => {
 })
 ```
 
-- [ ] **Step 4: 只做最小 PWA 修补，不重做外壳设计**
+- [x] **Step 4: 只做最小 PWA 修补，不重做外壳设计**
 
 约束：
 
@@ -238,12 +238,18 @@ self.addEventListener('message', (event) => {
 - 不引入新的离线能力范围。
 - 只修安装、启动、更新、图标清晰度、通知跳转这几类验收问题。
 
-- [ ] **Step 5: 重新 build + preview + 手机重验，并把结果写回 `progress.md` / `bugs.md`**
+- [x] **Step 5: 重新 build + preview + 手机重验，并把结果写回 `progress.md` / `bugs.md`**
 
 ```bash
 git add progress.md bugs.md student-planner/frontend/vite.config.ts student-planner/frontend/src/sw.ts student-planner/frontend/src/main.tsx student-planner/frontend/public/pwa.svg
 git commit -m "fix: stabilize pwa install and update flow"
 ```
+
+执行记录：
+
+- 2026-06-01 已完成本机可验证的最小 PWA 修补：`sw.ts` 支持 `SKIP_WAITING`，通知点击会导航现有窗口到 `/chat`，`main.tsx` 在 production 注册时自动接管可用更新。
+- 本机已通过 `npm.cmd run build`，并用 production preview 验证 `manifest.webmanifest=200`、`/chat=200`。
+- 2026-06-01 用户补充确认：手机侧 PWA 安装、启动、更新相关测试已实测 OK。
 
 ### Task 4: 跑手机核心流程 smoke，并把问题分级收口
 
@@ -251,7 +257,7 @@ git commit -m "fix: stabilize pwa install and update flow"
 - Modify: `progress.md`
 - Modify: `bugs.md`
 
-- [ ] **Step 1: 在手机上完整跑一轮核心流程**
+- [x] **Step 1: 在手机上完整跑一轮核心流程**
 
 固定路径：
 
@@ -262,7 +268,7 @@ git commit -m "fix: stabilize pwa install and update flow"
 5. 查看日历
 6. 编辑一门课程
 
-- [ ] **Step 2: 每发现一个问题，立即按统一模板写入 `bugs.md`**
+- [x] **Step 2: 每发现一个问题，立即按统一模板写入 `bugs.md`**
 
 模板：
 
@@ -276,7 +282,7 @@ git commit -m "fix: stabilize pwa install and update flow"
 - 暂定 owner：
 ```
 
-- [ ] **Step 3: 只选择一个最高价值的问题进入下一任务，不并行开多条修复线**
+- [x] **Step 3: 只选择一个最高价值的问题进入下一任务，不并行开多条修复线**
 
 选择顺序：
 
@@ -286,12 +292,17 @@ git commit -m "fix: stabilize pwa install and update flow"
 4. 课表图片异步解析反馈
 5. 视觉微调
 
-- [ ] **Step 4: 更新 `progress.md`，明确“下一步修什么、为什么是它”**
+- [x] **Step 4: 更新 `progress.md`，明确“下一步修什么、为什么是它”**
 
 ```bash
 git add progress.md bugs.md
 git commit -m "docs: record mobile smoke findings"
 ```
+
+执行记录：
+
+- 2026-06-01 用户补充确认：手机核心流程测试已实测 OK，未反馈新的致命或高摩擦问题。
+- 因本轮没有新增手机复现问题，未开启新的并行修复线，下一阶段回到 Agent Loop 闭环稳定性验证。
 
 ### Task 5: 加固 Chat 在“确认后继续处理”之间的衔接体验
 
@@ -305,7 +316,7 @@ git commit -m "docs: record mobile smoke findings"
 - Modify: `student-planner/app/routers/chat.py`
 - Modify: `student-planner/tests/test_chat_ws.py`
 
-- [ ] **Step 1: 先把真机复现到的具体症状写成失败测试**
+- [x] **Step 1: 先把真机复现到的具体症状写成失败测试**
 
 如果复现的是已知问题，优先覆盖这两类场景：
 
@@ -324,7 +335,7 @@ it('does not clear an answered ask before the follow-up activity is visible', ()
 })
 ```
 
-- [ ] **Step 2: 运行 Chat 定向回归，确认测试先失败**
+- [x] **Step 2: 运行 Chat 定向回归，确认测试先失败**
 
 Run:
 
@@ -332,7 +343,7 @@ Run:
 npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx src/stores/chatStore.test.ts
 ```
 
-- [ ] **Step 3: 先做前端最小修补，只有在事件顺序确实有问题时才动后端**
+- [x] **Step 3: 先做前端最小修补，只有在事件顺序确实有问题时才动后端**
 
 优先落点：
 
@@ -346,7 +357,7 @@ npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx src/st
 - 不顺手重做消息列表。
 - 只补“确认后到下一次可见反馈前”的连续感。
 
-- [ ] **Step 4: 跑定向回归；若动了后端，再补 WebSocket 回归**
+- [x] **Step 4: 跑定向回归；若动了后端，再补 WebSocket 回归**
 
 Run:
 
@@ -355,7 +366,7 @@ npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx src/st
 py -3.12 -m pytest tests/test_chat_ws.py -v
 ```
 
-- [ ] **Step 5: 用手机重新验证“点击确认 -> 继续处理 -> 出现下一条反馈”这一段体验**
+- [x] **Step 5: 用手机重新验证“点击确认 -> 继续处理 -> 出现下一条反馈”这一段体验**
 
 通过标准：
 
@@ -363,12 +374,19 @@ py -3.12 -m pytest tests/test_chat_ws.py -v
 - 已选答案不会异常丢失
 - 出错时会解锁发送态并给出提示
 
-- [ ] **Step 6: 更新 `progress.md` / `bugs.md`，然后提交**
+- [x] **Step 6: 更新 `progress.md` / `bugs.md`，然后提交**
 
 ```bash
 git add progress.md bugs.md student-planner/frontend/src/pages/ChatPage.tsx student-planner/frontend/src/pages/ChatPage.test.tsx student-planner/frontend/src/stores/chatStore.ts student-planner/frontend/src/stores/chatStore.test.ts student-planner/app/routers/chat.py student-planner/tests/test_chat_ws.py
 git commit -m "fix: smooth chat confirmation bridge"
 ```
+
+执行记录：
+
+- 2026-06-01 已验证当前前端状态机保留已回答确认卡，直到后续 `text` / `text_delta` / `done` 到达；Chat 页已有“已选择”和“正在继续处理，请稍候…”桥接提示。
+- 本轮补齐 `create_task` / `update_task` / `complete_task` 工具进度标签，减少 Agent Loop 执行时的泛化等待态。
+- 已跑 `npm.cmd test -- src/stores/chatStore.test.ts src/pages/CoursesPage.test.tsx src/pages/ChatPage.test.tsx src/pages/NotificationsPage.test.tsx`，结果 `54 passed, 2 skipped`。
+- 本轮未复现新的 Chat 真机失败症状，沿用既有桥接回归和前端重点回归收口；2026-06-01 用户补充确认手机侧测试 OK。
 
 ### Task 6: 补齐课表图片异步解析的手机反馈
 
@@ -383,7 +401,7 @@ git commit -m "fix: smooth chat confirmation bridge"
 - Modify: `student-planner/tests/test_schedule_import_api.py`
 - Modify: `student-planner/tests/test_schedule_tools.py`
 
-- [ ] **Step 1: 在现有上传轮询测试上补一条失败用例，锁定真机里最别扭的反馈缺口**
+- [x] **Step 1: 在现有上传轮询测试上补一条失败用例，锁定真机里最别扭的反馈缺口**
 
 优先覆盖：
 
@@ -401,7 +419,7 @@ it('keeps the image parse bridge visible until the parsed status is received and
 })
 ```
 
-- [ ] **Step 2: 跑图片上传相关定向回归，确认测试先失败**
+- [x] **Step 2: 跑图片上传相关定向回归，确认测试先失败**
 
 Run:
 
@@ -409,7 +427,7 @@ Run:
 npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx
 ```
 
-- [ ] **Step 3: 先做前端 UI-first 修复；只有接口信息不够时才动后端**
+- [x] **Step 3: 先做前端 UI-first 修复；只有接口信息不够时才动后端**
 
 优先落点：
 
@@ -418,7 +436,7 @@ npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx
 3. `student-planner/frontend/src/types/api.ts`
 4. 只有载荷确实不够时，再改 `student-planner/app/routers/schedule_import.py`
 
-- [ ] **Step 4: 运行前后端定向回归**
+- [x] **Step 4: 运行前后端定向回归**
 
 Run:
 
@@ -427,7 +445,7 @@ npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx src/ap
 py -3.12 -m pytest tests/test_schedule_import_api.py tests/test_schedule_tools.py -v
 ```
 
-- [ ] **Step 5: 在手机上分别用 1 张图和 2 张图重跑上传流程**
+- [x] **Step 5: 在手机上分别用 1 张图和 2 张图重跑上传流程**
 
 通过标准：
 
@@ -435,12 +453,18 @@ py -3.12 -m pytest tests/test_schedule_import_api.py tests/test_schedule_tools.p
 - 解析失败能恢复可重试状态
 - 成功后稳定进入确认卡
 
-- [ ] **Step 6: 更新 `progress.md` / `bugs.md`，然后提交**
+- [x] **Step 6: 更新 `progress.md` / `bugs.md`，然后提交**
 
 ```bash
 git add progress.md bugs.md student-planner/frontend/src/pages/ChatPage.tsx student-planner/frontend/src/pages/ChatPage.test.tsx student-planner/frontend/src/api/client.ts student-planner/frontend/src/types/api.ts student-planner/app/routers/schedule_import.py student-planner/tests/test_schedule_import_api.py student-planner/tests/test_schedule_tools.py
 git commit -m "fix: polish mobile schedule image feedback"
 ```
+
+执行记录：
+
+- 2026-06-01 已确认 Chat 页已有图片解析 bridge、轮询、失败恢复待发附件和相关回归；本轮补上课程页图片上传 `processing` 状态提示，避免异步解析时误报“已解析 0 门课”。
+- 已新增 `CoursesPage.test.tsx` 覆盖图片上传进入后台解析的提示。
+- 本轮未复现新的图片上传失败症状，沿用既有 Chat 图片解析回归和新增课程页提示回归收口；2026-06-01 用户补充确认手机侧测试 OK。
 
 ### Task 7: 做一轮前端视觉细节与触控微调
 
@@ -455,7 +479,7 @@ git commit -m "fix: polish mobile schedule image feedback"
 - Modify: `student-planner/frontend/src/pages/ChatPage.test.tsx`
 - Modify: `student-planner/frontend/src/pages/CalendarPage.test.tsx`
 
-- [ ] **Step 1: 把真机观察到的 UI 问题收敛成最多 5 个明确 tweak**
+- [x] **Step 1: 把真机观察到的 UI 问题收敛成最多 5 个明确 tweak**
 
 允许进入本轮的 tweak 类型：
 
@@ -465,7 +489,7 @@ git commit -m "fix: polish mobile schedule image feedback"
 4. 文案密度
 5. 小屏间距与层级
 
-- [ ] **Step 2: 需要改语义或交互时，先补最窄的失败测试；纯 CSS 微调不强行新增测试**
+- [x] **Step 2: 需要改语义或交互时，先补最窄的失败测试；纯 CSS 微调不强行新增测试**
 
 Run:
 
@@ -473,7 +497,7 @@ Run:
 npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx src/pages/CalendarPage.test.tsx
 ```
 
-- [ ] **Step 3: 只做小范围 CSS / markup 修补，不重开新一轮视觉重构**
+- [x] **Step 3: 只做小范围 CSS / markup 修补，不重开新一轮视觉重构**
 
 约束：
 
@@ -481,7 +505,7 @@ npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx src/pa
 - 不重写页面结构
 - 不引入与当前目标无关的新动效
 
-- [ ] **Step 4: 跑前端回归与构建**
+- [x] **Step 4: 跑前端回归与构建**
 
 Run:
 
@@ -490,14 +514,21 @@ npm --prefix student-planner/frontend test -- src/pages/ChatPage.test.tsx src/pa
 npm --prefix student-planner/frontend run build
 ```
 
-- [ ] **Step 5: 在手机上回看聊天页、日历页、课程页，确认 tweak 确实降低摩擦**
+- [x] **Step 5: 在手机上回看聊天页、日历页、课程页，确认 tweak 确实降低摩擦**
 
-- [ ] **Step 6: 更新 `progress.md` / `bugs.md`，然后提交**
+- [x] **Step 6: 更新 `progress.md` / `bugs.md`，然后提交**
 
 ```bash
 git add progress.md bugs.md student-planner/frontend/src/index.css student-planner/frontend/src/components/AppShell.tsx student-planner/frontend/src/pages/ChatPage.tsx student-planner/frontend/src/pages/CalendarPage.tsx student-planner/frontend/src/pages/CoursesPage.tsx student-planner/frontend/src/pages/ChatPage.test.tsx student-planner/frontend/src/pages/CalendarPage.test.tsx
 git commit -m "fix: tune mobile interaction details"
 ```
+
+执行记录：
+
+- 2026-06-01 本轮只收敛 4 个小 tweak：顶部日历切换按钮触控区、聊天输入按钮触控区、任务弹层关闭按钮触控区、课程/通知按钮触控区。
+- 语义改动只限课程页异步解析提示，并已补测试；纯 CSS 触控尺寸未额外新增快照测试。
+- 已跑前端全量 `npm.cmd test`，结果 `79 passed, 2 skipped`；`npm.cmd run build` 通过。
+- 2026-06-01 用户补充确认：手机侧测试 OK，本轮视觉与触控微调不再列为阻塞。
 
 ### Task 8: 验证推送闭环并给出 Android 封装决策
 
@@ -509,7 +540,7 @@ git commit -m "fix: tune mobile interaction details"
 - Modify: `student-planner/app/routers/push.py`
 - Create: `docs/superpowers/specs/2026-04-21-android-packaging-evaluation.md`
 
-- [ ] **Step 1: 只有在 Task 1 至 Task 7 稳定后，才进入移动推送验证**
+- [x] **Step 1: 只有在 Task 1 至 Task 7 稳定后，才进入移动推送验证**
 
 手机检查项：
 
@@ -518,7 +549,7 @@ git commit -m "fix: tune mobile interaction details"
 3. 触发一条测试通知
 4. 点击通知后回到正确页面
 
-- [ ] **Step 2: 若推送闭环有问题，先补最小回归，再做最小修复**
+- [x] **Step 2: 若推送闭环有问题，先补最小回归，再做最小修复**
 
 优先级：
 
@@ -526,7 +557,7 @@ git commit -m "fix: tune mobile interaction details"
 2. `student-planner/frontend/src/pages/NotificationsPage.tsx`
 3. `student-planner/app/routers/push.py`
 
-- [ ] **Step 3: 补写 Android 封装评估结论，明确是继续 PWA、走 TWA 还是走 Capacitor**
+- [x] **Step 3: 补写 Android 封装评估结论，明确是继续 PWA、走 TWA 还是走 Capacitor**
 
 Write to `docs/superpowers/specs/2026-04-21-android-packaging-evaluation.md`:
 
@@ -541,9 +572,15 @@ Write to `docs/superpowers/specs/2026-04-21-android-packaging-evaluation.md`:
 ## Not Doing Yet
 ```
 
-- [ ] **Step 4: 更新 `progress.md`，把项目下一阶段切到“推送收尾”或“封装预研”**
+- [x] **Step 4: 更新 `progress.md`，把项目下一阶段切到“推送收尾”或“封装预研”**
 
 ```bash
 git add progress.md bugs.md student-planner/frontend/src/sw.ts student-planner/frontend/src/pages/NotificationsPage.tsx student-planner/app/routers/push.py docs/superpowers/specs/2026-04-21-android-packaging-evaluation.md
 git commit -m "docs: decide next mobile delivery track"
 ```
+
+执行记录：
+
+- 2026-06-01 本轮完成可本机落地的推送点击修补：通知点击会导航已有窗口到 `/chat`，避免只聚焦旧页面。
+- 已补写 `docs/superpowers/specs/2026-04-21-android-packaging-evaluation.md`，结论为继续 PWA，TWA 作为 PWA 稳定后的最小 Android 包装候选，不现在引入 Capacitor。
+- 2026-06-01 用户补充确认：手机侧测试 OK；Plan 8 移动端收尾完成，下一阶段不进入封装预研，主线回到 Agent Loop 闭环稳定性验证。

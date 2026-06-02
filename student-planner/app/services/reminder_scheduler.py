@@ -16,6 +16,7 @@ from app.models.user import User
 from app.services.push_service import send_push
 
 RETRY_DELAYS = [1, 5, 15]
+REMINDER_SWEEP_INTERVAL_SECONDS = 15
 _scheduler: AsyncIOScheduler | None = None
 
 
@@ -87,6 +88,10 @@ def schedule_reminder_job(
     attempt: int = 0,
 ) -> Any:
     scheduler = get_scheduler()
+    if not scheduler.running:
+        scheduler.start()
+    if fire_time <= datetime.now():
+        fire_time = datetime.now()
     job_id = f"reminder:{reminder_id}"
     if attempt > 0:
         job_id = f"reminder:{reminder_id}:retry{attempt}"
@@ -194,3 +199,32 @@ async def reload_pending_reminders() -> int:
             )
             count += 1
     return count
+
+
+async def deliver_due_reminders(now: datetime | None = None) -> int:
+    current = now or datetime.now()
+    due: list[tuple[str, str]] = []
+
+    async with async_session() as db:
+        result = await db.execute(select(Reminder).where(Reminder.status == "pending"))
+        reminders = list(result.scalars().all())
+        for reminder in reminders:
+            if datetime.fromisoformat(reminder.remind_at) <= current:
+                due.append((reminder.id, reminder.user_id))
+
+    for reminder_id, user_id in due:
+        await fire_reminder(reminder_id=reminder_id, user_id=user_id)
+
+    return len(due)
+
+
+async def reminder_watch_loop(
+    stop_event: asyncio.Event,
+    interval_seconds: int = REMINDER_SWEEP_INTERVAL_SECONDS,
+) -> None:
+    while not stop_event.is_set():
+        await deliver_due_reminders()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except asyncio.TimeoutError:
+            continue

@@ -31,6 +31,24 @@ def test_schedule_reminder_job_adds_job():
     scheduler.remove_job(job.id)
 
 
+def test_schedule_reminder_job_starts_scheduler_when_stopped():
+    scheduler = get_scheduler()
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+
+    fire_time = datetime.now() + timedelta(hours=1)
+    job = schedule_reminder_job(
+        reminder_id="rem-start-1",
+        fire_time=fire_time,
+        user_id="user-456",
+    )
+
+    assert scheduler.running is True
+    assert job.id == "reminder:rem-start-1"
+
+    scheduler.remove_job(job.id)
+
+
 def test_cancel_reminder_job():
     scheduler = get_scheduler()
     if not scheduler.running:

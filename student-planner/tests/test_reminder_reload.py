@@ -1,3 +1,4 @@
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
@@ -68,3 +69,16 @@ async def test_reload_pending_reminders_uses_stored_trigger_time(mock_schedule, 
     assert {first_call["reminder_id"], second_call["reminder_id"]} == {"rem-reload-1", "rem-reload-2"}
     scheduled_times = {first_call["fire_time"].isoformat(), second_call["fire_time"].isoformat()}
     assert scheduled_times == {"2099-04-05T09:30:00", "2099-04-05T13:45:00"}
+
+
+@pytest.mark.asyncio
+@patch("app.services.reminder_scheduler.fire_reminder")
+async def test_deliver_due_reminders_only_dispatches_overdue_pending(mock_fire, setup_pending_reminders):
+    from tests.conftest import TestSession
+    from app.services.reminder_scheduler import deliver_due_reminders
+
+    with patch("app.services.reminder_scheduler.async_session", TestSession):
+        count = await deliver_due_reminders(now=datetime.fromisoformat("2099-04-05T12:00:00"))
+
+    assert count == 1
+    mock_fire.assert_called_once_with(reminder_id="rem-reload-1", user_id="user-reload-1")

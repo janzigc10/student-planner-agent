@@ -139,13 +139,19 @@ export const api = {
     start_time: string
     end_time: string
     exam_id?: string
+    reminder_advance_minutes?: number | null
   }) {
     return request<Task>('/api/tasks/', {
       method: 'POST',
       body: JSON.stringify(body),
     })
   },
-  updateTask(taskId: string, body: Partial<Pick<Task, 'title' | 'description' | 'scheduled_date' | 'start_time' | 'end_time' | 'status'>>) {
+  updateTask(
+    taskId: string,
+    body: Partial<Pick<Task, 'title' | 'description' | 'scheduled_date' | 'start_time' | 'end_time' | 'status'>> & {
+      reminder_advance_minutes?: number | null
+    },
+  ) {
     return request<Task>(`/api/tasks/${taskId}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
@@ -153,6 +159,9 @@ export const api = {
   },
   getVapidKey() {
     return request<{ public_key: string }>('/api/push/vapid-key')
+  },
+  getPushStatus() {
+    return request<{ subscribed: boolean; vapid_configured: boolean }>('/api/push/status')
   },
   subscribePush(subscription: PushSubscriptionJSON) {
     return request<{ status: string }>('/api/push/subscribe', {
