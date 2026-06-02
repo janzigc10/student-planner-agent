@@ -264,3 +264,35 @@ async def test_parse_schedule_image_returns_failed_status_when_background_parse_
 
         assert result["status"] == "failed"
         assert result["error"] == "vision parser down"
+
+
+@pytest.mark.asyncio
+async def test_parse_schedule_image_empty_courses_does_not_request_semester_meta(
+    setup_db,
+) -> None:
+    from tests.conftest import TestSession
+
+    async with TestSession() as db:
+        user = User(id="schedule-user-empty-image", username="scheduleuser-empty", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        file_id = store_schedule_upload(
+            user_id="schedule-user-empty-image",
+            kind="image",
+            courses=[],
+            status="PARSED",
+            progress=100,
+        )
+
+        result = await execute_tool(
+            "parse_schedule_image",
+            {"file_id": file_id},
+            db=db,
+            user_id="schedule-user-empty-image",
+        )
+
+        assert result["status"] == "ready"
+        assert result["count"] == 0
+        assert result["courses"] == []
+        assert "没有从这张图片里识别到课程信息" in result["message"]

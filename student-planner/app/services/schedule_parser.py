@@ -480,6 +480,7 @@ def _looks_like_week_line(text: str) -> bool:
 
 def _parse_week_info(text: str) -> tuple[int, int, str, str] | None:
     source = _normalize_week_source(text)
+    week_numbers: list[int] = []
 
     week_match = _WEEK_RANGE_RE.search(source)
     if week_match:
@@ -514,6 +515,7 @@ def _parse_week_info(text: str) -> tuple[int, int, str, str] | None:
 
         if not numbers:
             return None
+        week_numbers = sorted(set(numbers))
         week_start = min(numbers)
         week_end = max(numbers)
 
@@ -525,10 +527,22 @@ def _parse_week_info(text: str) -> tuple[int, int, str, str] | None:
         week_pattern = "odd"
     elif "双周" in source or "偶数周" in source or "鍙屽懆" in text or "even" in lowered:
         week_pattern = "even"
+    elif _is_complete_parity_sequence(week_numbers, parity=1):
+        week_pattern = "odd"
+    elif _is_complete_parity_sequence(week_numbers, parity=0):
+        week_pattern = "even"
     else:
         week_pattern = "all"
 
     return week_start, week_end, week_pattern, text.strip() or _build_week_text(week_start, week_end, week_pattern)
+
+
+def _is_complete_parity_sequence(numbers: list[int], parity: int) -> bool:
+    if len(numbers) < 2:
+        return False
+    if any(number % 2 != parity for number in numbers):
+        return False
+    return numbers == list(range(numbers[0], numbers[-1] + 1, 2))
 
 
 def _parse_week_range(text: str) -> tuple[int, int] | None:

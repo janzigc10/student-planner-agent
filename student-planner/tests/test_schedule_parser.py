@@ -221,3 +221,27 @@ def test_parse_supports_odd_even_and_single_week_expressions() -> None:
     assert single_week.week_end == 1
     assert single_week.week_pattern == "all"
     assert single_week.week_text == "\u7b2c1\u5468"
+
+
+def test_parse_infers_odd_pattern_from_comma_week_list() -> None:
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "course-table"
+    sheet["A1"] = "period"
+    sheet["B1"] = "monday"
+    sheet["A2"] = "1-2"
+    week_text = "3,5,7,9,11,13,15,17([\u5468])[01-02\u8282]"
+    sheet["B2"] = f"discrete-odd\nTeacher D\nD101\n{week_text}"
+
+    stream = BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    stream.seek(0)
+
+    courses = parse_excel_schedule(stream)
+    course = next(course for course in courses if course.name == "discrete-odd")
+
+    assert course.week_start == 3
+    assert course.week_end == 17
+    assert course.week_pattern == "odd"
+    assert course.week_text == week_text

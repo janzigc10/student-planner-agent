@@ -28,6 +28,10 @@ export function CoursesPage() {
     const file = event.target.files?.[0]
     if (!file) return
     const result = await api.uploadSchedule(file)
+    if (result.kind === 'image' && result.status === 'processing') {
+      setMessage('已收到课表图片，正在后台解析。请回到聊天页查看进度并确认导入。')
+      return
+    }
     setMessage(`已解析 ${result.count} 门课，请回到聊天页确认导入。`)
   }
 
