@@ -12,16 +12,26 @@
 - 首次在该仓库执行 git 操作时，若触发 `dubious ownership`，需要先把 `D:\student_time_plan` 加入 git `safe.directory`。
 
 ## 已确认并需要记住的问题
+- 2026-06-02 复习计划任务拆解 live E2E 暴露确认写入缺口：对“下周四（2026-06-11）有大学英语3考试，帮我做一个复习计划”这类完整请求，Agent 能先确认考试信息，调用 `get_free_slots`，再调用 `create_study_plan` 生成 9 条候选复习任务；但用户确认后没有继续逐条调用 `create_task`，最终 E2E SQLite 中 `tasks=[] / reminders=[]`。沙箱外权限重跑仍复现，因此不是普通沙箱 provider/network 失败。初步判断是 `create_study_plan` 的完整候选任务在 review/确认链路中没有稳定保留为结构化数据，模型又进入二次 review/重新查询，导致“生成计划”和“写入任务”断开。后续修复应优先保证 review `ask_user` 携带完整 task 数据，并在确认后确定性落库，而不是只加强提示词。
+- 2026-06-01 真实课表截图 OCR 质量问题：用户指定的两张课表图 `C:\Users\Chen\Desktop\微信图片_20260419104519.jpg`（第 3 周）和 `C:\Users\Chen\Desktop\微信图片_20260419104523.jpg`（第 4 周）通过真实 vision provider 后，上传/异步状态链路能完成，但 OCR 输出明显错误。问题包括：竖排课程名被拆成多门课，例如“机器人流程自动化”被拆成“机器人程动 / 流自化”等；“大学生就业指导”被拆成“大生业导 / 学就指导”；第 4 周图出现 weekday 左移，把周三/周四识别成周二/周三；最终两图合并得到 `count=13`，而人工核对应为 6 条。结论：图片上传、轮询、合并状态链路通，但真实 OCR 质量暂不达标；后续如果要继续课表图片能力，优先改 OCR prompt/后处理/视觉解析策略，而不是再查上传链路。
+- 2026-06-01 Plan 12 live E2E 曾暴露一个已修复的能力表缺口：连续修改同一个普通任务时，用户第二轮说“不提醒/取消提醒”，模型会回复“没有删除提醒工具”，因为 `update_task` 工具描述和 Agent 规则没有明确暴露 `reminder_advance_minutes=null` 可以删除已有 task reminder。现已在 `tools.py`、`Agent.md`、`prompt.py` 和 task routing hint 中补齐，并用 `test_tools_schema.py` 锁住契约；沙箱外 live E2E 已通过 `4 passed (3.0m)`，连续多轮 evidence 确认同一个 task 被复用且旧 reminder 不残留。
+- 2026-05-31 已修复上一条 Agent E2E 暴露的核心参数丢失：当前源码在 `run_agent_loop` 执行工具前会做 `tool_preflight`，把用户明确表达的“提前 N 分钟 / 准点 / 不提醒”补齐到 `create_task` / `update_task` 的 reminder 参数；同时当用户明确是“修改已有任务”时，会给 LLM task routing hint，并在 LLM 误调 `create_task` 时用内部工具错误拦截，要求改走 `list_tasks -> update_task`。后续 Task 7 又补上通用 required-slot/schema guard：工具缺必填参数或 enum 值非法时，不执行、不落库、不向前端暴露坏 tool call，而是把内部错误回传给 LLM 修正；显式“不提醒/取消提醒”现在会传入 `reminder_advance_minutes=None` 删除已有 task reminder。最新验证：preflight/Agent task 定向 `17 passed`，Plan 9 定向 `57 passed`，后端全量 `229 passed`；当前 `5174 -> 8001` 真实链路 smoke 已通过，`update_task` 参数包含 `reminder_advance_minutes=15`，数据库最终无旧 task/reminder 残留。
+- 2026-05-31 Agent E2E smoke 确认：真实创建任务+提醒路径可以跑通，但“多轮修改任务时间+提醒提前分钟”仍会分叉。复现路径是在 `http://127.0.0.1:5174/chat` 登录临时账号后，先创建“明天下午3点到4点提醒我复习线性代数，提前30分钟提醒”，再说“把刚才的复习线性代数任务改到明天下午4点到5点，提前15分钟提醒”。结果是 `update_task` 只收到 `start_time/end_time`，没有收到 `reminder_advance_minutes=15`；任务时间会更新，但旧 reminder 仍停在 `14:30 / advance_minutes=30`。这不是后端 task/reminder 同步 API 的单元回归失败，而是 Agent 工具调用层没有把提醒修改意图稳定路由进 `update_task.reminder_advance_minutes`。
 - 旧版本地数据库可能停留在 `courses.week_type` schema；如果再次出现 `no such column: courses.week_pattern`，优先检查 Alembic 版本并执行兼容迁移 `c4c3b8a92f1d`。
 - WebSocket 重连曾导致旧确认卡片仍可见但 answer 落到新会话；相关保护已修复，但若再次出现类似“确认后不继续”，先检查 `pendingAsk` 清理和后端等待态。
 - `schedule_parser` 曾把 `1-16周` 误识别为节次，并在空行分块时把“操场”拆成独立课程；相关回归测试已经补齐，后续改解析逻辑时需要重点回归。
 - IAB 或本地撤销可能把 `student-planner/frontend/src/pages/ChatPage.tsx` 写入 Git 冲突标记；如果前端突然无法编译，优先全局检索 `<<<<<<<|=======|>>>>>>>`。
+- 2026-05-01 确认过一条容易误判的推送坑：仅在手机系统里给已安装 PWA / Chrome 开通知权限，不代表项目已经完成 Web Push 订阅。当前前端只有在 `/me/notifications` 页点击“开启推送通知”时才会调用 `pushManager.subscribe()` 并把订阅写入后端；如果部署环境缺失 `SP_VAPID_PRIVATE_KEY` / `SP_VAPID_PUBLIC_KEY`，这一步会根本走不通，数据库里 `users.push_subscription` 也会保持为空。
+- 2026-05-01 又确认了一条前端侧静默失败坑：如果浏览器本地已经残留 `PushSubscription`，但服务器端 `users.push_subscription` 为空，旧版通知页会继续直接调用 `pushManager.subscribe()`，失败时也没有任何用户可见错误，因此看起来“权限都开了”但后端始终是 `0` 订阅。现已改成先读本机订阅和 `/api/push/status`，必要时复用现有订阅重新同步，并显示明确错误/状态文案。
 
 ## 已延期但仍待处理
-- 课表图片异步解析的前端进度展示尚未补齐，需要前端轮询或 WebSocket 进度消费。
-- Chat 在“确认后到下一次 `tool_call` 前”的轻量过渡方案尚未完成，目前保持稳定版“仅显示已选择”。
+- Plan 8 手机侧测试已由用户补充确认 OK；PWA 安装、独立窗口、冷启动、登录、聊天、课表图片导入、确认导入、日历查看、课程编辑、推送展示和通知点击跳转不再列为当前待补验项。
+- Chat 确认后空窗和课表图片异步解析反馈的前端代码侧已补齐；若手机实测仍有摩擦，按真实路径重新记录到“高摩擦”问题后再修。
 
 ## 近期确认的部署坑
+- 2026-06-01 Agent Loop live E2E 环境坑：`npm.cmd run e2e:agent-loop -- --reporter=list --global-timeout=600000` 在普通沙箱里可能因为后端访问 live LLM provider 失败而卡住，失败特征是前端反复出现“确认”后报“聊天暂时不可用，请稍后重试”，后端日志出现 `openai.APIConnectionError` / `PermissionError: [WinError 5] 拒绝访问。`。同一套 harness 在沙箱外权限下已通过 `4 passed (3.0m)`；因此后续判断 Agent Loop live E2E 结果时，需要区分代码闭环失败和沙箱网络失败。
+- 2026-05-31 本地 smoke 额外确认：当前打开的 `5174` 页面如果连着旧 `8001` 进程，会复现旧工具结果和旧 reminder 分叉；修改 Agent 后必须重启 `8001` 后端，不能只看源码测试通过。另一个本地测试坑是 PowerShell here-string 管道给 `python -` 时中文可能变成 `???`，会让意图识别 smoke 失真；需要用真实浏览器输入、Node/Playwright，或在 Python smoke 中使用 Unicode escape。
+- 2026-05-31 本地 E2E 入口确认：`5174 -> 8001` 是当前可用的 Student Planner 前后端组合，`5174/ws/chat` 可以握手；`5173` 虽能返回前端 HTML，但 `/api/auth/me` 为 `404`，不适合作为当前 smoke 入口；`8000/health` 返回的是 EngGo，不是 Student Planner。现有 `student-planner/frontend` 的 Playwright 配置仍默认使用 `5173`，因此只跑 `npm.cmd run e2e` 容易得到误导性的“通过”。
 - 服务器部署目录必须包含 `student-planner/Agent.md`。如果 `/opt/student-planner/current/Agent.md` 缺失，后端在构造系统提示词时会抛 `FileNotFoundError`，前端聊天会显示“聊天暂时不可用，请稍后重试”。2026-04-23 已在临时 HTTPS 服务器补齐该文件，并用公网 WebSocket smoke 验证普通聊天恢复。
 - 2026-04-25 出现过“本地已修、线上仍复现旧课表导入问题”的部署回退：腾讯云测试机上的 `/opt/student-planner/current/app/agent/loop.py`、`tool_executor.py`、`services/schedule_parser.py` 哈希一度落后于本地工作树，导致真机仍会看到旧的补信息提问和错误周次结果。后续每次声称“已部署”前，都先比对这几份关键文件哈希并重启 `student-planner-backend`。
 
@@ -29,3 +39,45 @@
 - 不要把 `AGENTS.md` 当成长期 session 流水账；历史过程应压缩为当前快照或单独归档。
 - 不要在未确认设计变更时直接改实现；先记录问题，再决定是否调整 spec / plan。
 - 不要把移动端/PWA 的附件入口继续做成“`button` 调 `ref.click()` + `display:none` 文件输入”的组合；2026-04-25 已确认这会导致真机上聊天页加号点击无反应。优先使用原生 `label[for=file-input]` 或其他保留原生文件选择交互链的实现。
+## 2026-05-02 新确认的能力错配坑
+- agent 工具层与 HTTP/数据库真实能力不一致时，真机对话会出现“先承诺能做，执行时才翻车”的假成功。
+- 线上已确认案例：`2026-05-02 16:57` 的“17.00提醒我去做饭”会话里，assistant 先承诺“创建做饭任务”，随后实际只调用了 `list_tasks`，接着错误地调用 `update_task(task_id="new")`，最后才返回 `Task not found`。
+- 根因不是数据库或提醒服务挂了，而是当时 agent 只有 `update_task` 没有 `create_task`，模型在能力表不完整的情况下自己脑补了“可创建”。
+- 后续凡是新增了 HTTP/后端能力，尤其是 `task / reminder / study plan` 相关，都要同步检查 `app/agent/tools.py`、`app/agent/tool_executor.py`、`Agent.md / system prompt` 是否同时更新；只改 API 不改 agent，会在真机真实对话里以“先答应后打脸”的形式暴露出来。
+
+## 2026-05-03 新确认的提醒调度坑
+- `/api/reminders/` 路由之前只负责写库，不负责把新 reminder 挂进 APScheduler；因此用户在 UI/真机上“成功创建提醒”后，数据库里能看到 `reminders.status='pending'`，但后台完全没有 `fire_reminder` 日志，提醒也就永远不会真正发送。
+- 线上已确认案例：用户 `96a50612-9a83-44c0-a826-06e035cd999c` 的任务 `去洗澡`（`2026-05-02 19:20-19:50`）对应 reminder `62b100df-611f-4077-9a39-ec5288dbf1fe` 一直停在 `pending`，直到人工排查才发现根因是路由漏掉了 `schedule_reminder_job`。
+- 结论：任务/课程 reminder 不能只测数据库写入成功，还要确认创建路径调用了 `schedule_reminder_job`，删除路径调用了 `cancel_reminder_job`；否则看起来“提醒创建成功”，实际上只是写了一条永远不会被执行的记录。
+
+## 2026-05-06 新确认的任务/提醒分叉坑
+- 仅仅“创建了任务”不等于“创建了这个任务对应时间的提醒”。此前日历页 `/calendar` 的“添加任务”弹层只调用 `/api/tasks/`，不会一起创建 reminder；因此用户在 UI 里看到 `11:01-11:31` 的任务时，很容易误以为这条任务天然带有 `11:01` 的提醒，但数据库里根本可能没有对应 reminder，或者 reminder 挂成了别的时间。
+- 线上已确认案例：`2026-05-03 11:01` 的 `去洗澡` 任务存在，但对应 reminder 实际是 `2026-05-03T22:55:00`；因此“11:01 没弹”不是推送链当时没发，而是系统根本没把这条任务当成 `11:01` 的提醒来调度。
+- 结论：后续任务创建入口必须显式暴露 reminder 选项，并且由后端在同一个 task 路径里负责 task/reminder 一体化创建与同步；否则前端、agent 和提醒系统各走各的，用户只会看到“任务时间”和“提醒时间”分叉。
+## 2026-05-09 新确认的 scheduler 运行态坑
+- 即使 task reminder 已经正确写入数据库，也不代表它一定会按时触发。线上 `2026-05-09 11:20` 的 `去做饭` 案例表明：`tasks` 和 `reminders` 记录都存在且时间正确，但 reminder 仍然卡在 `pending`，同时后台在对应时间窗没有任何 `fire_reminder` 执行日志。
+- 这说明还存在一层调度器运行态风险：创建 reminder 时如果生产进程内的 APScheduler 没有真正处于运行态，或者 run_date 已经擦边过去，job 会被静默丢掉，只留下数据库里的 `pending` 记录，让用户误以为“提醒系统没发”。
+- 当前兜底修法已加入：`schedule_reminder_job()` 在 scheduler 未运行时会先自启动，并且对 `fire_time <= now` 的提醒直接钳到 `now`。如果后续真机仍复现“库里有 pending、日志里没 fire”，就要继续检查生产进程内 scheduler 的真实运行态，而不是再回头怀疑前端权限或 VAPID。
+## 2026-05-09 新确认的部署网络阻塞
+- 当前测试服务器 `101.33.229.161` 上，Student Planner 应用层已经能正确创建 task/reminder，也能把 due reminder 从数据库里捞出来执行；但真正发 Web Push 的最后一跳被部署环境网络拦住。
+- 已确认的硬证据：
+  - 服务器直连 `fcm.googleapis.com:443` 超时；
+  - `gost.service` 在跑，监听 `:18080`，但走它访问 `fcm.googleapis.com` 和 `www.google.com` 都失败；
+    - HTTP 代理方式：`CONNECT tunnel failed, response 503`
+    - SOCKS5 方式：`Can't complete SOCKS5 connection`
+- 对用户真实 subscription 在服务器上直接调用 `send_push()`，返回 `HTTPSConnectionPool(... fcm.googleapis.com ...) Failed to establish a new connection: [Errno 101] Network is unreachable`。
+- 结论：如果部署环境不能访问 Google/FCM，那么前端权限、VAPID、scheduler、task/reminder 写库都修好也没法让手机收到推送。后续别再把这个问题误判成“页面没传对提醒时间”或“应用没 schedule”。
+- 2026-05-24 已确认旧 `gost` 上游拒绝连接，并已停用/备份坏代理：`gost.service` 不再加载，`:18080` 不再监听，`/root/.bashrc` 里的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 已注释。清理后服务器直连 FCM 仍超时，所以后续若继续用这台大陆机，需要配置新的可用代理；否则直接切到“本地电脑开 VPN + 本地部署 + 手机 HTTPS 访问”的验证路径。
+
+## 2026-05-17 本地方案 B 验证坑与新观察
+- 本机 `127.0.0.1:8000` 可能被其他项目占用；本轮实际发现 EngGo 后端占用了 `127.0.0.1:8000`，而 Student Planner 绑定 `0.0.0.0:8000` 后，`localhost:8000` 仍会落到 EngGo。后续本地方案 B 推荐直接使用 Student Planner 后端 `8001`，并通过 `STUDENT_PLANNER_BACKEND_ORIGIN=http://127.0.0.1:8001` 指定前端 proxy。
+- 本地 `.env` 里的 VAPID key 可能为空；若 `/api/push/status` 显示 `vapid_configured=false`，先补 `SP_VAPID_PRIVATE_KEY` / `SP_VAPID_PUBLIC_KEY`，否则手机只能授权，无法完成真实 Web Push 订阅。
+- `localtunnel` 会先要求输入 tunnel password/IP，本轮值为 `156.229.160.167`；这个不是应用登录，也不是后端鉴权。
+- Vite preview 默认会拒绝 `*.loca.lt` Host，表现为 localtunnel 进入后出现 HTTP 400/403，响应体包含 `Blocked request. This host (...) is not allowed.`。修法是把 `.loca.lt` 加入 `preview.allowedHosts`。
+- 本地方案 B 已证明“直接测试推送”链路可通：账号 `111` 写入真实 FCM subscription；直接 `send_push()` 返回 `201`；用户手机收到测试推送。随后 `10:48` task reminder 到点后状态从 `pending` 变为 `sent`，但用户明确说明没有看到这条 `10:48` 可见通知。后续要把 `sent` 理解为后端/FCM accepted，不要等同于设备已展示；若数据库已从 `pending` 变为 `sent` 但手机没弹，应继续查 service worker 展示条件、payload、前后台状态和浏览器通知策略。
+- 待查新观察：本轮手机端创建的任务标题入库为 `혼넜레`，通知文本也出现问号乱码；但用同一 API 发送标准 UTF-8 JSON 创建 `中文编码检查` 能正确入库。因此这不是后端/SQLite 对中文的通用不支持，更像 mobile/localtunnel 页面输入链路或临时测试输入的编码异常。若再次复现，请记录输入前的原文、页面、浏览器/PWA 状态和数据库实际标题。
+- 新确认一条 Web Push 默认值坑：`pywebpush.webpush()` 的默认 `ttl=0` 会让推送服务在设备不可立即送达时丢弃消息，但调用方仍可能拿到 FCM accepted / HTTP 201。当前已改为显式 `ttl=3600`，避免学生提醒因为手机短暂休眠或网络切换而被立即丢弃。
+- 新确认一条本地方案 B 启动坑：只有“沙箱外启动”的本地后端才和用户电脑 VPN 处在同一条可访问 FCM 的网络路径里；普通沙箱内 `send_push()` 会失败并返回 `HTTPSConnectionPool(... fcm.googleapis.com ...) NewConnectionError`。如果本地 scheduled reminder 卡在 `pending`，先检查后端启动权限与 FCM 出网，再看 scheduler 逻辑。
+- 已确认本地方案 B 的正向闭环：沙箱外后端启动后，通过真实 `/api/tasks/` 创建的 `11:15` scheduled reminder 到点变为 `sent`，用户手机收到 Chrome 通知弹窗。后续如果再出现 `sent` 但无弹窗，应优先检查手机通知权限、Chrome/PWA 前后台状态、系统省电策略、service worker 展示逻辑和通知点击路径，而不是回退怀疑 task/reminder 写库。
+## 2026-05-31 Agent Execution Loop V1 测试告警
+- Agent Execution Loop V1 的定向后端回归已通过 `42 passed`，后端全量回归已通过 `214 passed`。pytest 过程中仍有非阻塞告警：`test_agent_loop_can_create_task_then_set_reminder`、`test_reminders.py::test_list_reminders`、`test_reminders.py::test_delete_reminder` 会触发 `coroutine 'run_coroutine_job' was never awaited`，原因是部分旧测试路径没有 mock 掉 APScheduler job；定向回归中还出现过 `.pytest_cache` 写入 `D:\student_time_plan\student-planner\.pytest_cache\v\cache\nodeids` 的 `Permission denied`。这些当前不影响 V1 功能判断，但后续做测试清洁度时应单独处理。
