@@ -1,7 +1,8 @@
 import json
 import re
 import uuid
-from typing import Any, AsyncGenerator
+from datetime import date, datetime, timedelta
+from typing import Any, AsyncGenerator, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,6 +147,102 @@ _CN_TIME_RANGE_RE = re.compile(
     r"(?P<start>\d{1,2})\s*点\s*"
     r"(?:到|至|-|~|～|—|–)\s*"
     r"(?P<end>\d{1,2})\s*点"
+)
+_DAILY_LIMIT_RE = re.compile(
+    r"(?:每天|每日|一天|一日|单日).{0,12}?"
+    r"(?P<value>\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)\s*"
+    r"(?P<unit>小时|钟头|h|H|分钟|分)"
+)
+_TARGET_SCORE_RE = re.compile(r"(?:目标|希望|争取|想考|要考|至少).{0,10}?(?P<score>\d{2,3})\s*分?")
+_SCOPE_HINT_RE = re.compile(
+    r"(?:unit|Unit|UNIT)\s*\d+|第\s*\d+\s*(?:-|到|至|~|～)\s*\d+\s*章|"
+    r"第\s*\d+\s*章|第\s*\d+\s*(?:-|到|至|~|～)\s*\d+\s*单元|范围|章节|单元|重点"
+)
+_STUDY_CONTEXT_DEFAULT_REPLIES = {
+    "按默认",
+    "默认",
+    "不知道",
+    "不确定",
+    "都可以",
+    "你来安排",
+    "你安排",
+    "没有",
+    "无",
+}
+_STUDY_WEAK_AREA_KEYWORDS = (
+    "听力",
+    "写作",
+    "作文",
+    "阅读",
+    "翻译",
+    "语法",
+    "词汇",
+    "单词",
+    "口语",
+    "错题",
+    "真题",
+    "计算",
+    "证明",
+    "公式",
+)
+_STUDY_CONTEXT_DETAIL_KEYWORDS = (
+    "详细",
+    "具体",
+    "精准",
+    "精确",
+    "定制",
+    "个性化",
+    "冲刺",
+    "提分",
+    "高分",
+    "保过",
+    "高效",
+    "专项",
+    "针对",
+)
+_WORK_PLAN_KEYWORDS = (
+    "实验报告",
+    "大作业",
+    "presentation",
+    "project",
+    "报告",
+    "作业",
+    "论文",
+    "项目",
+    "展示",
+)
+_WORK_PLAN_DEADLINE_KEYWORDS = (
+    "要交",
+    "提交",
+    "截止",
+    "ddl",
+    "deadline",
+    "due",
+    "交",
+)
+_WORK_CONTEXT_DEFAULT_REPLIES = {
+    "按默认",
+    "默认",
+    "不知道",
+    "不确定",
+    "都可以",
+    "你来安排",
+    "你安排",
+    "没有",
+    "无",
+}
+_WORK_REQUIREMENT_HINT_RE = re.compile(
+    r"(?:pdf|ppt|word|页|字|实验|参考文献|格式|要求|评分|代码|数据|图表|展示|答辩|初稿|已经|完成)"
+)
+_PLAN_ADJUSTMENT_KEYWORDS = (
+    "太满",
+    "太多",
+    "压缩",
+    "减少",
+    "改成每天",
+    "调整",
+    "改成",
+    "改为",
 )
 
 
@@ -382,6 +479,412 @@ def _extract_task_schedule(answer: str) -> dict[str, str] | None:
         "scheduled_date": scheduled_date,
         "start_time": f"{start_hour:02d}:00",
         "end_time": f"{end_hour:02d}:00",
+    }
+
+
+def _is_cancelled_answer(answer: str) -> bool:
+    normalized = (answer or "").strip().lower()
+    return normalized.startswith(("取消", "先不", "不做", "不用", "no"))
+
+
+def _parse_study_number(value: str) -> float | None:
+    value = str(value or "").strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    if value == "半":
+        return 0.5
+    digits = {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    if value == "十":
+        return 10
+    if "十" in value:
+        left, _, right = value.partition("十")
+        tens = digits.get(left, 1 if left == "" else None)
+        ones = digits.get(right, 0 if right == "" else None)
+        if tens is None or ones is None:
+            return None
+        return float(tens * 10 + ones)
+    if value in digits:
+        return float(digits[value])
+    return None
+
+
+def _extract_daily_study_limit_minutes(text: str) -> int | None:
+    match = _DAILY_LIMIT_RE.search(text or "")
+    if match is None:
+        return None
+    number = _parse_study_number(match.group("value"))
+    if number is None:
+        return None
+    unit = match.group("unit")
+    if unit in {"小时", "钟头", "h", "H"}:
+        return int(number * 60)
+    return int(number)
+
+
+def _extract_study_context_from_text(text: str) -> dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+
+    compact = raw.strip().lower().replace(" ", "")
+    if compact in _STUDY_CONTEXT_DEFAULT_REPLIES:
+        return {"raw_notes": raw, "using_defaults": True}
+
+    context: dict[str, Any] = {"raw_notes": raw}
+    daily_limit = _extract_daily_study_limit_minutes(raw)
+    if daily_limit is not None:
+        context["daily_study_limit_minutes"] = daily_limit
+
+    target_match = _TARGET_SCORE_RE.search(raw)
+    if target_match is not None:
+        context["target_score"] = f"{target_match.group('score')}分"
+
+    weak_areas = [keyword for keyword in _STUDY_WEAK_AREA_KEYWORDS if keyword in raw]
+    if "弱" in raw or "薄弱" in raw or weak_areas:
+        context["weak_areas"] = weak_areas or ["用户提到薄弱项，但未明确具体科目"]
+
+    if _SCOPE_HINT_RE.search(raw):
+        context["exam_scope"] = raw
+
+    if _study_context_has_quality(context):
+        return context
+    return {}
+
+
+def _study_context_has_quality(study_context: Any) -> bool:
+    if not isinstance(study_context, dict):
+        return False
+    if study_context.get("using_defaults") is True:
+        return True
+    for key in ("exam_scope", "weak_areas", "target_score", "daily_study_limit_minutes"):
+        value = study_context.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, list) and len(value) > 0:
+            return True
+        if isinstance(value, int) and value > 0:
+            return True
+    raw_notes = str(study_context.get("raw_notes") or "").strip()
+    if not raw_notes:
+        return False
+    raw_compact = raw_notes.lower().replace(" ", "")
+    if raw_compact in _STUDY_CONTEXT_DEFAULT_REPLIES:
+        return True
+    return bool(
+        _SCOPE_HINT_RE.search(raw_notes)
+        or _DAILY_LIMIT_RE.search(raw_notes)
+        or _TARGET_SCORE_RE.search(raw_notes)
+        or any(keyword in raw_notes for keyword in _STUDY_WEAK_AREA_KEYWORDS)
+    )
+
+
+def _study_context_from_reference_texts(reference_texts: list[str]) -> dict[str, Any]:
+    for text in reversed(reference_texts):
+        context = _extract_study_context_from_text(text)
+        if _study_context_has_quality(context):
+            return context
+    return {}
+
+
+def _has_complete_exam_info(exams: Any) -> bool:
+    if not isinstance(exams, list) or not exams:
+        return False
+    for exam in exams:
+        if not isinstance(exam, dict):
+            return False
+        if not str(exam.get("course_name") or "").strip():
+            return False
+        if not str(exam.get("exam_date") or "").strip():
+            return False
+    return True
+
+
+def _wants_detailed_study_context(text: str) -> bool:
+    return any(keyword in (text or "") for keyword in _STUDY_CONTEXT_DETAIL_KEYWORDS)
+
+
+def _should_default_study_context(reference_texts: list[str], tool_args: dict[str, Any]) -> bool:
+    if not _has_complete_exam_info(tool_args.get("exams")):
+        return False
+    combined = "\n".join(str(text or "") for text in reference_texts)
+    return not _wants_detailed_study_context(combined)
+
+
+def _has_real_available_slots(available_slots: Any) -> bool:
+    if not isinstance(available_slots, dict):
+        return False
+    slots = available_slots.get("slots")
+    if not isinstance(slots, list) or not slots:
+        return False
+    return all(
+        isinstance(day, dict)
+        and isinstance(day.get("free_periods"), list)
+        and "date" in day
+        for day in slots
+    )
+
+
+def _study_plan_intake_question(tool_args: dict[str, Any]) -> str:
+    exams = tool_args.get("exams")
+    course_names: list[str] = []
+    if isinstance(exams, list):
+        for exam in exams:
+            if isinstance(exam, dict):
+                course_name = str(exam.get("course_name") or "").strip()
+                if course_name:
+                    course_names.append(course_name)
+    course_text = "、".join(course_names) if course_names else "这门考试"
+    return (
+        f"为了把「{course_text}」的复习任务拆得更准，请补充：复习范围/章节、薄弱点、"
+        "目标成绩，以及每天最多能学多久。比如：范围 Unit1-6，听力和写作薄弱，"
+        "目标 80 分，每天最多 2 小时。也可以回复“按默认”。"
+    )
+
+
+def _looks_like_study_plan_request(user_message: str) -> bool:
+    text = (user_message or "").strip()
+    if not text:
+        return False
+    if any(keyword in text for keyword in _SCHEDULE_IMPORT_KEYWORDS):
+        return False
+    return bool(
+        ("考试" in text and any(keyword in text for keyword in ("复习计划", "学习计划", "安排", "拆")))
+        or "备考计划" in text
+        or "拆复习任务" in text
+    )
+
+
+def _should_collect_study_context_locally(user_message: str) -> bool:
+    if not _looks_like_study_plan_request(user_message):
+        return False
+    if _ISO_DATE_RE.search(user_message or "") is None:
+        return False
+    if not _wants_detailed_study_context(user_message):
+        return False
+    return not _study_context_has_quality(_extract_study_context_from_text(user_message))
+
+
+def _extract_first_iso_date(text: str) -> str | None:
+    match = _ISO_DATE_RE.search(text or "")
+    if match is None:
+        return None
+    year, month, day = (int(part) for part in match.groups())
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _extract_work_item_title(user_message: str) -> str:
+    text = re.sub(_ISO_DATE_RE, "", user_message or "")
+    for keyword in sorted(_WORK_PLAN_KEYWORDS, key=len, reverse=True):
+        index = text.lower().find(keyword.lower())
+        if index < 0:
+            continue
+        fragment = text[max(0, index - 14) : index + len(keyword)]
+        fragment = re.sub(r".*(?:要交|提交|截止|完成|写|做|有|帮我|把|这个|那个)", "", fragment)
+        fragment = fragment.strip(" ：:，,。.?？（）()“”\"'的")
+        if fragment and keyword in fragment:
+            return fragment
+        return keyword
+    return "作业任务"
+
+
+def _extract_work_type(title: str) -> str:
+    lowered = title.lower()
+    if "实验报告" in title:
+        return "lab report"
+    if "报告" in title:
+        return "report"
+    if "论文" in title:
+        return "essay"
+    if "大作业" in title or "项目" in title or "project" in lowered:
+        return "project"
+    if "presentation" in lowered or "展示" in title:
+        return "presentation"
+    return "assignment"
+
+
+def _extract_work_context_from_text(text: str) -> dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+
+    compact = raw.strip().lower().replace(" ", "")
+    if compact in _WORK_CONTEXT_DEFAULT_REPLIES:
+        return {"raw_notes": raw, "using_defaults": True}
+
+    context: dict[str, Any] = {"raw_notes": raw}
+    daily_limit = _extract_daily_study_limit_minutes(raw)
+    if daily_limit is not None:
+        context["daily_work_limit_minutes"] = daily_limit
+    if _WORK_REQUIREMENT_HINT_RE.search(raw):
+        context["requirements"] = raw
+    if any(marker in raw for marker in ("已经", "做完", "写了", "完成了", "还没开始")):
+        context["current_progress"] = raw
+    if _work_context_has_quality(context):
+        return context
+    return {}
+
+
+def _work_context_has_quality(work_context: Any) -> bool:
+    if not isinstance(work_context, dict):
+        return False
+    if work_context.get("using_defaults") is True:
+        return True
+    for key in ("requirements", "current_progress", "daily_work_limit_minutes"):
+        value = work_context.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, int) and value > 0:
+            return True
+    raw_notes = str(work_context.get("raw_notes") or "").strip()
+    if not raw_notes:
+        return False
+    raw_compact = raw_notes.lower().replace(" ", "")
+    if raw_compact in _WORK_CONTEXT_DEFAULT_REPLIES:
+        return True
+    return bool(_WORK_REQUIREMENT_HINT_RE.search(raw_notes) or _DAILY_LIMIT_RE.search(raw_notes))
+
+
+def _work_context_from_reference_texts(reference_texts: list[str]) -> dict[str, Any]:
+    for text in reversed(reference_texts):
+        context = _extract_work_context_from_text(text)
+        if _work_context_has_quality(context):
+            return context
+    return {}
+
+
+def _work_plan_intake_question(title: str) -> str:
+    return (
+        f"为了把「{title}」拆得更准，请补充交付要求、格式/页数或评分点、当前进度，"
+        "以及每天最多能投入多久。比如：需要 5 页 PDF，包括实验结果和参考文献，"
+        "现在还没开始，每天最多 2 小时。也可以回复“按默认”。"
+    )
+
+
+def _looks_like_work_plan_request(user_message: str) -> bool:
+    text = (user_message or "").strip()
+    if not text:
+        return False
+    if any(keyword in text for keyword in _SCHEDULE_IMPORT_KEYWORDS):
+        return False
+    mentions_work = any(keyword.lower() in text.lower() for keyword in _WORK_PLAN_KEYWORDS)
+    mentions_deadline = any(keyword.lower() in text.lower() for keyword in _WORK_PLAN_DEADLINE_KEYWORDS)
+    asks_to_decompose = any(keyword in text for keyword in ("拆", "安排", "计划", "分解"))
+    return mentions_work and (mentions_deadline or asks_to_decompose) and _extract_first_iso_date(text) is not None
+
+
+def _should_handle_work_plan_locally(user_message: str) -> bool:
+    return _looks_like_work_plan_request(user_message)
+
+
+def _should_collect_work_context_locally(user_message: str) -> bool:
+    if not _looks_like_work_plan_request(user_message):
+        return False
+    return not _work_context_has_quality(_extract_work_context_from_text(user_message))
+
+
+def _normalize_study_plan_task(raw_task: dict[str, Any]) -> dict[str, Any] | None:
+    title = str(raw_task.get("title") or "").strip()
+    exam_name = str(raw_task.get("exam_name") or raw_task.get("course_name") or "").strip()
+    scheduled_date = str(raw_task.get("scheduled_date") or raw_task.get("date") or "").strip()
+    start_time = str(raw_task.get("start_time") or "").strip()
+    end_time = str(raw_task.get("end_time") or "").strip()
+    description = str(raw_task.get("description") or "").strip()
+
+    if not title and exam_name:
+        title = f"{exam_name} - 复习"
+    elif exam_name and exam_name not in title:
+        title = f"{exam_name} - {title}"
+
+    if not title or not scheduled_date or not start_time or not end_time:
+        return None
+
+    task_args: dict[str, Any] = {
+        "title": title,
+        "scheduled_date": scheduled_date,
+        "start_time": start_time,
+        "end_time": end_time,
+    }
+    if description:
+        task_args["description"] = description
+    return task_args
+
+
+def _normalize_study_plan_tasks(raw_tasks: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_tasks, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for raw_task in raw_tasks:
+        if not isinstance(raw_task, dict):
+            continue
+        task_args = _normalize_study_plan_task(raw_task)
+        if task_args is not None:
+            normalized.append(task_args)
+
+    return normalized
+
+
+def _normalize_work_plan_task(raw_task: dict[str, Any]) -> dict[str, Any] | None:
+    title = str(raw_task.get("title") or "").strip()
+    work_item_name = str(raw_task.get("work_item_name") or raw_task.get("work_item") or "").strip()
+    scheduled_date = str(raw_task.get("scheduled_date") or raw_task.get("date") or "").strip()
+    start_time = str(raw_task.get("start_time") or "").strip()
+    end_time = str(raw_task.get("end_time") or "").strip()
+    description = str(raw_task.get("description") or "").strip()
+
+    if not title and work_item_name:
+        title = f"{work_item_name} - 任务"
+    elif work_item_name and work_item_name not in title:
+        title = f"{work_item_name} - {title}"
+
+    if not title or not scheduled_date or not start_time or not end_time:
+        return None
+
+    task_args: dict[str, Any] = {
+        "title": title,
+        "scheduled_date": scheduled_date,
+        "start_time": start_time,
+        "end_time": end_time,
+    }
+    if description:
+        task_args["description"] = description
+    return task_args
+
+
+def _normalize_work_plan_tasks(raw_tasks: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_tasks, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for raw_task in raw_tasks:
+        if not isinstance(raw_task, dict):
+            continue
+        task_args = _normalize_work_plan_task(raw_task)
+        if task_args is not None:
+            normalized.append(task_args)
+
+    return normalized
+
+
+def _study_plan_review_data(tasks: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "tasks": tasks,
+        "count": len(tasks),
     }
 
 
@@ -906,6 +1409,404 @@ async def _run_missing_task_create_shortcut(
     yield {"type": "done"}
 
 
+async def _run_confirmed_plan_write(
+    raw_tasks: Any,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    start_step: int,
+    normalize_tasks: Callable[[Any], list[dict[str, Any]]],
+    task_label: str,
+    empty_text: str,
+    review_question: str,
+    cancel_text: str,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    tasks = normalize_tasks(raw_tasks)
+    if not tasks:
+        message_id = str(uuid.uuid4())
+        yield {"type": "text", "message_id": message_id, "content": empty_text}
+        await _save_message(db, session_id, "assistant", empty_text)
+        yield {"type": "done"}
+        return
+
+    confirm_answer = yield {
+        "type": "ask_user",
+        "ask_type": "review",
+        "question": review_question.format(count=len(tasks)),
+        "options": ["确认", "取消"],
+        "data": _study_plan_review_data(tasks),
+    }
+    if not _is_confirmed_answer(str(confirm_answer or "")):
+        message_id = str(uuid.uuid4())
+        yield {"type": "text", "message_id": message_id, "content": cancel_text}
+        await _save_message(db, session_id, "assistant", cancel_text)
+        yield {"type": "done"}
+        return
+
+    step = start_step
+    created_results: list[dict[str, Any]] = []
+    failed_results: list[dict[str, Any]] = []
+    for task_args in tasks:
+        step += 1
+        yield {"type": "tool_call", "name": "create_task", "args": task_args}
+        create_result = await execute_tool("create_task", task_args, db, user.id)
+        yield {"type": "tool_result", "name": "create_task", "result": create_result}
+        await _persist_local_tool_step(
+            db,
+            session_id,
+            user.id,
+            step,
+            "create_task",
+            task_args,
+            create_result,
+        )
+        if "error" in create_result:
+            failed_results.append(create_result)
+        else:
+            created_results.append(create_result)
+
+    message_id = str(uuid.uuid4())
+    if failed_results and created_results:
+        text = f"已写入 {len(created_results)} 条{task_label}；另有 {len(failed_results)} 条因为时间冲突或参数问题未写入。"
+    elif failed_results:
+        text = f"这些{task_label}暂时没有写入成功，主要原因是时间冲突或参数不完整。请调整后再试。"
+    else:
+        text = f"已把 {len(created_results)} 条{task_label}写入日程。"
+
+    yield {"type": "text", "message_id": message_id, "content": text}
+    await _save_message(db, session_id, "assistant", text)
+    yield {"type": "done"}
+
+
+def _run_confirmed_study_plan_write(
+    raw_tasks: Any,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    start_step: int,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    return _run_confirmed_plan_write(
+        raw_tasks,
+        user,
+        session_id,
+        db,
+        start_step,
+        _normalize_study_plan_tasks,
+        "复习任务",
+        "复习计划已经生成，但里面没有可写入日程的完整任务时间。请补充考试范围或每日可复习时间后再试。",
+        "我已经拆出 {count} 条复习任务。确认后我会把它们写入你的日程。",
+        "好的，我先不写入这些复习任务。你可以调整考试范围、复习强度或空闲时间后再让我重新拆。",
+    )
+
+
+def _run_confirmed_work_plan_write(
+    raw_tasks: Any,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    start_step: int,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    return _run_confirmed_plan_write(
+        raw_tasks,
+        user,
+        session_id,
+        db,
+        start_step,
+        _normalize_work_plan_tasks,
+        "作业任务",
+        "作业计划已经生成，但里面没有可写入日程的完整任务时间。请补充截止日期、交付要求或每日可投入时间后再试。",
+        "我已经拆出 {count} 条作业任务。确认后我会把它们写入你的日程。",
+        "好的，我先不写入这些作业任务。你可以调整要求、工作量或空闲时间后再让我重新拆。",
+    )
+
+
+def _work_plan_date_range(due_date: str) -> tuple[str, str]:
+    due = date.fromisoformat(due_date)
+    start = date.today()
+    if start >= due:
+        start = due - timedelta(days=3)
+    end = due - timedelta(days=1)
+    if end < start:
+        end = start
+    return start.isoformat(), end.isoformat()
+
+
+async def _run_work_plan_shortcut(
+    user_message: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    due_date = _extract_first_iso_date(user_message)
+    title = _extract_work_item_title(user_message)
+    if due_date is None:
+        message_id = str(uuid.uuid4())
+        text = "我还没识别到作业或报告的截止日期，请按“2026-06-12 要交机器学习报告”这种格式再发一次。"
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    context = _extract_work_context_from_text(user_message)
+    if not _work_context_has_quality(context):
+        context_answer = yield {
+            "type": "ask_user",
+            "ask_type": "review",
+            "question": _work_plan_intake_question(title),
+            "options": [],
+            "data": None,
+        }
+        if _is_cancelled_answer(str(context_answer or "")):
+            message_id = str(uuid.uuid4())
+            text = "好的，我先不生成作业计划。你整理好要求后再告诉我。"
+            yield {"type": "text", "message_id": message_id, "content": text}
+            await _save_message(db, session_id, "assistant", text)
+            yield {"type": "done"}
+            return
+        context_text = str(context_answer or "按默认")
+        context = _extract_work_context_from_text(context_text)
+        if not _work_context_has_quality(context):
+            context = {"raw_notes": context_text, "using_defaults": True}
+
+    start_date, end_date = _work_plan_date_range(due_date)
+    free_args = {"start_date": start_date, "end_date": end_date, "min_duration_minutes": 30}
+    step = 1
+    yield {"type": "tool_call", "name": "get_free_slots", "args": free_args}
+    free_result = await execute_tool("get_free_slots", free_args, db, user.id)
+    yield {"type": "tool_result", "name": "get_free_slots", "result": free_result}
+    await _persist_local_tool_step(db, session_id, user.id, step, "get_free_slots", free_args, free_result)
+
+    if "error" in free_result:
+        message_id = str(uuid.uuid4())
+        text = str(free_result.get("error") or "查询空闲时间失败，请稍后重试。")
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    work_args = {
+        "work_items": [
+            {
+                "title": title,
+                "due_date": due_date,
+                "work_type": _extract_work_type(title),
+            }
+        ],
+        "available_slots": free_result,
+        "work_context": context,
+        "strategy": "staged",
+    }
+    step += 1
+    yield {"type": "tool_call", "name": "create_work_plan", "args": work_args}
+    work_result = await execute_tool("create_work_plan", work_args, db, user.id)
+    yield {"type": "tool_result", "name": "create_work_plan", "result": work_result}
+    await _persist_local_tool_step(db, session_id, user.id, step, "create_work_plan", work_args, work_result)
+
+    if "error" in work_result:
+        message_id = str(uuid.uuid4())
+        text = str(work_result.get("error") or "作业计划生成失败，请补充要求或空闲时间后再试。")
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    shortcut = _run_confirmed_work_plan_write(work_result.get("tasks"), user, session_id, db, step)
+    try:
+        event = await shortcut.__anext__()
+        while True:
+            if event["type"] == "ask_user":
+                user_response = yield event
+                event = await shortcut.asend(user_response)
+            else:
+                yield event
+                event = await shortcut.__anext__()
+    except StopAsyncIteration:
+        pass
+
+
+def _should_handle_plan_adjustment_locally(user_message: str) -> bool:
+    text = (user_message or "").strip()
+    if not text:
+        return False
+    if _extract_daily_study_limit_minutes(text) is None:
+        return False
+    if "计划" not in text and "任务" not in text:
+        return False
+    return any(keyword in text for keyword in _PLAN_ADJUSTMENT_KEYWORDS)
+
+
+def _extract_plan_adjustment_query(user_message: str) -> str:
+    work_title = _extract_work_item_title(user_message)
+    if work_title != "作业任务":
+        return work_title
+    text = re.sub(_DAILY_LIMIT_RE, "", user_message or "")
+    text = re.sub(r"(太满|太多|压缩|减少|调整|改成|每天最多|每日最多|计划|任务|这个|刚才|一下|帮我)", "", text)
+    text = text.strip(" ：:，,。.?？")
+    if len(text) >= 2:
+        return text[:12]
+    return ""
+
+
+def _task_duration_minutes(task: dict[str, Any]) -> int | None:
+    start_time = str(task.get("start_time") or "")
+    end_time = str(task.get("end_time") or "")
+    try:
+        start = datetime.strptime(start_time, "%H:%M")
+        end = datetime.strptime(end_time, "%H:%M")
+    except ValueError:
+        return None
+    minutes = int((end - start).total_seconds() // 60)
+    return minutes if minutes > 0 else None
+
+
+def _time_after_minutes(start_time: str, minutes: int) -> str:
+    start = datetime.strptime(start_time, "%H:%M")
+    return (start + timedelta(minutes=minutes)).strftime("%H:%M")
+
+
+def _build_plan_adjustment_updates(
+    tasks: list[dict[str, Any]],
+    daily_limit_minutes: int,
+) -> list[dict[str, Any]]:
+    tasks_by_date: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        tasks_by_date.setdefault(str(task.get("scheduled_date") or ""), []).append(task)
+
+    updates: list[dict[str, Any]] = []
+    for date_key, day_tasks in tasks_by_date.items():
+        if not date_key:
+            continue
+        per_task_limit = max(30, daily_limit_minutes // max(len(day_tasks), 1))
+        for task in day_tasks:
+            duration = _task_duration_minutes(task)
+            if duration is None or duration <= per_task_limit:
+                continue
+            start_time = str(task.get("start_time") or "")
+            new_end_time = _time_after_minutes(start_time, per_task_limit)
+            updates.append(
+                {
+                    "task_id": str(task.get("id") or ""),
+                    "title": str(task.get("title") or ""),
+                    "scheduled_date": date_key,
+                    "start_time": start_time,
+                    "old_end_time": str(task.get("end_time") or ""),
+                    "new_end_time": new_end_time,
+                    "old_duration_minutes": duration,
+                    "new_duration_minutes": per_task_limit,
+                }
+            )
+    return [update for update in updates if update["task_id"]]
+
+
+async def _run_plan_adjustment_shortcut(
+    user_message: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    daily_limit = _extract_daily_study_limit_minutes(user_message)
+    query = _extract_plan_adjustment_query(user_message)
+    if daily_limit is None or daily_limit < 30:
+        message_id = str(uuid.uuid4())
+        text = "我还没识别到有效的每日上限，请按“每天最多1小时”或“每天最多60分钟”这种格式再发一次。"
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+    if not query:
+        message_id = str(uuid.uuid4())
+        text = "我还没识别到要调整哪个计划，请带上计划关键词，比如“机器学习报告计划太满，每天最多1小时”。"
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    list_args = {
+        "date_from": date.today().isoformat(),
+        "date_to": (date.today() + timedelta(days=30)).isoformat(),
+    }
+    step = 1
+    yield {"type": "tool_call", "name": "list_tasks", "args": list_args}
+    list_result = await execute_tool("list_tasks", list_args, db, user.id)
+    yield {"type": "tool_result", "name": "list_tasks", "result": list_result}
+    await _persist_local_tool_step(db, session_id, user.id, step, "list_tasks", list_args, list_result)
+
+    if "error" in list_result:
+        message_id = str(uuid.uuid4())
+        text = str(list_result.get("error") or "查询任务失败，请稍后重试。")
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    tasks = [
+        task
+        for task in list_result.get("tasks", [])
+        if isinstance(task, dict)
+        and str(task.get("status") or "pending") == "pending"
+        and query in f"{task.get('title') or ''}\n{task.get('description') or ''}"
+    ]
+    if not tasks:
+        message_id = str(uuid.uuid4())
+        text = f"我查了未来 30 天的任务，但没有找到包含「{query}」的待办任务，所以没有做调整。"
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    updates = _build_plan_adjustment_updates(tasks, daily_limit)
+    if not updates:
+        message_id = str(uuid.uuid4())
+        text = f"我查到「{query}」相关任务，但它们当前单日安排已经不超过 {daily_limit} 分钟，暂时不需要压缩。"
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    confirm_answer = yield {
+        "type": "ask_user",
+        "ask_type": "review",
+        "question": f"我找到 {len(updates)} 条需要压缩的「{query}」任务。确认后我会把它们调整到每天最多 {daily_limit} 分钟。",
+        "options": ["确认", "取消"],
+        "data": {"daily_limit_minutes": daily_limit, "tasks": updates, "count": len(updates)},
+    }
+    if not _is_confirmed_answer(str(confirm_answer or "")):
+        message_id = str(uuid.uuid4())
+        text = "好的，我先不调整这些任务。"
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    updated_results: list[dict[str, Any]] = []
+    failed_results: list[dict[str, Any]] = []
+    for update in updates:
+        step += 1
+        update_args = {
+            "task_id": update["task_id"],
+            "end_time": update["new_end_time"],
+        }
+        yield {"type": "tool_call", "name": "update_task", "args": update_args}
+        update_result = await execute_tool("update_task", update_args, db, user.id)
+        yield {"type": "tool_result", "name": "update_task", "result": update_result}
+        await _persist_local_tool_step(db, session_id, user.id, step, "update_task", update_args, update_result)
+        if "error" in update_result:
+            failed_results.append(update_result)
+        else:
+            updated_results.append(update_result)
+
+    message_id = str(uuid.uuid4())
+    if failed_results and updated_results:
+        text = f"已调整 {len(updated_results)} 条任务；另有 {len(failed_results)} 条因为冲突或参数问题未调整。"
+    elif failed_results:
+        text = "这些任务暂时没有调整成功，主要原因是时间冲突或参数不完整。"
+    else:
+        text = f"已把 {len(updated_results)} 条「{query}」相关任务压缩到每日上限内。"
+    yield {"type": "text", "message_id": message_id, "content": text}
+    await _save_message(db, session_id, "assistant", text)
+    yield {"type": "done"}
+
+
 async def run_agent_loop(
     user_message: str,
     user: User,
@@ -935,8 +1836,70 @@ async def run_agent_loop(
     messages.append({"role": "user", "content": user_message})
     await _save_message(db, session_id, "user", user_message)
 
+    initial_study_context_text: str | None = None
+    if _should_collect_study_context_locally(user_message):
+        context_answer = yield {
+            "type": "ask_user",
+            "ask_type": "review",
+            "question": _study_plan_intake_question({"exams": []}),
+            "options": [],
+            "data": None,
+        }
+        if _is_cancelled_answer(str(context_answer or "")):
+            message_id = str(uuid.uuid4())
+            text = "好的，我先不生成复习计划。你整理好范围或目标后再告诉我。"
+            yield {"type": "text", "message_id": message_id, "content": text}
+            await _save_message(db, session_id, "assistant", text)
+            yield {"type": "done"}
+            return
+        initial_study_context_text = str(context_answer or "按默认")
+        initial_study_context = _extract_study_context_from_text(initial_study_context_text)
+        if not _study_context_has_quality(initial_study_context):
+            initial_study_context = {"raw_notes": initial_study_context_text, "using_defaults": True}
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "用户已补充学习计划上下文，后续调用 create_study_plan 时必须写入 study_context："
+                    f"{json.dumps(initial_study_context, ensure_ascii=False)}"
+                    "。不要再次追问复习范围、薄弱点、目标成绩或每日学习上限；"
+                    "如果考试课程和日期已经明确，可以继续确认考试信息或直接查询空闲时间。"
+                ),
+            }
+        )
+
     if _should_handle_schedule_import_locally(user_message):
         shortcut = _run_schedule_import_shortcut(user_message, user, session_id, db)
+        try:
+            event = await shortcut.__anext__()
+            while True:
+                if event["type"] == "ask_user":
+                    user_response = yield event
+                    event = await shortcut.asend(user_response)
+                else:
+                    yield event
+                    event = await shortcut.__anext__()
+        except StopAsyncIteration:
+            pass
+        return
+
+    if _should_handle_work_plan_locally(user_message):
+        shortcut = _run_work_plan_shortcut(user_message, user, session_id, db)
+        try:
+            event = await shortcut.__anext__()
+            while True:
+                if event["type"] == "ask_user":
+                    user_response = yield event
+                    event = await shortcut.asend(user_response)
+                else:
+                    yield event
+                    event = await shortcut.__anext__()
+        except StopAsyncIteration:
+            pass
+        return
+
+    if _should_handle_plan_adjustment_locally(user_message):
+        shortcut = _run_plan_adjustment_shortcut(user_message, user, session_id, db)
         try:
             event = await shortcut.__anext__()
             while True:
@@ -983,7 +1946,11 @@ async def run_agent_loop(
     tool_history: list[str] = []
     preflight_reference_texts: list[str] = [user_message]
     preflight_user_texts: list[str] = [user_message]
+    if initial_study_context_text:
+        preflight_reference_texts.append(initial_study_context_text)
+        preflight_user_texts.append(initial_study_context_text)
     error_count: dict[str, int] = {}
+    last_free_slots_result: dict[str, Any] | None = None
     step = 0
 
     for iteration in range(MAX_ITERATIONS):
@@ -1133,6 +2100,77 @@ async def run_agent_loop(
                 )
                 continue
 
+            if tool_name in {"create_study_plan", "create_work_plan"} and last_free_slots_result is not None:
+                available_slots = tool_args.get("available_slots")
+                if not _has_real_available_slots(available_slots):
+                    tool_args["available_slots"] = last_free_slots_result
+                    tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
+
+            if tool_name == "create_study_plan" and not _study_context_has_quality(tool_args.get("study_context")):
+                inferred_context = _study_context_from_reference_texts(preflight_reference_texts)
+                if _study_context_has_quality(inferred_context):
+                    tool_args["study_context"] = inferred_context
+                    tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
+                elif _should_default_study_context(preflight_reference_texts, tool_args):
+                    tool_args["study_context"] = {"raw_notes": "按默认", "using_defaults": True}
+                    tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
+                else:
+                    context_answer = yield {
+                        "type": "ask_user",
+                        "ask_type": "review",
+                        "question": _study_plan_intake_question(tool_args),
+                        "options": [],
+                        "data": None,
+                    }
+                    if _is_cancelled_answer(str(context_answer or "")):
+                        message_id = str(uuid.uuid4())
+                        text = "好的，我先不生成复习计划。你整理好范围或目标后再告诉我。"
+                        yield {"type": "text", "message_id": message_id, "content": text}
+                        await _save_message(db, session_id, "assistant", text)
+                        yield {"type": "done"}
+                        return
+                    context_text = str(context_answer or "按默认")
+                    context = _extract_study_context_from_text(context_text)
+                    if not _study_context_has_quality(context):
+                        context = {"raw_notes": context_text, "using_defaults": True}
+                    tool_args["study_context"] = context
+                    tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
+                    preflight_reference_texts.append(context_text)
+                    preflight_user_texts.append(context_text)
+
+            if tool_name == "create_work_plan" and not _work_context_has_quality(tool_args.get("work_context")):
+                inferred_context = _work_context_from_reference_texts(preflight_reference_texts)
+                if _work_context_has_quality(inferred_context):
+                    tool_args["work_context"] = inferred_context
+                    tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
+                else:
+                    work_items = tool_args.get("work_items")
+                    title = "作业任务"
+                    if isinstance(work_items, list) and work_items and isinstance(work_items[0], dict):
+                        title = str(work_items[0].get("title") or title)
+                    context_answer = yield {
+                        "type": "ask_user",
+                        "ask_type": "review",
+                        "question": _work_plan_intake_question(title),
+                        "options": [],
+                        "data": None,
+                    }
+                    if _is_cancelled_answer(str(context_answer or "")):
+                        message_id = str(uuid.uuid4())
+                        text = "好的，我先不生成作业计划。你整理好要求后再告诉我。"
+                        yield {"type": "text", "message_id": message_id, "content": text}
+                        await _save_message(db, session_id, "assistant", text)
+                        yield {"type": "done"}
+                        return
+                    context_text = str(context_answer or "按默认")
+                    context = _extract_work_context_from_text(context_text)
+                    if not _work_context_has_quality(context):
+                        context = {"raw_notes": context_text, "using_defaults": True}
+                    tool_args["work_context"] = context
+                    tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
+                    preflight_reference_texts.append(context_text)
+                    preflight_user_texts.append(context_text)
+
             schema_preflight_error = tool_schema_preflight_error(
                 tool_name,
                 tool_args,
@@ -1175,6 +2213,8 @@ async def run_agent_loop(
                 tool_result_content = compress_tool_result(tool_name, result)
                 if "error" in result:
                     error_count[tool_name] = error_count.get(tool_name, 0) + 1
+                elif tool_name == "get_free_slots" and isinstance(result.get("slots"), list):
+                    last_free_slots_result = result
                 yield {"type": "tool_result", "name": tool_name, "result": result}
                 await _save_message(
                     db,
@@ -1195,6 +2235,48 @@ async def run_agent_loop(
             step += 1
             tool_history.append(tool_name)
             await _log_step(db, user.id, session_id, step, tool_name, tool_args, result)
+
+            if tool_name == "create_study_plan" and "error" not in result:
+                shortcut = _run_confirmed_study_plan_write(
+                    result.get("tasks"),
+                    user,
+                    session_id,
+                    db,
+                    step,
+                )
+                try:
+                    event = await shortcut.__anext__()
+                    while True:
+                        if event["type"] == "ask_user":
+                            user_response = yield event
+                            event = await shortcut.asend(user_response)
+                        else:
+                            yield event
+                            event = await shortcut.__anext__()
+                except StopAsyncIteration:
+                    pass
+                return
+
+            if tool_name == "create_work_plan" and "error" not in result:
+                shortcut = _run_confirmed_work_plan_write(
+                    result.get("tasks"),
+                    user,
+                    session_id,
+                    db,
+                    step,
+                )
+                try:
+                    event = await shortcut.__anext__()
+                    while True:
+                        if event["type"] == "ask_user":
+                            user_response = yield event
+                            event = await shortcut.asend(user_response)
+                        else:
+                            yield event
+                            event = await shortcut.__anext__()
+                except StopAsyncIteration:
+                    pass
+                return
 
     yield {"type": "error", "message": "Agent loop reached the maximum number of iterations."}
     yield {"type": "done"}

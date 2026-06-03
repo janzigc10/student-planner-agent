@@ -251,6 +251,12 @@ async function createTaskFromBrowser(page: Page, body: Record<string, unknown>) 
   }, body)
 }
 
+function taskDurationMinutes(task: Pick<DbTask, 'start_time' | 'end_time'>) {
+  const [startHour, startMinute] = task.start_time.split(':').map(Number)
+  const [endHour, endMinute] = task.end_time.split(':').map(Number)
+  return (endHour! * 60 + endMinute!) - (startHour! * 60 + startMinute!)
+}
+
 async function writeEvidence(
   page: Page,
   testInfo: TestInfo,
@@ -513,21 +519,27 @@ test.describe('Agent Loop E2E', () => {
     await installWebSocketRecorder(page)
     await registerAndLogin(page, username)
 
+    const studyContextAnswer = '范围 Unit1-6，听力和写作薄弱，目标80分，每天最多2小时。'
     await sendMessage(page, '下周四（2026-06-11）有大学英语3考试，帮我做一个复习计划。')
-    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认', '确认', '确认'], (state) => {
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认', studyContextAnswer, '确认', '确认'], (state) => {
       const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
       const englishTasks = state.tasks.filter((task) => {
         const haystack = `${task.title}\n${task.description ?? ''}`
         return /大学英语|英语/.test(haystack)
+      })
+      const contextualTasks = englishTasks.filter((task) => {
+        const haystack = `${task.title}\n${task.description ?? ''}`
+        return /Unit\s*1|1-6|听力|写作|薄弱|80/.test(haystack)
       })
       return (
         toolNames.includes('get_free_slots') &&
         toolNames.includes('create_study_plan') &&
         toolNames.includes('create_task') &&
         englishTasks.length >= 2 &&
+        contextualTasks.length >= 2 &&
         englishTasks.every((task) => {
           return (
-            task.scheduled_date >= '2026-06-03' &&
+            task.scheduled_date >= '2026-06-02' &&
             task.scheduled_date <= '2026-06-10' &&
             /^([01]\d|2[0-3]):[0-5]\d$/.test(task.start_time) &&
             /^([01]\d|2[0-3]):[0-5]\d$/.test(task.end_time)
@@ -538,18 +550,154 @@ test.describe('Agent Loop E2E', () => {
 
     const toolNames = dbSnapshot.agent_logs.map((log) => String(log.tool_called ?? ''))
     const englishTasks = dbSnapshot.tasks.filter((task) => /大学英语|英语/.test(`${task.title}\n${task.description ?? ''}`))
+    const contextualTasks = englishTasks.filter((task) => {
+      const haystack = `${task.title}\n${task.description ?? ''}`
+      return /Unit\s*1|1-6|听力|写作|薄弱|80/.test(haystack)
+    })
     expect(toolNames).toContain('get_free_slots')
     expect(toolNames).toContain('create_study_plan')
     expect(toolNames).toContain('create_task')
     expect(englishTasks.length).toBeGreaterThanOrEqual(2)
+    expect(contextualTasks.length).toBeGreaterThanOrEqual(2)
     expect(
-      englishTasks.every((task) => task.scheduled_date >= '2026-06-03' && task.scheduled_date <= '2026-06-10'),
+      englishTasks.every((task) => task.scheduled_date >= '2026-06-02' && task.scheduled_date <= '2026-06-10'),
     ).toBe(true)
     await writeEvidence(page, testInfo, 'study-plan-confirmed-write', username, dbSnapshot, {
       taskCount: englishTasks.length,
       taskIds: englishTasks.map((task) => task.id),
+      contextualTaskIds: contextualTasks.map((task) => task.id),
+      studyContextHints: ['Unit1-6', '听力', '写作', '目标80分', '每天最多2小时'],
       toolSequence: toolNames,
       expectedExamDate: '2026-06-11',
+    })
+  })
+
+  test('generates an assignment report plan and writes confirmed staged tasks', async ({ page }, testInfo) => {
+    const username = scenarioUsername('workplan')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    const workContextAnswer = '需要5页PDF，包括实验结果和参考文献，现在还没开始，每天最多2小时。'
+    await sendMessage(page, '2026-06-12 要交机器学习报告，帮我拆成任务。')
+    const dbSnapshot = await driveUntilDbInvariant(page, username, [workContextAnswer, '确认', '确认'], (state) => {
+      const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
+      const reportTasks = state.tasks.filter((task) => {
+        const haystack = `${task.title}\n${task.description ?? ''}`
+        return haystack.includes('机器学习报告')
+      })
+      const stagedTasks = reportTasks.filter((task) => {
+        const haystack = `${task.title}\n${task.description ?? ''}`
+        return /整理|资料|提纲|初稿|修改|提交|参考文献|实验结果/.test(haystack)
+      })
+      return (
+        toolNames.includes('get_free_slots') &&
+        toolNames.includes('create_work_plan') &&
+        toolNames.includes('create_task') &&
+        reportTasks.length >= 3 &&
+        stagedTasks.length >= 3 &&
+        reportTasks.every((task) => {
+          return task.scheduled_date <= '2026-06-11' && taskDurationMinutes(task) <= 120
+        })
+      )
+    })
+
+    const toolNames = dbSnapshot.agent_logs.map((log) => String(log.tool_called ?? ''))
+    const reportTasks = dbSnapshot.tasks.filter((task) => `${task.title}\n${task.description ?? ''}`.includes('机器学习报告'))
+    expect(toolNames).toContain('get_free_slots')
+    expect(toolNames).toContain('create_work_plan')
+    expect(toolNames).toContain('create_task')
+    expect(reportTasks.length).toBeGreaterThanOrEqual(3)
+    expect(reportTasks.every((task) => task.scheduled_date <= '2026-06-11')).toBe(true)
+    expect(reportTasks.every((task) => taskDurationMinutes(task) <= 120)).toBe(true)
+    await writeEvidence(page, testInfo, 'work-plan-confirmed-write', username, dbSnapshot, {
+      taskCount: reportTasks.length,
+      taskIds: reportTasks.map((task) => task.id),
+      workContextHints: ['5页PDF', '实验结果', '参考文献', '每天最多2小时'],
+      toolSequence: toolNames,
+      expectedDueDate: '2026-06-12',
+    })
+  })
+
+  test('generates a multi-exam study plan with tasks for both exams', async ({ page }, testInfo) => {
+    const username = scenarioUsername('multiexam')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    await sendMessage(
+      page,
+      '2026-06-10 有高等数学考试，范围第1-5章；2026-06-12 有大学英语3考试，范围 Unit1-6，听力薄弱。帮我做复习计划，每天最多2小时。',
+    )
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认', '确认', '确认'], (state) => {
+      const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
+      const mathTasks = state.tasks.filter((task) => /高等数学|高数/.test(`${task.title}\n${task.description ?? ''}`))
+      const englishTasks = state.tasks.filter((task) => /大学英语|英语|Unit/.test(`${task.title}\n${task.description ?? ''}`))
+      return (
+        toolNames.includes('get_free_slots') &&
+        toolNames.includes('create_study_plan') &&
+        toolNames.includes('create_task') &&
+        mathTasks.length >= 1 &&
+        englishTasks.length >= 1 &&
+        state.tasks.every((task) => task.scheduled_date <= '2026-06-11')
+      )
+    })
+
+    const toolNames = dbSnapshot.agent_logs.map((log) => String(log.tool_called ?? ''))
+    const mathTasks = dbSnapshot.tasks.filter((task) => /高等数学|高数/.test(`${task.title}\n${task.description ?? ''}`))
+    const englishTasks = dbSnapshot.tasks.filter((task) => /大学英语|英语|Unit/.test(`${task.title}\n${task.description ?? ''}`))
+    expect(toolNames).toContain('create_study_plan')
+    expect(mathTasks.length).toBeGreaterThanOrEqual(1)
+    expect(englishTasks.length).toBeGreaterThanOrEqual(1)
+    await writeEvidence(page, testInfo, 'multi-exam-study-plan', username, dbSnapshot, {
+      mathTaskIds: mathTasks.map((task) => task.id),
+      englishTaskIds: englishTasks.map((task) => task.id),
+      toolSequence: toolNames,
+      expectedExamDates: ['2026-06-10', '2026-06-12'],
+    })
+  })
+
+  test('adjusts an existing assignment plan to a lower daily limit', async ({ page }, testInfo) => {
+    const username = scenarioUsername('planadjust')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+    const firstTask = (await createTaskFromBrowser(page, {
+      title: '机器学习报告 - 完成初稿',
+      scheduled_date: '2026-06-09',
+      start_time: '09:00',
+      end_time: '11:00',
+    })) as { id: string }
+    const secondTask = (await createTaskFromBrowser(page, {
+      title: '机器学习报告 - 修改完善',
+      scheduled_date: '2026-06-10',
+      start_time: '14:00',
+      end_time: '16:00',
+    })) as { id: string }
+
+    await sendMessage(page, '机器学习报告计划太满了，改成每天最多1小时。')
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认'], (state) => {
+      const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
+      const reportTasks = state.tasks.filter((task) => [firstTask.id, secondTask.id].includes(task.id))
+      return (
+        toolNames.includes('list_tasks') &&
+        toolNames.includes('update_task') &&
+        reportTasks.length === 2 &&
+        reportTasks.every((task) => taskDurationMinutes(task) <= 60)
+      )
+    })
+
+    const toolNames = dbSnapshot.agent_logs.map((log) => String(log.tool_called ?? ''))
+    const reportTasks = dbSnapshot.tasks.filter((task) => [firstTask.id, secondTask.id].includes(task.id))
+    expect(toolNames).toContain('list_tasks')
+    expect(toolNames).toContain('update_task')
+    expect(reportTasks).toHaveLength(2)
+    expect(reportTasks.every((task) => taskDurationMinutes(task) <= 60)).toBe(true)
+    await writeEvidence(page, testInfo, 'plan-adjustment-daily-limit', username, dbSnapshot, {
+      taskIds: [firstTask.id, secondTask.id],
+      durations: reportTasks.map((task) => ({ id: task.id, durationMinutes: taskDurationMinutes(task) })),
+      dailyLimitMinutes: 60,
+      toolSequence: toolNames,
     })
   })
 })

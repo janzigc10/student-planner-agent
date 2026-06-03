@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.study_planner import generate_study_plan
+from app.agent.work_planner import generate_work_plan
 from app.models.course import Course
 from app.models.memory import Memory
 from app.models.reminder import Reminder
@@ -262,12 +263,33 @@ async def _create_study_plan(
     user_id: str,
     exams: list,
     available_slots: dict,
+    study_context: dict[str, Any] | None = None,
     strategy: str = "balanced",
     **kwargs,
 ) -> dict[str, Any]:
-    tasks = await generate_study_plan(exams, available_slots, strategy)
+    tasks = await generate_study_plan(exams, available_slots, strategy, study_context=study_context)
     if not tasks:
         return {"error": "Failed to generate study plan. Please try again."}
+    return {"tasks": tasks, "count": len(tasks)}
+
+
+async def _create_work_plan(
+    db: AsyncSession,
+    user_id: str,
+    work_items: list,
+    available_slots: dict,
+    work_context: dict[str, Any] | None = None,
+    strategy: str = "staged",
+    **kwargs,
+) -> dict[str, Any]:
+    tasks = await generate_work_plan(
+        work_items,
+        available_slots,
+        strategy,
+        work_context=work_context,
+    )
+    if not tasks:
+        return {"error": "Failed to generate work plan. Please add deadline details or available time."}
     return {"tasks": tasks, "count": len(tasks)}
 
 
@@ -1137,6 +1159,7 @@ TOOL_HANDLERS = {
     "delete_course": _delete_course,
     "get_free_slots": _get_free_slots,
     "create_study_plan": _create_study_plan,
+    "create_work_plan": _create_work_plan,
     "list_tasks": _list_tasks,
     "create_task": _create_task,
     "update_task": _update_task,

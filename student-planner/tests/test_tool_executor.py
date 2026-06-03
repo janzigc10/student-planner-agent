@@ -1,9 +1,11 @@
+from datetime import date
 from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
 
 from app.agent.tool_executor import execute_tool
+from app.models.course import Course
 from app.models.reminder import Reminder
 from app.models.user import User
 from tests.conftest import TestSession
@@ -119,6 +121,79 @@ async def test_create_task_rejects_time_conflict(setup_db):
         )
         assert "error" in conflict
         assert "conflict" in conflict["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_get_free_slots_keeps_evening_after_evening_course(setup_db):
+    async with TestSession() as db:
+        user = User(
+            id="user-evening-slots",
+            username="evening-slots",
+            hashed_password="x",
+            current_semester_start=date(2026, 6, 1),
+        )
+        db.add(user)
+        db.add(
+            Course(
+                user_id="user-evening-slots",
+                name="晚间课程",
+                weekday=3,
+                start_time="18:00",
+                end_time="20:00",
+                week_start=1,
+                week_end=16,
+                week_pattern="all",
+            )
+        )
+        await db.commit()
+
+        result = await execute_tool(
+            "get_free_slots",
+            {"start_date": "2026-06-03", "end_date": "2026-06-03"},
+            db,
+            "user-evening-slots",
+        )
+
+        free_periods = result["slots"][0]["free_periods"]
+        assert {"start": "20:00", "end": "22:00", "duration_minutes": 120} in free_periods
+        assert {"start": "18:00", "end": "20:00", "type": "course", "name": "晚间课程"} in result["slots"][0][
+            "occupied"
+        ]
+
+
+@pytest.mark.asyncio
+async def test_create_work_plan_dispatches_generator(setup_db):
+    generated_tasks = [
+        {
+            "title": "机器学习报告 - 整理要求",
+            "work_item_name": "机器学习报告",
+            "date": "2026-06-08",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "description": "确认PDF和参考文献要求。",
+        }
+    ]
+
+    async with TestSession() as db:
+        user = User(id="user-work-plan-tool", username="work-plan-tool", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        with patch("app.agent.tool_executor.generate_work_plan", return_value=generated_tasks) as mock_generate:
+            result = await execute_tool(
+                "create_work_plan",
+                {
+                    "work_items": [{"title": "机器学习报告", "due_date": "2026-06-12"}],
+                    "available_slots": {"slots": []},
+                    "work_context": {"requirements": "5页PDF", "daily_work_limit_minutes": 60},
+                },
+                db,
+                "user-work-plan-tool",
+            )
+
+    assert result["count"] == 1
+    assert result["tasks"] == generated_tasks
+    mock_generate.assert_called_once()
 
 
 @pytest.mark.asyncio

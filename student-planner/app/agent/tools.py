@@ -147,6 +147,33 @@ TOOL_DEFINITIONS: list[dict] = [
                         },
                     },
                     "available_slots": {"type": "object", "description": "Output from get_free_slots"},
+                    "study_context": {
+                        "type": "object",
+                        "description": (
+                            "Optional study-quality context collected before planning. "
+                            "Use this to pass exam scope, weak areas, target score, daily study limit, "
+                            "and the user's raw notes so the generated tasks are not generic."
+                        ),
+                        "properties": {
+                            "exam_scope": {"type": "string", "description": "Exam scope, chapters, units, or topics"},
+                            "weak_areas": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Known weak areas such as listening, writing, formulas, or mistakes",
+                            },
+                            "target_score": {"type": "string", "description": "Target score, grade, or pass goal"},
+                            "daily_study_limit_minutes": {
+                                "type": "integer",
+                                "description": "Maximum planned study minutes per day",
+                                "minimum": 30,
+                            },
+                            "raw_notes": {"type": "string", "description": "Original user-provided study notes"},
+                            "using_defaults": {
+                                "type": "boolean",
+                                "description": "True if the user explicitly asked to use default assumptions",
+                            },
+                        },
+                    },
                     "strategy": {
                         "type": "string",
                         "enum": ["balanced", "intensive", "spaced"],
@@ -155,6 +182,68 @@ TOOL_DEFINITIONS: list[dict] = [
                     },
                 },
                 "required": ["exams", "available_slots"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_work_plan",
+            "description": "Generate a staged deadline-oriented plan for assignments, reports, essays, projects, presentations, or lab reports from available time slots. This only creates candidate tasks; confirmed tasks must be written with create_task.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "work_items": {
+                        "type": "array",
+                        "description": "Assignment, report, project, or presentation list",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "Work item title"},
+                                "due_date": {"type": "string", "description": "Deadline in YYYY-MM-DD format"},
+                                "work_type": {
+                                    "type": "string",
+                                    "description": "assignment, report, essay, project, presentation, lab report, etc.",
+                                },
+                                "course_name": {"type": "string", "description": "Related course name if known"},
+                            },
+                            "required": ["title", "due_date"],
+                        },
+                    },
+                    "available_slots": {"type": "object", "description": "Output from get_free_slots"},
+                    "work_context": {
+                        "type": "object",
+                        "description": (
+                            "Optional work-quality context collected before planning. "
+                            "Use this to pass deliverable requirements, format, grading focus, current progress, "
+                            "daily work limit, and raw user notes."
+                        ),
+                        "properties": {
+                            "requirements": {
+                                "type": "string",
+                                "description": "Deliverable requirements, format, grading focus, or constraints",
+                            },
+                            "current_progress": {"type": "string", "description": "What the user has already done"},
+                            "daily_work_limit_minutes": {
+                                "type": "integer",
+                                "description": "Maximum planned work minutes per day",
+                                "minimum": 30,
+                            },
+                            "raw_notes": {"type": "string", "description": "Original user-provided work notes"},
+                            "using_defaults": {
+                                "type": "boolean",
+                                "description": "True if the user explicitly asked to use default assumptions",
+                            },
+                        },
+                    },
+                    "strategy": {
+                        "type": "string",
+                        "enum": ["staged", "front_loaded", "last_mile"],
+                        "description": "Work decomposition strategy",
+                        "default": "staged",
+                    },
+                },
+                "required": ["work_items", "available_slots"],
             },
         },
     },

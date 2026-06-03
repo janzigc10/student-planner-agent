@@ -1,9 +1,11 @@
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
 
 from app.agent.loop import run_agent_loop
+from app.models.agent_log import AgentLog
 from app.models.reminder import Reminder
 from app.models.task import Task
 from app.models.user import User
@@ -1115,3 +1117,515 @@ async def test_agent_loop_handles_missing_task_create_info_locally(setup_db):
             reminders = list(reminder_result.scalars().all())
             assert len(reminders) == 1
             assert reminders[0].remind_at == "2026-07-28T18:45:00"
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_writes_confirmed_study_plan_tasks(setup_db):
+    mock_client = AsyncMock()
+    llm_call_count = 0
+    generated_tasks = [
+        {
+            "title": "大学英语3 - 词汇与短语",
+            "exam_name": "大学英语3",
+            "date": "2026-06-03",
+            "start_time": "09:00",
+            "end_time": "10:30",
+            "description": "复习核心词汇、短语搭配和易错表达。",
+        },
+        {
+            "title": "大学英语3 - 阅读训练",
+            "exam_name": "大学英语3",
+            "date": "2026-06-04",
+            "start_time": "14:00",
+            "end_time": "16:00",
+            "description": "完成两篇阅读理解并整理错题。",
+        },
+    ]
+
+    plan_available_slots: list[dict[str, object]] = []
+    plan_study_contexts: list[dict[str, object] | None] = []
+
+    async def fake_generate_study_plan(exams, available_slots, strategy, study_context=None):
+        plan_available_slots.append(available_slots)
+        plan_study_contexts.append(study_context)
+        return generated_tasks
+
+    def mock_chat_completion_stream(client, messages, tools=None, tool_choice=None):
+        nonlocal llm_call_count
+        llm_call_count += 1
+
+        if llm_call_count == 1:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "ask_exam_1",
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": '{"question":"确认考试信息：2026-06-11 大学英语3。","type":"confirm"}',
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 2:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "free_slots_1",
+                            "type": "function",
+                            "function": {
+                                "name": "get_free_slots",
+                                "arguments": '{"start_date":"2026-06-03","end_date":"2026-06-10"}',
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 3:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "study_plan_1",
+                            "type": "function",
+                            "function": {
+                                "name": "create_study_plan",
+                                "arguments": (
+                                    '{"exams":[{"course_name":"大学英语3","exam_date":"2026-06-11"}],'
+                                    '"available_slots":{"total_free_hours":42,"free_slot_count":8},'
+                                    '"strategy":"balanced"}'
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        raise AssertionError("The loop should not ask the model to continue after confirmed study plan write")
+
+    with (
+        patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
+        patch("app.agent.tool_executor.generate_study_plan", side_effect=fake_generate_study_plan),
+    ):
+        async with TestSession() as db:
+            user = User(
+                id="user-agent-study-plan-write",
+                username="agent-study-plan-write",
+                hashed_password="x",
+            )
+            db.add(user)
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "下周四（2026-06-11）有大学英语3考试，帮我做一个复习计划。",
+                user,
+                "session-agent-study-plan-write",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user" and "拆得更准" in event["question"]:
+                        event = await generator.asend("范围 Unit1-6，听力和写作薄弱，目标80分，每天最多2小时。")
+                    elif event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            create_task_calls = [
+                event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
+            ]
+            assert len(create_task_calls) == 2
+            assert not any(event["type"] == "ask_user" and "拆得更准" in event["question"] for event in events)
+            assert any(
+                event["type"] == "ask_user"
+                and isinstance(event.get("data"), dict)
+                and event["data"].get("count") == 2
+                for event in events
+            )
+            assert any(event["type"] == "text" and "2 条复习任务写入日程" in event["content"] for event in events)
+            assert len(plan_available_slots) == 1
+            assert isinstance(plan_available_slots[0].get("slots"), list)
+            assert plan_available_slots[0]["slots"][0]["date"] == "2026-06-03"
+            assert len(plan_study_contexts) == 1
+            assert plan_study_contexts[0] is not None
+            assert plan_study_contexts[0]["using_defaults"] is True
+            assert plan_study_contexts[0]["raw_notes"] == "按默认"
+
+            task_result = await db.execute(
+                select(Task).where(Task.user_id == "user-agent-study-plan-write").order_by(Task.scheduled_date)
+            )
+            tasks = list(task_result.scalars().all())
+            assert [task.title for task in tasks] == ["大学英语3 - 词汇与短语", "大学英语3 - 阅读训练"]
+            assert [task.scheduled_date for task in tasks] == ["2026-06-03", "2026-06-04"]
+            assert tasks[0].description == "复习核心词汇、短语搭配和易错表达。"
+
+            log_result = await db.execute(
+                select(AgentLog.tool_called)
+                .where(AgentLog.user_id == "user-agent-study-plan-write")
+                .order_by(AgentLog.step)
+            )
+            tool_names = list(log_result.scalars().all())
+            assert tool_names.count("create_study_plan") == 1
+            assert tool_names.count("create_task") == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_collects_context_for_detailed_study_plan(setup_db):
+    mock_client = AsyncMock()
+
+    async with TestSession() as db:
+        user = User(
+            id="user-agent-detailed-study-plan",
+            username="agent-detailed-study-plan",
+            hashed_password="x",
+        )
+        db.add(user)
+        await db.commit()
+
+        generator = run_agent_loop(
+            "2026-06-11 有大学英语3考试，帮我做一个详细复习计划。",
+            user,
+            "session-agent-detailed-study-plan",
+            db,
+            mock_client,
+        )
+
+        event = await generator.__anext__()
+        assert event["type"] == "ask_user"
+        assert "拆得更准" in event["question"]
+        await generator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_writes_confirmed_work_plan_tasks_locally(setup_db):
+    mock_client = AsyncMock()
+    generated_tasks = [
+        {
+            "title": "机器学习报告 - 整理要求和资料",
+            "work_item_name": "机器学习报告",
+            "date": "2099-06-08",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "description": "确认5页PDF、实验结果和参考文献要求。",
+        },
+        {
+            "title": "机器学习报告 - 完成提纲",
+            "work_item_name": "机器学习报告",
+            "date": "2099-06-09",
+            "start_time": "10:00",
+            "end_time": "11:00",
+            "description": "列出报告结构和实验结果位置。",
+        },
+        {
+            "title": "机器学习报告 - 完成初稿",
+            "work_item_name": "机器学习报告",
+            "date": "2099-06-10",
+            "start_time": "14:00",
+            "end_time": "16:00",
+            "description": "完成报告主体初稿。",
+        },
+    ]
+    captured_work_contexts: list[dict[str, object] | None] = []
+
+    async def fake_generate_work_plan(work_items, available_slots, strategy, work_context=None):
+        captured_work_contexts.append(work_context)
+        return generated_tasks
+
+    with (
+        patch("app.agent.loop.chat_completion_stream") as mock_stream,
+        patch("app.agent.tool_executor.generate_work_plan", side_effect=fake_generate_work_plan),
+    ):
+        async with TestSession() as db:
+            user = User(
+                id="user-agent-work-plan-write",
+                username="agent-work-plan-write",
+                hashed_password="x",
+            )
+            db.add(user)
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "2099-06-12 要交机器学习报告，帮我拆成任务。",
+                user,
+                "session-agent-work-plan-write",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user" and "拆得更准" in event["question"]:
+                        event = await generator.asend("需要5页PDF，包括实验结果和参考文献，每天最多2小时。")
+                    elif event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            mock_stream.assert_not_called()
+            assert any(event["type"] == "tool_call" and event["name"] == "get_free_slots" for event in events)
+            assert any(event["type"] == "tool_call" and event["name"] == "create_work_plan" for event in events)
+            create_task_calls = [
+                event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
+            ]
+            assert len(create_task_calls) == 3
+            assert captured_work_contexts[0] is not None
+            assert captured_work_contexts[0]["requirements"] == "需要5页PDF，包括实验结果和参考文献，每天最多2小时。"
+            assert captured_work_contexts[0]["daily_work_limit_minutes"] == 120
+            assert any(event["type"] == "text" and "3 条作业任务写入日程" in event["content"] for event in events)
+
+            task_result = await db.execute(
+                select(Task)
+                .where(Task.user_id == "user-agent-work-plan-write")
+                .order_by(Task.scheduled_date)
+            )
+            tasks = list(task_result.scalars().all())
+            assert [task.title for task in tasks] == [
+                "机器学习报告 - 整理要求和资料",
+                "机器学习报告 - 完成提纲",
+                "机器学习报告 - 完成初稿",
+            ]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_adjusts_existing_plan_daily_limit_locally(setup_db):
+    mock_client = AsyncMock()
+    target_date = (date.today() + timedelta(days=1)).isoformat()
+
+    with patch("app.agent.loop.chat_completion_stream") as mock_stream:
+        async with TestSession() as db:
+            user = User(
+                id="user-agent-plan-adjust",
+                username="agent-plan-adjust",
+                hashed_password="x",
+            )
+            first_task = Task(
+                id="task-plan-adjust-1",
+                user_id="user-agent-plan-adjust",
+                title="机器学习报告 - 完成初稿",
+                scheduled_date=target_date,
+                start_time="09:00",
+                end_time="11:00",
+                status="pending",
+            )
+            second_task = Task(
+                id="task-plan-adjust-2",
+                user_id="user-agent-plan-adjust",
+                title="机器学习报告 - 修改完善",
+                scheduled_date=(date.today() + timedelta(days=2)).isoformat(),
+                start_time="14:00",
+                end_time="16:00",
+                status="pending",
+            )
+            db.add_all([user, first_task, second_task])
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "机器学习报告计划太满了，改成每天最多1小时。",
+                user,
+                "session-agent-plan-adjust",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            mock_stream.assert_not_called()
+            assert any(event["type"] == "tool_call" and event["name"] == "list_tasks" for event in events)
+            update_calls = [
+                event for event in events if event["type"] == "tool_call" and event["name"] == "update_task"
+            ]
+            assert len(update_calls) == 2
+            assert all(event["args"]["end_time"] in {"10:00", "15:00"} for event in update_calls)
+
+            task_result = await db.execute(
+                select(Task)
+                .where(Task.user_id == "user-agent-plan-adjust")
+                .order_by(Task.scheduled_date)
+            )
+            tasks = list(task_result.scalars().all())
+            assert tasks[0].end_time == "10:00"
+            assert tasks[1].end_time == "15:00"
+
+            log_result = await db.execute(
+                select(AgentLog.tool_called)
+                .where(AgentLog.user_id == "user-agent-plan-adjust")
+                .order_by(AgentLog.step)
+            )
+            tool_names = list(log_result.scalars().all())
+            assert tool_names.count("list_tasks") == 1
+            assert tool_names.count("update_task") == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_writes_multi_exam_study_plan_tasks(setup_db):
+    mock_client = AsyncMock()
+    llm_call_count = 0
+    generated_tasks = [
+        {
+            "title": "高等数学 - 极限与导数",
+            "exam_name": "高等数学",
+            "date": "2026-06-08",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "description": "复习第1-3章基础题。",
+        },
+        {
+            "title": "大学英语3 - Unit1-6 听力",
+            "exam_name": "大学英语3",
+            "date": "2026-06-09",
+            "start_time": "14:00",
+            "end_time": "15:00",
+            "description": "完成Unit1-6听力专项训练。",
+        },
+    ]
+
+    async def fake_generate_study_plan(exams, available_slots, strategy, study_context=None):
+        return generated_tasks
+
+    def mock_chat_completion_stream(client, messages, tools=None, tool_choice=None):
+        nonlocal llm_call_count
+        llm_call_count += 1
+
+        if llm_call_count == 1:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "ask_multi_exam",
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": '{"question":"确认两门考试：2026-06-10 高等数学，2026-06-12 大学英语3。","type":"confirm"}',
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 2:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "free_slots_multi_exam",
+                            "type": "function",
+                            "function": {
+                                "name": "get_free_slots",
+                                "arguments": '{"start_date":"2026-06-03","end_date":"2026-06-11"}',
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 3:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "study_plan_multi_exam",
+                            "type": "function",
+                            "function": {
+                                "name": "create_study_plan",
+                                "arguments": (
+                                    '{"exams":['
+                                    '{"course_name":"高等数学","exam_date":"2026-06-10","difficulty":"hard"},'
+                                    '{"course_name":"大学英语3","exam_date":"2026-06-12","difficulty":"medium"}'
+                                    '],'
+                                    '"available_slots":{"slots":[]},'
+                                    '"study_context":{"exam_scope":"高数第1-5章；英语Unit1-6","daily_study_limit_minutes":120},'
+                                    '"strategy":"balanced"}'
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        raise AssertionError("The loop should stop after confirmed multi-exam study plan write")
+
+    with (
+        patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
+        patch("app.agent.tool_executor.generate_study_plan", side_effect=fake_generate_study_plan),
+    ):
+        async with TestSession() as db:
+            user = User(
+                id="user-agent-multi-exam",
+                username="agent-multi-exam",
+                hashed_password="x",
+            )
+            db.add(user)
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "2026-06-10 高等数学考试，范围第1-5章；2026-06-12 大学英语3考试，范围Unit1-6。帮我做复习计划，每天最多2小时。",
+                user,
+                "session-agent-multi-exam",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            create_task_calls = [
+                event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
+            ]
+            assert len(create_task_calls) == 2
+
+            task_result = await db.execute(
+                select(Task)
+                .where(Task.user_id == "user-agent-multi-exam")
+                .order_by(Task.scheduled_date)
+            )
+            tasks = list(task_result.scalars().all())
+            assert any("高等数学" in task.title for task in tasks)
+            assert any("大学英语3" in task.title for task in tasks)
