@@ -888,6 +888,112 @@ def _study_plan_review_data(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _plan_task_date_range(tasks: list[dict[str, Any]]) -> tuple[str, str] | None:
+    dates: list[str] = []
+    for task in tasks:
+        scheduled_date = str(task.get("scheduled_date") or "")
+        try:
+            date.fromisoformat(scheduled_date)
+        except ValueError:
+            continue
+        dates.append(scheduled_date)
+    if not dates:
+        return None
+    return min(dates), max(dates)
+
+
+def _time_to_minutes(value: str) -> int | None:
+    try:
+        parsed = datetime.strptime(value, "%H:%M")
+    except ValueError:
+        return None
+    return parsed.hour * 60 + parsed.minute
+
+
+def _is_time_conflict_result(result: dict[str, Any]) -> bool:
+    error = str(result.get("error") or "").lower()
+    return "conflict" in error or "时间冲突" in error
+
+
+def _reschedule_candidate_rank(
+    original_date: str,
+    original_start: str,
+    candidate_date: str,
+    candidate_start: str,
+) -> tuple[int, str, int]:
+    original_start_minutes = _time_to_minutes(original_start) or 0
+    candidate_start_minutes = _time_to_minutes(candidate_start) or 0
+    if candidate_date == original_date and candidate_start_minutes >= original_start_minutes:
+        rank = 0
+    elif candidate_date > original_date:
+        rank = 1
+    elif candidate_date == original_date:
+        rank = 2
+    else:
+        rank = 3
+    return rank, candidate_date, candidate_start_minutes
+
+
+def _find_rescheduled_task_args(
+    task_args: dict[str, Any],
+    free_slots_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    duration = _task_duration_minutes(task_args)
+    if duration is None:
+        return None
+
+    original_date = str(task_args.get("scheduled_date") or "")
+    original_start = str(task_args.get("start_time") or "")
+    candidates: list[tuple[tuple[int, str, int], dict[str, Any]]] = []
+    slots = free_slots_result.get("slots")
+    if not isinstance(slots, list):
+        return None
+
+    for day in slots:
+        if not isinstance(day, dict):
+            continue
+        candidate_date = str(day.get("date") or "")
+        periods = day.get("free_periods")
+        if not candidate_date or not isinstance(periods, list):
+            continue
+        for period in periods:
+            if not isinstance(period, dict):
+                continue
+            start_time = str(period.get("start") or "")
+            try:
+                available_minutes = int(period.get("duration_minutes") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not start_time or available_minutes < duration:
+                continue
+            rescheduled = dict(task_args)
+            rescheduled["scheduled_date"] = candidate_date
+            rescheduled["start_time"] = start_time
+            rescheduled["end_time"] = _time_after_minutes(start_time, duration)
+            if (
+                rescheduled.get("scheduled_date") == task_args.get("scheduled_date")
+                and rescheduled.get("start_time") == task_args.get("start_time")
+                and rescheduled.get("end_time") == task_args.get("end_time")
+            ):
+                continue
+            candidates.append(
+                (
+                    _reschedule_candidate_rank(
+                        original_date=original_date,
+                        original_start=original_start,
+                        candidate_date=candidate_date,
+                        candidate_start=start_time,
+                    ),
+                    rescheduled,
+                )
+            )
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
 def _should_handle_course_merge_locally(
     user_message: str,
     history_messages: list[ConversationMessage],
@@ -1444,8 +1550,10 @@ async def _run_confirmed_plan_write(
         return
 
     step = start_step
+    plan_date_range = _plan_task_date_range(tasks)
     created_results: list[dict[str, Any]] = []
     failed_results: list[dict[str, Any]] = []
+    rescheduled_results: list[dict[str, Any]] = []
     for task_args in tasks:
         step += 1
         yield {"type": "tool_call", "name": "create_task", "args": task_args}
@@ -1460,16 +1568,75 @@ async def _run_confirmed_plan_write(
             task_args,
             create_result,
         )
-        if "error" in create_result:
-            failed_results.append(create_result)
-        else:
+        if "error" not in create_result:
             created_results.append(create_result)
+            continue
+
+        duration = _task_duration_minutes(task_args)
+        if not (_is_time_conflict_result(create_result) and plan_date_range is not None and duration is not None):
+            failed_results.append(create_result)
+            continue
+
+        start_date, end_date = plan_date_range
+        free_args = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "min_duration_minutes": duration,
+        }
+        step += 1
+        yield {"type": "tool_call", "name": "get_free_slots", "args": free_args}
+        free_result = await execute_tool("get_free_slots", free_args, db, user.id)
+        yield {"type": "tool_result", "name": "get_free_slots", "result": free_result}
+        await _persist_local_tool_step(
+            db,
+            session_id,
+            user.id,
+            step,
+            "get_free_slots",
+            free_args,
+            free_result,
+        )
+
+        rescheduled_args = _find_rescheduled_task_args(task_args, free_result)
+        if rescheduled_args is None:
+            failed_results.append(create_result)
+            continue
+
+        step += 1
+        yield {"type": "tool_call", "name": "create_task", "args": rescheduled_args}
+        retry_result = await execute_tool("create_task", rescheduled_args, db, user.id)
+        yield {"type": "tool_result", "name": "create_task", "result": retry_result}
+        await _persist_local_tool_step(
+            db,
+            session_id,
+            user.id,
+            step,
+            "create_task",
+            rescheduled_args,
+            retry_result,
+        )
+        if "error" in retry_result:
+            failed_results.append(retry_result)
+            continue
+        created_results.append(retry_result)
+        rescheduled_results.append(
+            {
+                "title": rescheduled_args.get("title") or task_args.get("title"),
+                "from": f"{task_args.get('scheduled_date')} {task_args.get('start_time')}-{task_args.get('end_time')}",
+                "to": f"{rescheduled_args.get('scheduled_date')} {rescheduled_args.get('start_time')}-{rescheduled_args.get('end_time')}",
+            }
+        )
 
     message_id = str(uuid.uuid4())
+    reschedule_text = ""
+    if rescheduled_results:
+        reschedule_text = f"其中 {len(rescheduled_results)} 条因原时间冲突已自动重排；"
     if failed_results and created_results:
-        text = f"已写入 {len(created_results)} 条{task_label}；另有 {len(failed_results)} 条因为时间冲突或参数问题未写入。"
+        text = f"已写入 {len(created_results)} 条{task_label}；{reschedule_text}另有 {len(failed_results)} 条因为时间冲突或参数问题未写入。"
     elif failed_results:
         text = f"这些{task_label}暂时没有写入成功，主要原因是时间冲突或参数不完整。请调整后再试。"
+    elif rescheduled_results:
+        text = f"已把 {len(created_results)} 条{task_label}写入日程，其中 {len(rescheduled_results)} 条因原时间冲突已自动重排。"
     else:
         text = f"已把 {len(created_results)} 条{task_label}写入日程。"
 

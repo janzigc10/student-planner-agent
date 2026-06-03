@@ -31,6 +31,14 @@ interface DbSnapshot {
   messages: Array<Record<string, unknown>>
 }
 
+interface ReviewPlanTask {
+  title: string
+  scheduled_date: string
+  start_time: string
+  end_time: string
+  description?: string | null
+}
+
 const backendDir = path.resolve(process.cwd(), '..')
 const dbHelper = path.join(backendDir, 'scripts', 'agent_loop_e2e_db.py')
 const python = process.env.AGENT_E2E_PYTHON ?? (process.platform === 'win32' ? 'C:\\Users\\Chen\\anaconda3\\python.exe' : 'python')
@@ -231,6 +239,46 @@ async function driveUntilDbInvariant(
     await page.waitForTimeout(2_000)
   }
   return waitForSnapshot(username, predicate)
+}
+
+async function waitForLatestReviewPlanTask(page: Page, timeout = 120_000): Promise<ReviewPlanTask> {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    const task = await page.evaluate(() => {
+      type RecordedEvent = { direction: 'client' | 'server'; payload: unknown }
+      type Payload = { type?: unknown; data?: { tasks?: unknown } }
+      const events = ((window as unknown as { __agentE2eEvents?: RecordedEvent[] }).__agentE2eEvents ?? []).filter(
+        (event) => event.direction === 'server',
+      )
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const payload = events[index]!.payload as Payload
+        if (payload?.type !== 'ask_user') continue
+        const tasks = payload.data?.tasks
+        if (!Array.isArray(tasks) || tasks.length === 0) continue
+        const first = tasks[0] as Record<string, unknown>
+        if (
+          typeof first.title === 'string' &&
+          typeof first.scheduled_date === 'string' &&
+          typeof first.start_time === 'string' &&
+          typeof first.end_time === 'string'
+        ) {
+          return {
+            title: first.title,
+            scheduled_date: first.scheduled_date,
+            start_time: first.start_time,
+            end_time: first.end_time,
+            description: typeof first.description === 'string' ? first.description : null,
+          }
+        }
+      }
+      return null
+    })
+    if (task) {
+      return task
+    }
+    await page.waitForTimeout(1_000)
+  }
+  throw new Error('Timed out waiting for review plan task')
 }
 
 async function createTaskFromBrowser(page: Page, body: Record<string, unknown>) {
@@ -616,6 +664,74 @@ test.describe('Agent Loop E2E', () => {
       workContextHints: ['5页PDF', '实验结果', '参考文献', '每天最多2小时'],
       toolSequence: toolNames,
       expectedDueDate: '2026-06-12',
+    })
+  })
+
+  test('reschedules a confirmed plan task when the original slot conflicts before write', async ({ page }, testInfo) => {
+    const username = scenarioUsername('reschedule')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    const workContextAnswer = '需要5页PDF，包括实验结果和参考文献，现在还没开始，每天最多2小时。'
+    await sendMessage(page, '2026-06-12 要交机器学习报告，帮我拆成任务。')
+    await expect.poll(() => waitForAskPrompt(page, 1_000), { timeout: 30_000 }).toBe(true)
+    expect(await answerVisibleAsk(page, workContextAnswer)).toBe(true)
+
+    const plannedTask = await waitForLatestReviewPlanTask(page)
+    const blocker = (await createTaskFromBrowser(page, {
+      title: '临时占用 - 主动重排 E2E',
+      scheduled_date: plannedTask.scheduled_date,
+      start_time: plannedTask.start_time,
+      end_time: plannedTask.end_time,
+    })) as { id: string }
+
+    expect(await answerVisibleAsk(page, '确认')).toBe(true)
+    const dbSnapshot = await waitForSnapshot(username, (state) => {
+      const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
+      const firstTaskMatches = state.tasks.filter((task) => task.title === plannedTask.title)
+      const hasConflictResult = state.agent_logs.some((log) => String(log.tool_result ?? '').includes('Time conflict'))
+      const hasAutoRescheduleMessage = state.messages.some((message) => {
+        return String(message.role ?? '') === 'assistant' && String(message.content ?? '').includes('自动重排')
+      })
+      const hasRescheduledTask = firstTaskMatches.some((task) => {
+        return (
+          task.scheduled_date !== plannedTask.scheduled_date ||
+          task.start_time !== plannedTask.start_time ||
+          task.end_time !== plannedTask.end_time
+        )
+      })
+      return (
+        toolNames.filter((name) => name === 'get_free_slots').length >= 2 &&
+        toolNames.filter((name) => name === 'create_task').length >= 2 &&
+        hasConflictResult &&
+        hasAutoRescheduleMessage &&
+        hasRescheduledTask
+      )
+    })
+
+    const toolNames = dbSnapshot.agent_logs.map((log) => String(log.tool_called ?? ''))
+    const firstTaskMatches = dbSnapshot.tasks.filter((task) => task.title === plannedTask.title)
+    const rescheduledTask = firstTaskMatches.find((task) => {
+      return (
+        task.scheduled_date !== plannedTask.scheduled_date ||
+        task.start_time !== plannedTask.start_time ||
+        task.end_time !== plannedTask.end_time
+      )
+    })
+    expect(rescheduledTask).toBeTruthy()
+    expect(dbSnapshot.tasks.some((task) => task.id === blocker.id)).toBe(true)
+    expect(
+      dbSnapshot.agent_logs.some((log) => {
+        return String(log.tool_called ?? '') === 'create_task' && String(log.tool_result ?? '').includes('Time conflict')
+      }),
+    ).toBe(true)
+    expect(toolNames.filter((name) => name === 'get_free_slots').length).toBeGreaterThanOrEqual(2)
+    await writeEvidence(page, testInfo, 'plan-write-active-reschedule', username, dbSnapshot, {
+      plannedTask,
+      blockerId: blocker.id,
+      rescheduledTask,
+      toolSequence: toolNames,
     })
   })
 

@@ -1410,6 +1410,187 @@ async def test_agent_loop_writes_confirmed_work_plan_tasks_locally(setup_db):
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_reschedules_confirmed_plan_task_after_time_conflict(setup_db):
+    mock_client = AsyncMock()
+    generated_tasks = [
+        {
+            "title": "机器学习报告 - 整理要求和资料",
+            "work_item_name": "机器学习报告",
+            "date": "2099-06-08",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "description": "确认报告要求和资料。",
+        },
+    ]
+
+    async def fake_generate_work_plan(work_items, available_slots, strategy, work_context=None):
+        return generated_tasks
+
+    with (
+        patch("app.agent.loop.chat_completion_stream") as mock_stream,
+        patch("app.agent.tool_executor.generate_work_plan", side_effect=fake_generate_work_plan),
+    ):
+        async with TestSession() as db:
+            user = User(
+                id="user-agent-work-plan-reschedule",
+                username="agent-work-plan-reschedule",
+                hashed_password="x",
+            )
+            blocker = Task(
+                id="task-work-plan-conflict",
+                user_id="user-agent-work-plan-reschedule",
+                title="已有安排",
+                scheduled_date="2099-06-08",
+                start_time="09:00",
+                end_time="10:00",
+            )
+            db.add_all([user, blocker])
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "2099-06-12 要交机器学习报告，帮我拆成任务。",
+                user,
+                "session-agent-work-plan-reschedule",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user" and "拆得更准" in event["question"]:
+                        event = await generator.asend("需要5页PDF，包括实验结果和参考文献，每天最多2小时。")
+                    elif event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            mock_stream.assert_not_called()
+            assert any(event["type"] == "text" and "自动重排" in event["content"] for event in events)
+
+            create_task_calls = [
+                event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
+            ]
+            assert len(create_task_calls) == 2
+            assert create_task_calls[0]["args"]["start_time"] == "09:00"
+            assert create_task_calls[1]["args"]["start_time"] == "10:00"
+            assert create_task_calls[1]["args"]["end_time"] == "11:00"
+            assert any(
+                event["type"] == "tool_call"
+                and event["name"] == "get_free_slots"
+                and event["args"]["start_date"] == "2099-06-08"
+                and event["args"]["end_date"] == "2099-06-08"
+                and event["args"]["min_duration_minutes"] == 60
+                for event in events
+            )
+
+            task_result = await db.execute(
+                select(Task)
+                .where(Task.user_id == "user-agent-work-plan-reschedule")
+                .order_by(Task.start_time)
+            )
+            tasks = list(task_result.scalars().all())
+            assert [(task.title, task.start_time, task.end_time) for task in tasks] == [
+                ("已有安排", "09:00", "10:00"),
+                ("机器学习报告 - 整理要求和资料", "10:00", "11:00"),
+            ]
+
+            log_result = await db.execute(
+                select(AgentLog.tool_called)
+                .where(AgentLog.user_id == "user-agent-work-plan-reschedule")
+                .order_by(AgentLog.step)
+            )
+            tool_names = list(log_result.scalars().all())
+            assert tool_names == [
+                "get_free_slots",
+                "create_work_plan",
+                "create_task",
+                "get_free_slots",
+                "create_task",
+            ]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_reports_unwritten_plan_task_when_conflict_has_no_free_slot(setup_db):
+    mock_client = AsyncMock()
+    generated_tasks = [
+        {
+            "title": "机器学习报告 - 整理要求和资料",
+            "work_item_name": "机器学习报告",
+            "date": "2099-06-08",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "description": "确认报告要求和资料。",
+        },
+    ]
+
+    async def fake_generate_work_plan(work_items, available_slots, strategy, work_context=None):
+        return generated_tasks
+
+    with (
+        patch("app.agent.loop.chat_completion_stream") as mock_stream,
+        patch("app.agent.tool_executor.generate_work_plan", side_effect=fake_generate_work_plan),
+    ):
+        async with TestSession() as db:
+            user = User(
+                id="user-agent-work-plan-no-reschedule-slot",
+                username="agent-work-plan-no-reschedule-slot",
+                hashed_password="x",
+            )
+            blocker = Task(
+                id="task-work-plan-all-day-conflict",
+                user_id="user-agent-work-plan-no-reschedule-slot",
+                title="全天已有安排",
+                scheduled_date="2099-06-08",
+                start_time="08:00",
+                end_time="22:00",
+            )
+            db.add_all([user, blocker])
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "2099-06-12 要交机器学习报告，帮我拆成任务。",
+                user,
+                "session-agent-work-plan-no-reschedule-slot",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user" and "拆得更准" in event["question"]:
+                        event = await generator.asend("需要5页PDF，包括实验结果和参考文献，每天最多2小时。")
+                    elif event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            mock_stream.assert_not_called()
+            assert any(event["type"] == "text" and "暂时没有写入成功" in event["content"] for event in events)
+            create_task_calls = [
+                event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
+            ]
+            assert len(create_task_calls) == 1
+            assert any(event["type"] == "tool_call" and event["name"] == "get_free_slots" for event in events)
+
+            task_result = await db.execute(
+                select(Task).where(Task.user_id == "user-agent-work-plan-no-reschedule-slot")
+            )
+            tasks = list(task_result.scalars().all())
+            assert len(tasks) == 1
+            assert tasks[0].title == "全天已有安排"
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_adjusts_existing_plan_daily_limit_locally(setup_db):
     mock_client = AsyncMock()
     target_date = (date.today() + timedelta(days=1)).isoformat()
