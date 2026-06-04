@@ -244,6 +244,11 @@ _PLAN_ADJUSTMENT_KEYWORDS = (
     "改成",
     "改为",
 )
+_COURSE_RENAME_PATTERNS = (
+    re.compile(r"(?:把|将)?(?P<old>.+?)(?:改成|改为|改名为|统一成|统一为)(?P<new>.+)"),
+    re.compile(r"(?:把|将)?(?P<old>.+?)(?:改名|更名)(?:为|成)?(?P<new>.+)"),
+)
+_COURSE_DELETE_RE = re.compile(r"(?:删掉|删除|去掉|移除)(?P<target>.+)")
 
 
 def _normalize_ask_type(result: dict[str, Any]) -> str:
@@ -994,20 +999,120 @@ def _find_rescheduled_task_args(
     return candidates[0][1]
 
 
+def _clean_course_name_fragment(value: str) -> str:
+    text = str(value or "").strip()
+    text = text.strip(" \t\r\n，,。.?？:：；;！!\"'“”‘’`")
+    prefixes = (
+        "课表里的",
+        "课表里",
+        "课程里的",
+        "课程里",
+        "日历里的",
+        "日历里",
+        "那个",
+        "这个",
+        "这门课程",
+        "这门课",
+        "课程",
+    )
+    suffixes = (
+        "这门课程",
+        "这门课",
+        "这个课程",
+        "这个课",
+        "这条记录",
+        "这条",
+        "记录",
+        "课程",
+        "一下",
+        "吧",
+        "啦",
+        "了",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for prefix in prefixes:
+            if text.startswith(prefix):
+                text = text[len(prefix) :].strip(" \t\r\n，,。.?？:：；;！!\"'“”‘’`")
+                changed = True
+        for suffix in suffixes:
+            if text.endswith(suffix):
+                text = text[: -len(suffix)].strip(" \t\r\n，,。.?？:：；;！!\"'“”‘’`")
+                changed = True
+    return text
+
+
+def _parse_course_rename_request(user_text: str) -> dict[str, str] | None:
+    text = str(user_text or "").strip()
+    for pattern in _COURSE_RENAME_PATTERNS:
+        match = pattern.search(text)
+        if match is None:
+            continue
+        old_name = _clean_course_name_fragment(match.group("old"))
+        new_name = _clean_course_name_fragment(match.group("new"))
+        if len(old_name) >= 2 and len(new_name) >= 2 and old_name != new_name:
+            return {"kind": "rename", "old_name": old_name, "new_name": new_name}
+    return None
+
+
+def _parse_course_delete_request(user_text: str) -> dict[str, str] | None:
+    match = _COURSE_DELETE_RE.search(str(user_text or ""))
+    if match is None:
+        return None
+    target_name = _clean_course_name_fragment(match.group("target"))
+    if len(target_name) < 2:
+        return None
+    return {"kind": "delete", "target_name": target_name}
+
+
+def _course_slot_key(course: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        course.get("weekday"),
+        course.get("start_time"),
+        course.get("end_time"),
+        course.get("location") or "",
+        course.get("week_start"),
+        course.get("week_end"),
+        course.get("week_pattern") or "all",
+    )
+
+
 def _should_handle_course_merge_locally(
     user_message: str,
     history_messages: list[ConversationMessage],
 ) -> bool:
+    return _course_maintenance_intent(user_message, history_messages) is not None
+
+
+def _course_maintenance_intent(
+    user_message: str,
+    history_messages: list[ConversationMessage],
+) -> dict[str, str] | None:
     compact_message = (user_message or "").strip().lower().replace(" ", "")
     if not compact_message:
-        return False
+        return None
     if any(keyword in compact_message for keyword in _SCHEDULE_IMPORT_KEYWORDS):
-        return False
+        return None
+
+    mentions_course_context = any(keyword in compact_message for keyword in _COURSE_CONTEXT_KEYWORDS)
+    if any(keyword in compact_message for keyword in ("任务", "提醒")) and not mentions_course_context:
+        return None
+
+    rename_intent = _parse_course_rename_request(user_message)
+    if rename_intent is not None:
+        return rename_intent
+
+    delete_intent = _parse_course_delete_request(user_message)
+    if delete_intent is not None and (mentions_course_context or "课" in compact_message):
+        return delete_intent
 
     merge_keywords = ("优化成一门", "合并成一门", "还是两门课", "重复课程", "重复的课")
     if any(keyword in compact_message for keyword in merge_keywords):
-        return True
-    return _is_course_followup_message(user_message, history_messages)
+        return {"kind": "merge"}
+    if _is_course_followup_message(user_message, history_messages):
+        return {"kind": "merge"}
+    return None
 
 
 def _match_courses_from_text(user_text: str, courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1017,6 +1122,151 @@ def _match_courses_from_text(user_text: str, courses: list[dict[str, Any]]) -> l
         if course_name and course_name in user_text:
             matches.append(course)
     return matches
+
+
+def _match_courses_by_name_fragment(fragment: str, courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    target = _clean_course_name_fragment(fragment)
+    if len(target) < 2:
+        return []
+
+    exact_matches = [course for course in courses if str(course.get("name") or "").strip() == target]
+    if exact_matches:
+        return sorted(
+            exact_matches,
+            key=lambda course: (
+                course.get("weekday") or 999,
+                str(course.get("start_time") or ""),
+                str(course.get("end_time") or ""),
+                str(course.get("id") or ""),
+            ),
+        )
+
+    fuzzy_matches = []
+    for course in courses:
+        course_name = str(course.get("name") or "").strip()
+        if course_name and (course_name in target or target in course_name):
+            fuzzy_matches.append(course)
+    return sorted(
+        fuzzy_matches,
+        key=lambda course: (
+            course.get("weekday") or 999,
+            str(course.get("start_time") or ""),
+            str(course.get("end_time") or ""),
+            str(course.get("id") or ""),
+        ),
+    )
+
+
+def _course_snapshot(course: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(course.get("id") or ""),
+        "name": str(course.get("name") or ""),
+        "teacher": course.get("teacher"),
+        "location": course.get("location"),
+        "weekday": course.get("weekday"),
+        "start_time": course.get("start_time"),
+        "end_time": course.get("end_time"),
+        "week_start": course.get("week_start"),
+        "week_end": course.get("week_end"),
+        "week_pattern": course.get("week_pattern") or "all",
+        "week_text": course.get("week_text"),
+    }
+
+
+def _build_course_rename_actions(
+    old_name: str,
+    new_name: str,
+    courses: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str | None]:
+    matches = _match_courses_by_name_fragment(old_name, courses)
+    if not matches:
+        return [], "not_found"
+
+    actions: list[dict[str, Any]] = []
+    for course in matches:
+        same_slot_canonical = next(
+            (
+                candidate
+                for candidate in courses
+                if str(candidate.get("id") or "") != str(course.get("id") or "")
+                and str(candidate.get("name") or "").strip() == new_name
+                and _course_slot_key(candidate) == _course_slot_key(course)
+            ),
+            None,
+        )
+        if same_slot_canonical is not None:
+            actions.append(
+                {
+                    "action": "delete",
+                    "course": _course_snapshot(course),
+                    "reason": f"同一时段已存在「{new_name}」，删除重复错名记录",
+                    "canonical_course": _course_snapshot(same_slot_canonical),
+                }
+            )
+            continue
+        actions.append(
+            {
+                "action": "update",
+                "course": _course_snapshot(course),
+                "updates": {"name": new_name},
+                "reason": f"把课程名改为「{new_name}」",
+            }
+        )
+    return actions, None
+
+
+def _build_course_delete_actions(
+    target_name: str,
+    courses: list[dict[str, Any]],
+    user_text: str,
+) -> tuple[list[dict[str, Any]], str | None]:
+    matches = _match_courses_by_name_fragment(target_name, courses)
+    if not matches:
+        return [], "not_found"
+    delete_all = any(keyword in user_text for keyword in ("全部", "所有", "都删", "全删"))
+    if len(matches) > 1 and not delete_all:
+        return [], "ambiguous"
+    return [
+        {
+            "action": "delete",
+            "course": _course_snapshot(course),
+            "reason": "删除用户指定的错误课程记录",
+        }
+        for course in matches
+    ], None
+
+
+def _actions_from_course_merge_plan(
+    merge_plan: list[dict[str, Any]],
+    courses: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    courses_by_id = {str(course.get("id") or ""): course for course in courses}
+    actions: list[dict[str, Any]] = []
+    for item in merge_plan:
+        rename_to = item.get("rename_to")
+        keep_course_id = str(item.get("keep_course_id") or "")
+        if rename_to and keep_course_id:
+            keep_course = courses_by_id.get(keep_course_id, {"id": keep_course_id, "name": item.get("keep_name")})
+            actions.append(
+                {
+                    "action": "update",
+                    "course": _course_snapshot(keep_course),
+                    "updates": {"name": rename_to},
+                    "reason": f"保留该时段并统一课程名为「{rename_to}」",
+                }
+            )
+
+        for course_id in item.get("delete_ids", []):
+            course = courses_by_id.get(str(course_id), {"id": str(course_id), "name": ""})
+            actions.append(
+                {
+                    "action": "delete",
+                    "course": _course_snapshot(course),
+                    "reason": f"删除与「{item.get('keep_name')}」同一时段的重复记录",
+                    "canonical_name": item.get("keep_name"),
+                }
+            )
+    return actions
 
 
 def _build_course_merge_plan(courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1325,8 +1575,9 @@ async def _run_course_merge_shortcut(
     db: AsyncSession,
     history_messages: list[ConversationMessage],
 ) -> AsyncGenerator[dict[str, Any], str | None]:
+    intent = _course_maintenance_intent(user_message, history_messages) or {"kind": "merge"}
     selected_names_text = user_message
-    if not _is_course_followup_message(user_message, history_messages):
+    if intent.get("kind") == "merge" and not _is_course_followup_message(user_message, history_messages):
         selected_names_text = yield {
             "type": "ask_user",
             "ask_type": "review",
@@ -1346,47 +1597,79 @@ async def _run_course_merge_shortcut(
     yield {"type": "tool_call", "name": "list_courses", "args": {}}
     list_result = await execute_tool("list_courses", {}, db, user.id)
     yield {"type": "tool_result", "name": "list_courses", "result": list_result}
-    await _save_message(
-        db,
-        session_id,
-        "assistant",
-        _to_persisted_tool_summary("list_courses", compress_tool_result("list_courses", list_result)),
-        is_compressed=True,
-    )
-    await _log_step(db, user.id, session_id, 1, "list_courses", {}, list_result)
+    await _persist_local_tool_step(db, session_id, user.id, 1, "list_courses", {}, list_result)
 
-    matched_courses = _match_courses_from_text(selected_names_text, list_result.get("courses", []))
-    merge_plan = _build_course_merge_plan(matched_courses)
-    if not merge_plan:
+    if "error" in list_result:
         message_id = str(uuid.uuid4())
-        text = "我先查了当前课表，但还没定位到可以直接合并的重复记录。你可以把要保留的课程名再明确发我一次。"
+        text = str(list_result.get("error") or "课表查询失败，请稍后重试。")
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    courses = list(list_result.get("courses") or [])
+    actions: list[dict[str, Any]] = []
+    issue: str | None = None
+    kind = str(intent.get("kind") or "merge")
+    if kind == "rename":
+        actions, issue = _build_course_rename_actions(
+            str(intent.get("old_name") or ""),
+            str(intent.get("new_name") or ""),
+            courses,
+        )
+    elif kind == "delete":
+        actions, issue = _build_course_delete_actions(
+            str(intent.get("target_name") or ""),
+            courses,
+            user_message,
+        )
+    else:
+        matched_courses = _match_courses_from_text(selected_names_text, courses)
+        merge_plan = _build_course_merge_plan(matched_courses)
+        if not merge_plan:
+            issue = "not_found"
+        else:
+            actions = _actions_from_course_merge_plan(merge_plan, matched_courses)
+
+    if not actions:
+        message_id = str(uuid.uuid4())
+        if issue == "ambiguous":
+            text = "我先查了当前课表，但匹配到多条同名课程。请补充周几、时间或地点后我再删除，避免误删。"
+        elif kind == "rename":
+            text = f"我先查了当前课表，但没有找到「{intent.get('old_name')}」。请确认课程名后再让我修改。"
+        elif kind == "delete":
+            text = f"我先查了当前课表，但没有找到「{intent.get('target_name')}」。请确认课程名后再让我删除。"
+        else:
+            text = "我先查了当前课表，但还没定位到可以直接合并的重复记录。你可以把要保留的课程名再明确发我一次。"
         yield {"type": "text", "message_id": message_id, "content": text}
         await _save_message(db, session_id, "assistant", text)
         yield {"type": "done"}
         return
 
     review_data = {
-        "plans": [
+        "actions": [
             {
-                "weekday": item["weekday"],
-                "start_time": item["start_time"],
-                "end_time": item["end_time"],
-                "location": item["location"],
-                "week_start": item["week_start"],
-                "week_end": item["week_end"],
-                "week_pattern": item["week_pattern"],
-                "current_names": item["current_names"],
-                "keep_name": item["keep_name"],
-                "delete_count": len(item["delete_ids"]),
+                "action": item["action"],
+                "course": item["course"],
+                "updates": item.get("updates"),
+                "reason": item.get("reason"),
             }
-            for item in merge_plan
+            for item in actions
         ],
-        "count": len(merge_plan),
+        "count": len(actions),
     }
+    question = "我准备按下面方案维护课程记录。确认后我就直接处理。"
+    if kind == "rename":
+        question = "我准备按下面方案修改课程名。确认后我就直接处理。"
+    elif kind == "delete":
+        question = "我准备删除下面这些课程记录。确认后我就直接处理。"
+    elif kind == "merge":
+        question = "我准备把这些重复课程合并成每个时段 1 条记录。确认后我就直接处理。"
+
     confirm_answer = yield {
         "type": "ask_user",
         "ask_type": "review",
-        "question": "我准备把这些重复课程合并成每个时段 1 条记录。确认后我就直接处理。",
+        "question": question,
         "options": ["确认", "取消"],
         "data": review_data,
     }
@@ -1399,42 +1682,57 @@ async def _run_course_merge_shortcut(
         return
 
     step = 1
-    for item in merge_plan:
-        rename_to = item.get("rename_to")
-        keep_course_id = str(item.get("keep_course_id") or "")
-        if rename_to and keep_course_id:
-            update_args = {"course_id": keep_course_id, "name": rename_to}
+    updated_results: list[dict[str, Any]] = []
+    deleted_results: list[dict[str, Any]] = []
+    failed_results: list[dict[str, Any]] = []
+    for item in actions:
+        action = str(item.get("action") or "")
+        course = item.get("course") if isinstance(item.get("course"), dict) else {}
+        course_id = str(course.get("id") or "")
+        if action == "update" and course_id:
+            update_args = {"course_id": course_id, **dict(item.get("updates") or {})}
             yield {"type": "tool_call", "name": "update_course", "args": update_args}
             update_result = await execute_tool("update_course", update_args, db, user.id)
             yield {"type": "tool_result", "name": "update_course", "result": update_result}
             step += 1
-            await _save_message(
-                db,
-                session_id,
-                "assistant",
-                _to_persisted_tool_summary("update_course", compress_tool_result("update_course", update_result)),
-                is_compressed=True,
-            )
-            await _log_step(db, user.id, session_id, step, "update_course", update_args, update_result)
+            await _persist_local_tool_step(db, session_id, user.id, step, "update_course", update_args, update_result)
+            if "error" in update_result:
+                failed_results.append(update_result)
+            else:
+                updated_results.append(update_result)
+            continue
 
-        for course_id in item.get("delete_ids", []):
+        if action == "delete" and course_id:
             delete_args = {"course_id": course_id}
             yield {"type": "tool_call", "name": "delete_course", "args": delete_args}
             delete_result = await execute_tool("delete_course", delete_args, db, user.id)
             yield {"type": "tool_result", "name": "delete_course", "result": delete_result}
             step += 1
-            await _save_message(
-                db,
-                session_id,
-                "assistant",
-                _to_persisted_tool_summary("delete_course", compress_tool_result("delete_course", delete_result)),
-                is_compressed=True,
-            )
-            await _log_step(db, user.id, session_id, step, "delete_course", delete_args, delete_result)
+            await _persist_local_tool_step(db, session_id, user.id, step, "delete_course", delete_args, delete_result)
+            if "error" in delete_result:
+                failed_results.append(delete_result)
+            else:
+                deleted_results.append(delete_result)
+            continue
 
-    merged_names = "、".join(dict.fromkeys(item["keep_name"] for item in merge_plan))
+        failed_results.append({"error": "Invalid course maintenance action"})
+
     message_id = str(uuid.uuid4())
-    text = f"已经帮你把重复课程合并好了，当前保留的是：{merged_names}。"
+    if failed_results and (updated_results or deleted_results):
+        text = (
+            f"已完成 {len(updated_results)} 条课程修改、{len(deleted_results)} 条课程删除；"
+            f"另有 {len(failed_results)} 条因为参数或记录不存在未处理。"
+        )
+    elif failed_results:
+        text = "这些课程记录暂时没有处理成功，主要原因是参数不完整或记录不存在。请确认后再试。"
+    elif kind == "rename" and deleted_results and not updated_results:
+        text = f"已经帮你删除 {len(deleted_results)} 条重复错名课程记录，保留同一时段已有的正确课程。"
+    elif kind == "rename":
+        text = f"已经帮你修改 {len(updated_results)} 条课程记录。"
+    elif kind == "delete":
+        text = f"已经帮你删除 {len(deleted_results)} 条课程记录。"
+    else:
+        text = f"已经帮你把重复课程合并好了，删除 {len(deleted_results)} 条重复记录。"
     yield {"type": "text", "message_id": message_id, "content": text}
     await _save_message(db, session_id, "assistant", text)
     yield {"type": "done"}

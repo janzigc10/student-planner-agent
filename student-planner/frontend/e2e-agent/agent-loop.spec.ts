@@ -22,9 +22,24 @@ interface DbReminder {
   status: string
 }
 
+interface DbCourse {
+  id: string
+  name: string
+  teacher: string | null
+  location: string | null
+  weekday: number
+  start_time: string
+  end_time: string
+  week_start: number
+  week_end: number
+  week_pattern: string
+  week_text: string | null
+}
+
 interface DbSnapshot {
   username: string
   user: { id: string; username: string } | null
+  courses: DbCourse[]
   tasks: DbTask[]
   reminders: DbReminder[]
   agent_logs: Array<Record<string, unknown>>
@@ -299,6 +314,24 @@ async function createTaskFromBrowser(page: Page, body: Record<string, unknown>) 
   }, body)
 }
 
+async function createCourseFromBrowser(page: Page, body: Record<string, unknown>) {
+  return page.evaluate(async (payload) => {
+    const token = window.localStorage.getItem('student-planner-token')
+    const response = await fetch('/api/courses/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token ?? ''}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      throw new Error(await response.text())
+    }
+    return response.json()
+  }, body)
+}
+
 function taskDurationMinutes(task: Pick<DbTask, 'start_time' | 'end_time'>) {
   const [startHour, startMinute] = task.start_time.split(':').map(Number)
   const [endHour, endMinute] = task.end_time.split(':').map(Number)
@@ -538,6 +571,48 @@ test.describe('Agent Loop E2E', () => {
     await writeEvidence(page, testInfo, 'missing-params-recovery', username, dbSnapshot, {
       taskId: tasks[0]!.id,
       expectedReminder: '2026-07-28T18:45:00',
+    })
+  })
+
+  test('renames an imported course after confirmation', async ({ page }, testInfo) => {
+    const username = scenarioUsername('coursemaint')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+    const seededCourse = (await createCourseFromBrowser(page, {
+      name: '机器人程序动化',
+      location: 'B201',
+      weekday: 3,
+      start_time: '10:20',
+      end_time: '11:55',
+      week_start: 1,
+      week_end: 16,
+      week_pattern: 'all',
+    })) as { id: string }
+
+    await sendMessage(page, '把课表里的机器人程序动化改成机器人流程自动化。')
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认'], (state) => {
+      const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
+      const renamedCourse = state.courses.find((course) => course.id === seededCourse.id)
+      return (
+        toolNames.includes('list_courses') &&
+        toolNames.includes('update_course') &&
+        renamedCourse?.name === '机器人流程自动化' &&
+        state.courses.every((course) => course.name !== '机器人程序动化')
+      )
+    })
+
+    const toolNames = dbSnapshot.agent_logs.map((log) => String(log.tool_called ?? ''))
+    const renamedCourse = dbSnapshot.courses.find((course) => course.id === seededCourse.id)
+    expect(toolNames).toContain('list_courses')
+    expect(toolNames).toContain('update_course')
+    expect(renamedCourse?.name).toBe('机器人流程自动化')
+    expect(dbSnapshot.courses.every((course) => course.name !== '机器人程序动化')).toBe(true)
+    await writeEvidence(page, testInfo, 'course-maintenance-rename', username, dbSnapshot, {
+      seededCourseId: seededCourse.id,
+      beforeName: '机器人程序动化',
+      afterName: renamedCourse?.name,
+      toolSequence: toolNames,
     })
   })
 

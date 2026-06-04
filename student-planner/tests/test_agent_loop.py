@@ -619,6 +619,232 @@ async def test_course_merge_shortcut_preserves_distinct_week_patterns(setup_db):
 
 
 @pytest.mark.asyncio
+async def test_course_rename_shortcut_updates_existing_course_without_llm(setup_db):
+    mock_client = AsyncMock()
+
+    with patch(
+        "app.agent.loop.chat_completion_stream",
+        side_effect=AssertionError("LLM should not be called for local course rename shortcut"),
+    ), patch(
+        "app.agent.loop.chat_completion",
+        side_effect=AssertionError("LLM fallback should not be called for local course rename shortcut"),
+    ):
+        async with TestSession() as db:
+            user = User(id="u7c", username="test7c", hashed_password="x")
+            db.add(user)
+            db.add(
+                Course(
+                    id="course-rename-target",
+                    user_id="u7c",
+                    name="机器人程序动化",
+                    weekday=3,
+                    start_time="10:20",
+                    end_time="11:55",
+                    week_pattern="all",
+                )
+            )
+            await db.commit()
+
+            generator = run_agent_loop(
+                "把课表里的机器人程序动化改成机器人流程自动化",
+                user,
+                "session-7c",
+                db,
+                mock_client,
+            )
+
+            events = []
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            tool_calls = [event["name"] for event in events if event["type"] == "tool_call"]
+            assert tool_calls == ["list_courses", "update_course"]
+            assert any(event["type"] == "text" and "修改 1 条课程记录" in event["content"] for event in events)
+
+            result = await db.execute(select(Course).where(Course.user_id == "u7c"))
+            courses = list(result.scalars().all())
+            assert len(courses) == 1
+            assert courses[0].name == "机器人流程自动化"
+
+
+@pytest.mark.asyncio
+async def test_course_delete_shortcut_deletes_unique_course_after_confirmation(setup_db):
+    mock_client = AsyncMock()
+
+    with patch(
+        "app.agent.loop.chat_completion_stream",
+        side_effect=AssertionError("LLM should not be called for local course delete shortcut"),
+    ), patch(
+        "app.agent.loop.chat_completion",
+        side_effect=AssertionError("LLM fallback should not be called for local course delete shortcut"),
+    ):
+        async with TestSession() as db:
+            user = User(id="u7d", username="test7d", hashed_password="x")
+            db.add(user)
+            db.add_all(
+                [
+                    Course(
+                        id="course-delete-target",
+                        user_id="u7d",
+                        name="机器人程动",
+                        weekday=3,
+                        start_time="10:20",
+                        end_time="11:55",
+                    ),
+                    Course(
+                        id="course-delete-other",
+                        user_id="u7d",
+                        name="机器人流程自动化",
+                        weekday=3,
+                        start_time="10:20",
+                        end_time="11:55",
+                    ),
+                ]
+            )
+            await db.commit()
+
+            generator = run_agent_loop(
+                "删掉课表里的机器人程动",
+                user,
+                "session-7d",
+                db,
+                mock_client,
+            )
+
+            events = []
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            tool_calls = [event["name"] for event in events if event["type"] == "tool_call"]
+            assert tool_calls == ["list_courses", "delete_course"]
+
+            result = await db.execute(select(Course).where(Course.user_id == "u7d"))
+            courses = list(result.scalars().all())
+            assert [course.name for course in courses] == ["机器人流程自动化"]
+
+
+@pytest.mark.asyncio
+async def test_course_delete_shortcut_does_not_delete_ambiguous_same_name_courses(setup_db):
+    mock_client = AsyncMock()
+
+    with patch(
+        "app.agent.loop.chat_completion_stream",
+        side_effect=AssertionError("LLM should not be called for local course delete shortcut"),
+    ), patch(
+        "app.agent.loop.chat_completion",
+        side_effect=AssertionError("LLM fallback should not be called for local course delete shortcut"),
+    ):
+        async with TestSession() as db:
+            user = User(id="u7d2", username="test7d2", hashed_password="x")
+            db.add(user)
+            db.add_all(
+                [
+                    Course(
+                        id="course-delete-ambiguous-a",
+                        user_id="u7d2",
+                        name="高等数学",
+                        weekday=1,
+                        start_time="08:30",
+                        end_time="10:15",
+                    ),
+                    Course(
+                        id="course-delete-ambiguous-b",
+                        user_id="u7d2",
+                        name="高等数学",
+                        weekday=3,
+                        start_time="10:20",
+                        end_time="11:55",
+                    ),
+                ]
+            )
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "删除课表里的高等数学",
+                user,
+                "session-7d2",
+                db,
+                mock_client,
+            )
+            async for event in generator:
+                events.append(event)
+
+            tool_calls = [event["name"] for event in events if event["type"] == "tool_call"]
+            assert tool_calls == ["list_courses"]
+            assert not any(event["type"] == "ask_user" for event in events)
+            assert any(event["type"] == "text" and "匹配到多条同名课程" in event["content"] for event in events)
+
+            result = await db.execute(select(Course).where(Course.user_id == "u7d2").order_by(Course.weekday))
+            courses = list(result.scalars().all())
+            assert [(course.name, course.weekday) for course in courses] == [("高等数学", 1), ("高等数学", 3)]
+
+
+@pytest.mark.asyncio
+async def test_course_maintenance_shortcut_does_not_write_when_target_missing(setup_db):
+    mock_client = AsyncMock()
+
+    with patch(
+        "app.agent.loop.chat_completion_stream",
+        side_effect=AssertionError("LLM should not be called for local course maintenance shortcut"),
+    ), patch(
+        "app.agent.loop.chat_completion",
+        side_effect=AssertionError("LLM fallback should not be called for local course maintenance shortcut"),
+    ):
+        async with TestSession() as db:
+            user = User(id="u7e", username="test7e", hashed_password="x")
+            db.add(user)
+            db.add(
+                Course(
+                    id="course-existing-only",
+                    user_id="u7e",
+                    name="机器人流程自动化",
+                    weekday=3,
+                    start_time="10:20",
+                    end_time="11:55",
+                )
+            )
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "把课表里的不存在课程改成机器人流程自动化",
+                user,
+                "session-7e",
+                db,
+                mock_client,
+            )
+            async for event in generator:
+                events.append(event)
+
+            tool_calls = [event["name"] for event in events if event["type"] == "tool_call"]
+            assert tool_calls == ["list_courses"]
+            assert not any(event["type"] == "ask_user" for event in events)
+            assert any(event["type"] == "text" and "没有找到" in event["content"] for event in events)
+
+            result = await db.execute(select(Course).where(Course.user_id == "u7e"))
+            courses = list(result.scalars().all())
+            assert len(courses) == 1
+            assert courses[0].name == "机器人流程自动化"
+
+
+@pytest.mark.asyncio
 async def test_continue_message_can_reuse_persisted_list_course_summary(setup_db):
     mock_client = AsyncMock()
     llm_call_count = 0

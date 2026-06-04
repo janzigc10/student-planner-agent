@@ -14,6 +14,7 @@ TASK_TOOL_RULES = """## 普通任务与提醒补充规则
 - 用户明确说“不提醒 / 不用提醒 / 取消提醒 / 删除提醒”时，不要说系统不能删除提醒；先确认，再调用 `update_task`，并传入 `reminder_advance_minutes=null` 删除已有普通任务提醒。
 - 用户只改任务时间、没有明确改提醒时，调用 `update_task` 更新任务时间；已有 task reminder 会跟随新时间重算。
 - 所有任务/提醒相关的确认、补充信息、缺参数追问都必须调用 `ask_user`，禁止用普通 assistant 文本问用户“是否确认”“哪天/几点”。
+- 用户要纠正、改名、合并或删除当前课表里的课程时，先 `list_courses`，不要要求重新上传课表；确认后再 `update_course` 或 `delete_course`，同名多条且缺少周几/时间/地点时先澄清。
 - `create_study_plan` 只负责生成候选计划；如果用户确认要写入日程，再把计划里的每个条目逐个 `create_task` 落库。
 - 生成复习计划前，如果用户只是简单要求安排复习且考试课程/日期已明确，不要强行追问复习范围、薄弱点、目标成绩或每日上限；直接用默认均衡策略，并在 `study_context` 写入 `{"using_defaults": true, "raw_notes": "按默认"}`。只有用户明确要求详细、精准、冲刺、定制或针对性计划且缺少这些上下文时，才用 `ask_user` 补一次。
 - 调用 `create_study_plan` 时，把已知学习上下文写入 `study_context`，包括 `exam_scope`、`weak_areas`、`target_score`、`daily_study_limit_minutes` 和 `raw_notes`。

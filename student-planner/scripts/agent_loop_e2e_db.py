@@ -78,7 +78,15 @@ def snapshot(username: str) -> dict[str, Any]:
     with connect() as connection:
         user = find_user(connection, username)
         if not user:
-            return {"username": username, "user": None, "tasks": [], "reminders": [], "agent_logs": [], "messages": []}
+            return {
+                "username": username,
+                "user": None,
+                "courses": [],
+                "tasks": [],
+                "reminders": [],
+                "agent_logs": [],
+                "messages": [],
+            }
 
         user_id = user["id"]
         agent_logs = rows(
@@ -104,6 +112,17 @@ def snapshot(username: str) -> dict[str, Any]:
         return {
             "username": username,
             "user": user,
+            "courses": rows(
+                connection,
+                """
+                SELECT id, name, teacher, location, weekday, start_time, end_time,
+                       week_start, week_end, week_pattern, week_text
+                FROM courses
+                WHERE user_id = ?
+                ORDER BY weekday, start_time, name
+                """,
+                (user_id,),
+            ),
             "tasks": rows(
                 connection,
                 """
