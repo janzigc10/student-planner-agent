@@ -20,6 +20,38 @@ function isInteractiveTarget(target: EventTarget | null) {
 }
 
 const WEEK_LABELS = ['一', '二', '三', '四', '五', '六', '日']
+const WEEKDAY_FULL_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+function dateMeta(date: string) {
+  const parsed = new Date(`${date}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) {
+    return { monthDay: date, weekday: '', day: '' }
+  }
+  return {
+    monthDay: `${parsed.getMonth() + 1}月${parsed.getDate()}日`,
+    weekday: WEEKDAY_FULL_LABELS[parsed.getDay()] ?? '',
+    day: String(parsed.getDate()),
+  }
+}
+
+function weekStripDates(currentDate: string) {
+  const base = new Date(`${currentDate}T00:00:00`)
+  if (Number.isNaN(base.getTime())) {
+    return []
+  }
+  const weekday = base.getDay() === 0 ? 7 : base.getDay()
+  const monday = new Date(base)
+  monday.setDate(base.getDate() - weekday + 1)
+  return Array.from({ length: 7 }, (_, index) => {
+    const item = new Date(monday)
+    item.setDate(monday.getDate() + index)
+    return {
+      date: toDateString(item),
+      day: item.getDate(),
+      label: WEEK_LABELS[index] ?? '',
+    }
+  })
+}
 
 export function CalendarPage() {
   const user = useAuthStore((state) => state.user)
@@ -59,6 +91,12 @@ export function CalendarPage() {
     () => eventsForDate(currentDate, courses, tasks, semesterStart),
     [courses, currentDate, semesterStart, tasks],
   )
+  const selectedDateMeta = useMemo(() => dateMeta(currentDate), [currentDate])
+  const weekDates = useMemo(() => weekStripDates(currentDate), [currentDate])
+  const pendingTasks = tasks.filter((task) => task.status !== 'completed').length
+  const courseCount = events.filter((event) => event.kind === 'course').length
+  const taskCount = events.filter((event) => event.kind === 'task').length
+  const nextEvent = events[0] ?? null
 
   useEffect(() => {
     void load()
@@ -199,6 +237,11 @@ export function CalendarPage() {
 
     return (
       <main className="page calendar-page calendar-page--month">
+        <section className="calendar-overview">
+          <span className="eyebrow">Month Plan</span>
+          <h1>{monthMeta.month} 月排程</h1>
+          <p>课程、任务和复习计划会按日期聚合，点选日期进入当天 agenda。</p>
+        </section>
         <section className="month-card" onTouchStart={handleMonthTouchStart} onTouchEnd={handleMonthTouchEnd}>
           <div className="month-card__header">
             <div>
@@ -253,10 +296,56 @@ export function CalendarPage() {
 
   return (
     <main className="page calendar-page" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <section className="calendar-overview">
+        <div>
+          <span className="eyebrow">Today</span>
+          <h1>{selectedDateMeta.monthDay}</h1>
+          <p>{selectedDateMeta.weekday} · {courseCount} 门课 · {taskCount} 个任务</p>
+        </div>
+        <div className="calendar-overview__next">
+          <span>下一项</span>
+          <strong>{nextEvent ? `${nextEvent.start_time} ${nextEvent.title}` : '暂无安排'}</strong>
+        </div>
+      </section>
+      <section className="week-strip" aria-label="本周日期">
+        {weekDates.map((item) => (
+          <button
+            type="button"
+            key={item.date}
+            className={`week-strip__day${item.date === currentDate ? ' week-strip__day--selected' : ''}`}
+            onClick={() => {
+              setCurrentDate(item.date)
+              void load()
+            }}
+          >
+            <span>{item.label}</span>
+            <strong>{item.day}</strong>
+          </button>
+        ))}
+      </section>
       {isLoading ? <p>正在加载...</p> : null}
       {error ? <p role="alert">{error}</p> : null}
+      <section className="agenda-summary" aria-label="日程摘要">
+        <div>
+          <span>待办</span>
+          <strong>{pendingTasks}</strong>
+        </div>
+        <div>
+          <span>课程</span>
+          <strong>{courseCount}</strong>
+        </div>
+        <div>
+          <span>任务</span>
+          <strong>{taskCount}</strong>
+        </div>
+      </section>
       <section className="timeline" aria-label="日视图">
-        {events.length === 0 ? <p className="timeline-empty">今天还没有安排。</p> : null}
+        {events.length === 0 ? (
+          <div className="timeline-empty">
+            <strong>今天还没有安排。</strong>
+            <span>可以让 Agent 帮你拆复习计划，或者点击右上角添加一个任务。</span>
+          </div>
+        ) : null}
         {events.map((event) => (
           <article className={`timeline-item timeline-item--${event.kind}`} key={`${event.kind}-${event.id}`}>
             <time>

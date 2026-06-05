@@ -18,6 +18,9 @@ const tabs = [
 ]
 
 function pageTitle(pathname: string, currentDate: string) {
+  if (pathname.startsWith('/chat')) {
+    return '聊天'
+  }
   if (pathname.startsWith('/calendar')) {
     const [year, month, day] = currentDate.split('-').map((value) => Number(value))
     const date = Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)
@@ -41,7 +44,7 @@ function pageTitle(pathname: string, currentDate: string) {
   if (pathname === '/me') {
     return '我的'
   }
-  return 'Assistant'
+  return '学习规划'
 }
 
 export function AppShell() {
@@ -87,38 +90,47 @@ export function AppShell() {
   return (
     <div className="app-frame">
       <header className="top-bar">
-        {isSubPage ? (
-          <button className="top-bar__back" type="button" aria-label="返回上一页" onClick={goBack}>
-            <ChevronLeftIcon className="icon" />
-            <span>返回</span>
-          </button>
-        ) : isCalendarRoute ? (
-          <button className="top-bar__action" type="button" aria-label={calendarToggleLabel} onClick={toggleCalendarViewMode}>
-            {calendarViewMode === 'month' ? <TaskIcon className="icon" /> : <CalendarIcon className="icon" />}
-          </button>
-        ) : (
-          <span />
-        )}
-        {isCalendarRoute ? (
-          <div className="top-bar__title top-bar__calendar-title">
-            <button className="top-bar__nav" type="button" aria-label={previousLabel} onClick={() => shiftCalendar(-1)}>
+        <div className="top-bar__leading">
+          {isSubPage ? (
+            <button className="top-bar__back" type="button" aria-label="返回上一页" onClick={goBack}>
               <ChevronLeftIcon className="icon" />
+              <span>返回</span>
             </button>
-            <span>{title}</span>
-            <button className="top-bar__nav" type="button" aria-label={nextLabel} onClick={() => shiftCalendar(1)}>
-              <ChevronRightIcon className="icon" />
+          ) : isCalendarRoute ? (
+            <button className="top-bar__action" type="button" aria-label={calendarToggleLabel} onClick={toggleCalendarViewMode}>
+              {calendarViewMode === 'month' ? <TaskIcon className="icon" /> : <CalendarIcon className="icon" />}
             </button>
-          </div>
-        ) : (
-          <div className="top-bar__title">{title}</div>
-        )}
-        {canOpenTaskSheet ? (
-          <button className="top-bar__action" type="button" aria-label="添加任务" onClick={openCalendarTaskSheet}>
-            <PlusIcon className="icon icon--plus" />
-          </button>
-        ) : (
-          <span />
-        )}
+          ) : (
+            <span className="top-bar__brand-mark">SP</span>
+          )}
+        </div>
+        <div className="top-bar__center">
+          {isCalendarRoute ? (
+            <div className="top-bar__title top-bar__calendar-title">
+              <button className="top-bar__nav" type="button" aria-label={previousLabel} onClick={() => shiftCalendar(-1)}>
+                <ChevronLeftIcon className="icon" />
+              </button>
+              <span>日历</span>
+              <button className="top-bar__nav" type="button" aria-label={nextLabel} onClick={() => shiftCalendar(1)}>
+                <ChevronRightIcon className="icon" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="top-bar__title">{title}</div>
+              <div className="top-bar__subtitle">学习计划工作台</div>
+            </>
+          )}
+        </div>
+        <div className="top-bar__trailing">
+          {canOpenTaskSheet ? (
+            <button className="top-bar__action top-bar__action--primary" type="button" aria-label="添加任务" onClick={openCalendarTaskSheet}>
+              <PlusIcon className="icon icon--plus" />
+            </button>
+          ) : (
+            <span className="top-bar__sync">在线</span>
+          )}
+        </div>
       </header>
       <Outlet />
       <nav className="tab-bar" aria-label="主导航">

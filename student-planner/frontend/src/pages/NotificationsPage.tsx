@@ -26,6 +26,10 @@ export function NotificationsPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState(false)
+  const permissionLabel = permission === 'unsupported' ? '不支持' : permission
+  const browserLabel = browserSubscribed === null ? '读取中…' : browserSubscribed ? '已存在' : '未检测到'
+  const serverLabel = serverSubscribed === null ? '读取中…' : serverSubscribed ? '已保存' : '未保存'
+  const chainReady = permission === 'granted' && browserSubscribed === true && serverSubscribed === true
 
   useEffect(() => {
     if (!notificationsSupported) {
@@ -124,28 +128,72 @@ export function NotificationsPage() {
   }
 
   return (
-    <main className="page">
-      <section className="notification-settings">
-        <h2 className="notification-settings__title">
+    <main className="page notifications-page">
+      <section className={`notification-health ${chainReady ? 'notification-health--ready' : ''}`} aria-label="推送健康度">
+        <header>
+          <strong>推送健康度</strong>
+          <span className={`notification-state ${chainReady ? 'notification-state--ready' : ''}`}>
+            {chainReady ? '已就绪' : '待处理'}
+          </span>
+        </header>
+        <div className="notification-health__meter" aria-hidden="true">
+          <span />
+        </div>
+        <div className="notification-health__chips">
+          <p className={permission === 'granted' ? 'is-ready' : ''}>
+            <strong>权限</strong>
+            <span>{permissionLabel}</span>
+          </p>
+          <p className={browserSubscribed ? 'is-ready' : ''}>
+            <strong>设备</strong>
+            <span>{browserLabel}</span>
+          </p>
+          <p className={serverSubscribed ? 'is-ready' : ''}>
+            <strong>服务器</strong>
+            <span>{serverLabel}</span>
+          </p>
+        </div>
+      </section>
+      <details className="settings-accordion notification-accordion">
+        <summary>
           <BellIcon className="icon" />
-          <span>通知设置</span>
-        </h2>
-        <p>通知权限：{permission}</p>
-        <p>本机订阅：{browserSubscribed === null ? '读取中…' : browserSubscribed ? '已存在' : '未检测到'}</p>
-        <p>服务器订阅：{serverSubscribed === null ? '读取中…' : serverSubscribed ? '已保存' : '未保存'}</p>
-        {vapidConfigured === false ? (
-          <p className="status-inline status-inline--warning">服务器尚未配置推送密钥，暂时无法开启推送。</p>
-        ) : null}
-        {permission === 'denied' ? <p className="status-inline status-inline--warning">请在浏览器设置中重新开启通知权限。</p> : null}
-        {message ? <p className="status-inline">{message}</p> : null}
-        {error ? <p className="status-inline status-inline--warning" role="alert">{error}</p> : null}
+          <div>
+            <h2>推送链路</h2>
+            <p>{chainReady ? '浏览器、设备和服务器都已就绪' : '点开查看三段状态'}</p>
+          </div>
+        </summary>
+        <div className="settings-accordion__body notification-panel__body">
+          <p className="notification-note">任意一段断开，任务提醒都可能只停在系统里。</p>
+          <div className="status-grid notification-chain">
+            <p className={permission === 'granted' ? 'is-ready' : ''}>
+              <span>01 浏览器权限</span>
+              <strong>通知权限：{permissionLabel}</strong>
+            </p>
+            <p className={browserSubscribed ? 'is-ready' : ''}>
+              <span>02 当前设备</span>
+              <strong>本机订阅：{browserLabel}</strong>
+            </p>
+            <p className={serverSubscribed ? 'is-ready' : ''}>
+              <span>03 服务器记录</span>
+              <strong>服务器订阅：{serverLabel}</strong>
+            </p>
+          </div>
+        </div>
+      </details>
+      {vapidConfigured === false ? (
+        <p className="status-inline status-inline--warning">服务器尚未配置推送密钥，暂时无法开启推送。</p>
+      ) : null}
+      {permission === 'denied' ? <p className="status-inline status-inline--warning">请在浏览器设置中重新开启通知权限。</p> : null}
+      {message ? <p className="status-inline">{message}</p> : null}
+      {error ? <p className="status-inline status-inline--warning" role="alert">{error}</p> : null}
+      <div className="notification-actions">
         <button className="primary-button" type="button" onClick={() => void subscribe()} disabled={isBusy}>
           开启推送通知
         </button>
         <button type="button" onClick={() => void unsubscribe()} disabled={isBusy}>
           关闭推送通知
         </button>
-      </section>
+      </div>
     </main>
   )
 }

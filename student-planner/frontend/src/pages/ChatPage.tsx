@@ -29,6 +29,22 @@ interface CoursePreview {
   metaLine: string | null
 }
 
+interface TaskPreview {
+  title: string
+  date: string | null
+  time: string | null
+  description: string | null
+}
+
+interface CourseActionPreview {
+  action: string
+  courseName: string
+  nextName: string | null
+  timeLine: string | null
+  metaLine: string | null
+  reason: string | null
+}
+
 interface ScheduleReviewNotice {
   title: string
   note: string | null
@@ -45,6 +61,8 @@ const ATTACHMENT_INPUT_ID = 'chat-attachment-input'
 const DEFAULT_CONFIRM_OPTIONS = ['确认', '取消']
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const COURSE_ENTRY_KEYS = ['courses', 'course_list', 'courseList', '课程列表', '课程清单', '课表列表'] as const
+const TASK_ENTRY_KEYS = ['tasks', 'task_list', 'taskList', '计划任务', '任务列表'] as const
+const COURSE_ACTION_KEYS = ['actions', 'course_actions', 'courseActions', '修改动作'] as const
 const REVIEW_COUNT_KEYS = ['count', 'course_count', 'courseCount', 'total', '共识别课程条目', '识别课程数', '课程数量'] as const
 
 const SCHEDULE_REVIEW_RAW_MARKERS = ['完整课程列表如下', '课程列表如下', '课程明细如下', '|#|'] as const
@@ -250,6 +268,30 @@ function getCourseEntries(data: unknown): unknown[] | null {
   return null
 }
 
+function getArrayEntries(data: unknown, keys: readonly string[]) {
+  if (typeof data === 'string') {
+    const parsed = tryParseJsonPayload(data)
+    if (parsed !== null) {
+      return getArrayEntries(parsed, keys)
+    }
+    return null
+  }
+  if (Array.isArray(data)) {
+    return data
+  }
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+  const record = data as Record<string, unknown>
+  for (const key of keys) {
+    const value = record[key]
+    if (Array.isArray(value)) {
+      return value
+    }
+  }
+  return null
+}
+
 function pickSerializedField(text: string, keys: string[]) {
   for (const key of keys) {
     const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -404,6 +446,78 @@ function toCoursePreview(entry: unknown, index: number): CoursePreview {
   return { name, timeLine, metaLine }
 }
 
+function formatDateLabel(value: unknown) {
+  const text = asText(value)
+  if (!text) {
+    return null
+  }
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) {
+    return text
+  }
+  const date = new Date(`${text}T00:00:00`)
+  const weekday = Number.isNaN(date.getTime())
+    ? null
+    : new Intl.DateTimeFormat('zh-CN', { weekday: 'short' }).format(date)
+  return `${Number(match[2])}月${Number(match[3])}日${weekday ? ` ${weekday}` : ''}`
+}
+
+function toTaskPreview(entry: unknown, index: number): TaskPreview {
+  if (!entry || typeof entry !== 'object') {
+    return {
+      title: asText(entry) ?? `任务 ${index + 1}`,
+      date: null,
+      time: null,
+      description: null,
+    }
+  }
+
+  const record = entry as Record<string, unknown>
+  const title = pickText(record, ['title', 'name', '任务', '任务名', '标题']) ?? `任务 ${index + 1}`
+  const date = formatDateLabel(record.scheduled_date ?? record.date ?? record.日期)
+  const startTime = pickText(record, ['start_time', 'startTime', '开始时间'])
+  const endTime = pickText(record, ['end_time', 'endTime', '结束时间'])
+  const time = startTime && endTime ? `${startTime}-${endTime}` : startTime ?? endTime ?? pickText(record, ['time', '时间'])
+  const description = pickText(record, ['description', 'note', '说明', '描述', '内容'])
+
+  return { title, date, time, description }
+}
+
+function toCourseActionPreview(entry: unknown, index: number): CourseActionPreview {
+  const fallback = {
+    action: 'update',
+    courseName: `课程 ${index + 1}`,
+    nextName: null,
+    timeLine: null,
+    metaLine: null,
+    reason: null,
+  }
+
+  if (!entry || typeof entry !== 'object') {
+    return fallback
+  }
+
+  const record = entry as Record<string, unknown>
+  const course = record.course && typeof record.course === 'object' ? (record.course as Record<string, unknown>) : {}
+  const updates = record.updates && typeof record.updates === 'object' ? (record.updates as Record<string, unknown>) : {}
+  const action = pickText(record, ['action', '动作']) ?? fallback.action
+  const courseName = pickText(course, ['name', 'course_name', '课程名', '课程']) ?? fallback.courseName
+  const nextName = pickText(updates, ['name', 'course_name', '课程名', '课程']) ?? null
+  const weekdayLabel = normalizeWeekday(course.weekday)
+  const startTime = pickText(course, ['start_time', 'startTime'])
+  const endTime = pickText(course, ['end_time', 'endTime'])
+  const timeLine = weekdayLabel && startTime && endTime ? `${weekdayLabel} · ${startTime}-${endTime}` : null
+  const metaParts = [
+    pickText(course, ['location', 'classroom', 'place', '地点', '教室']),
+    pickText(course, ['teacher', '教师', '老师']),
+    formatWeekRange(course),
+  ].filter((part): part is string => Boolean(part))
+  const metaLine = metaParts.length > 0 ? metaParts.join(' · ') : null
+  const reason = pickText(record, ['reason', '原因', '说明'])
+
+  return { action, courseName, nextName, timeLine, metaLine, reason }
+}
+
 function stringifyDetailValue(value: unknown): string {
   if (value == null) {
     return '—'
@@ -521,11 +635,36 @@ export function ChatPage() {
     if (!pendingAsk || pendingAsk.type !== 'review' || normalizedAskData == null) {
       return null
     }
+    if (getArrayEntries(normalizedAskData, TASK_ENTRY_KEYS) || getArrayEntries(normalizedAskData, COURSE_ACTION_KEYS)) {
+      return null
+    }
     const courseEntries = getCourseEntries(normalizedAskData)
     if (!courseEntries) {
       return null
     }
     return courseEntries.map((entry, index) => toCoursePreview(entry, index))
+  }, [normalizedAskData, pendingAsk])
+
+  const taskPreviews = useMemo(() => {
+    if (!pendingAsk || pendingAsk.type !== 'review' || normalizedAskData == null) {
+      return null
+    }
+    const taskEntries = getArrayEntries(normalizedAskData, TASK_ENTRY_KEYS)
+    if (!taskEntries) {
+      return null
+    }
+    return taskEntries.map((entry, index) => toTaskPreview(entry, index))
+  }, [normalizedAskData, pendingAsk])
+
+  const courseActionPreviews = useMemo(() => {
+    if (!pendingAsk || pendingAsk.type !== 'review' || normalizedAskData == null) {
+      return null
+    }
+    const actionEntries = getArrayEntries(normalizedAskData, COURSE_ACTION_KEYS)
+    if (!actionEntries) {
+      return null
+    }
+    return actionEntries.map((entry, index) => toCourseActionPreview(entry, index))
   }, [normalizedAskData, pendingAsk])
 
   const reviewCount = useMemo(() => {
@@ -870,6 +1009,21 @@ export function ChatPage() {
 
   return (
     <main className="page chat-page">
+      <section className="chat-hero" aria-label="学习规划助手">
+        <div className="chat-hero__status">
+          <span>今日工作台</span>
+          <strong>Agent 在线</strong>
+        </div>
+        <h1>把学习安排说清楚就行</h1>
+        <p>考试、作业、课表和提醒都可以直接发给我。我会先整理成计划，确认后再写入日程。</p>
+        <div className="chat-hero__suggestions" aria-label="常用请求">
+          {['帮我拆一个复习计划', '把报告安排到本周', '检查今天的空闲时间', '修改课表里的课程'].map((suggestion) => (
+            <button type="button" key={suggestion} onClick={() => setDraft(suggestion)}>
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      </section>
       <div className="message-list">
         {messages.map((message, index) => (
           (() => {
@@ -974,7 +1128,61 @@ export function ChatPage() {
             )}
 
             {pendingAsk.type === 'review' && normalizedAskData != null ? (
-              coursePreviews ? (
+              taskPreviews ? (
+                <section className="ask-card__plan" aria-label="任务计划预览">
+                  <header className="ask-card__plan-head">
+                    <div>
+                      <strong>计划任务 {taskPreviews.length}</strong>
+                      <span>确认后写入日程</span>
+                    </div>
+                  </header>
+                  <div className="ask-card__plan-list">
+                    {taskPreviews.map((task, index) => (
+                      <article className="ask-card__plan-item" key={`${task.title}-${index}`}>
+                        <div className="ask-card__plan-time">
+                          <span>{task.date ?? '待定'}</span>
+                          <strong>{task.time ?? '待安排'}</strong>
+                        </div>
+                        <div className="ask-card__plan-body">
+                          <p className="ask-card__plan-title">{task.title}</p>
+                          {task.description ? <p className="ask-card__plan-desc">{task.description}</p> : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ) : courseActionPreviews ? (
+                <section className="ask-card__course-actions" aria-label="课程修改预览">
+                  <header className="ask-card__plan-head">
+                    <div>
+                      <strong>课程维护 {courseActionPreviews.length}</strong>
+                      <span>确认后更新课表</span>
+                    </div>
+                  </header>
+                  <div className="ask-card__course-action-list">
+                    {courseActionPreviews.map((action, index) => (
+                      <article className={`ask-card__course-action ask-card__course-action--${action.action}`} key={`${action.courseName}-${index}`}>
+                        <div className="ask-card__course-action-main">
+                          <p>
+                            {action.nextName ? (
+                              <>
+                                <span>{action.courseName}</span>
+                                <strong>→</strong>
+                                <span>{action.nextName}</span>
+                              </>
+                            ) : (
+                              <span>{action.courseName}</span>
+                            )}
+                          </p>
+                          {action.timeLine ? <span>{action.timeLine}</span> : null}
+                          {action.metaLine ? <span>{action.metaLine}</span> : null}
+                        </div>
+                        {action.reason ? <p className="ask-card__plan-desc">{action.reason}</p> : null}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ) : coursePreviews ? (
                 <section className="ask-card__schedule">
                   <header className="ask-card__schedule-head">
                     <strong>识别课程 {reviewCount}</strong>
