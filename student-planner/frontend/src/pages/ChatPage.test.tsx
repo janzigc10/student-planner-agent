@@ -603,7 +603,7 @@ describe('ChatPage attachment drafting', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm' }))
 
     expect(screen.getByText('已选择：Confirm')).toBeInTheDocument()
-    expect(screen.getByText('正在继续处理，请稍候…')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('理解你的需求')
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   })
 
@@ -618,7 +618,7 @@ describe('ChatPage attachment drafting', () => {
     })
 
     expect(screen.getByRole('progressbar')).toBeInTheDocument()
-    expect(screen.getByText('当前：解析课表')).toBeInTheDocument()
+    expect(screen.getByText('正在解析课表')).toBeInTheDocument()
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -628,6 +628,40 @@ describe('ChatPage attachment drafting', () => {
     })
 
     expect(screen.getByText('1/1')).toBeInTheDocument()
+  })
+
+  it('renders common assistant markdown as readable rich text', () => {
+    render(<ChatPage />)
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'text',
+        message_id: 'markdown-message',
+        content: '### 今晚计划总览\n- **19:00-20:30** 英语六级复习\n- **20:45-22:15** 高等数学复习',
+      })
+    })
+
+    expect(screen.getByText('今晚计划总览')).toBeInTheDocument()
+    expect(screen.getByText('19:00-20:30')).toBeInTheDocument()
+    expect(screen.queryByText(/###/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument()
+  })
+
+  it('renders task write success replies as result cards', () => {
+    const { container } = render(<ChatPage />)
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'text',
+        message_id: 'task-result-message',
+        content: '已把 2 条复习任务写入日程，其中 1 条因原时间冲突已自动重排。',
+      })
+    })
+
+    expect(container.querySelector('.assistant-result--success')).toBeTruthy()
+    expect(screen.getByLabelText('已完成')).toHaveTextContent('已把 2 条复习任务写入日程')
+    expect(screen.getByText('2 条记录')).toBeInTheDocument()
+    expect(screen.getByText('含自动重排')).toBeInTheDocument()
   })
 
   it('renders streamed assistant deltas as one growing message bubble', () => {
@@ -929,6 +963,57 @@ describe('ChatPage attachment drafting', () => {
     expect(screen.queryByText('"考试科目"')).not.toBeInTheDocument()
   })
 
+  it('renders plan arrays as task cards instead of key-value text', () => {
+    const { container } = render(<ChatPage />)
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'ask_user',
+        question: '你觉得这个时间安排怎么样？确认后我帮你创建任务并设置提醒。',
+        ask_type: 'review',
+        options: ['确认', '取消'],
+        data: {
+          plan: [
+            { time: '19:00-20:30', content: '英语六级复习', duration: '1.5h' },
+            { time: '20:45-22:15', content: '高等数学复习', duration: '1.5h' },
+          ],
+        },
+      })
+    })
+
+    expect(container.querySelector('.ask-card__plan-list')).toBeTruthy()
+    expect(screen.getByText('计划任务 2')).toBeInTheDocument()
+    expect(screen.getByText('英语六级复习')).toBeInTheDocument()
+    expect(screen.getByText('高等数学复习')).toBeInTheDocument()
+    expect(screen.getByText('19:00-20:30')).toBeInTheDocument()
+    expect(screen.queryByText('plan')).not.toBeInTheDocument()
+  })
+
+  it('keeps long task plans compact with an expandable remainder', () => {
+    render(<ChatPage />)
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'ask_user',
+        question: '确认后写入这些任务',
+        ask_type: 'review',
+        options: ['确认', '取消'],
+        data: {
+          tasks: [
+            { time: '08:00-09:00', content: '任务一' },
+            { time: '09:15-10:15', content: '任务二' },
+            { time: '10:30-11:30', content: '任务三' },
+            { time: '14:00-15:00', content: '任务四' },
+            { time: '15:15-16:15', content: '任务五' },
+          ],
+        },
+      })
+    })
+
+    expect(screen.getByText('计划任务 5')).toBeInTheDocument()
+    expect(screen.getByText('展开剩余 2 条任务')).toBeInTheDocument()
+  })
+
   it('keeps review ask card anchored in the timeline so new user messages render below it', () => {
     const { container } = render(<ChatPage />)
 
@@ -974,10 +1059,11 @@ describe('ChatPage attachment drafting', () => {
     })
 
     const askCard = container.querySelector('.ask-card')
-    const followupReply = screen.getByText('这是后续回复')
+    const followupReply = screen.getByText('这是后续回复').closest('.message')
 
     expect(askCard).toBeTruthy()
-    expectNodeBefore(askCard as HTMLElement, followupReply)
+    expect(followupReply).toBeTruthy()
+    expectNodeBefore(askCard as HTMLElement, followupReply as HTMLElement)
   })
 
   it('keeps progress card anchored in the timeline so new user messages render below it', () => {

@@ -153,6 +153,12 @@ _DAILY_LIMIT_RE = re.compile(
     r"(?P<value>\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)\s*"
     r"(?P<unit>小时|钟头|h|H|分钟|分)"
 )
+_TOTAL_STUDY_DURATION_RE = re.compile(
+    r"(?:花|用|安排|学|复习)?\s*"
+    r"(?P<value>\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)\s*"
+    r"(?:个)?\s*"
+    r"(?P<unit>小时|钟头|h|H|分钟|分)"
+)
 _TARGET_SCORE_RE = re.compile(r"(?:目标|希望|争取|想考|要考|至少).{0,10}?(?P<score>\d{2,3})\s*分?")
 _SCOPE_HINT_RE = re.compile(
     r"(?:unit|Unit|UNIT)\s*\d+|第\s*\d+\s*(?:-|到|至|~|～)\s*\d+\s*章|"
@@ -682,6 +688,58 @@ def _should_collect_study_context_locally(user_message: str) -> bool:
     if not _wants_detailed_study_context(user_message):
         return False
     return not _study_context_has_quality(_extract_study_context_from_text(user_message))
+
+
+def _extract_total_study_duration_minutes(text: str) -> int | None:
+    match = _TOTAL_STUDY_DURATION_RE.search(text or "")
+    if match is None:
+        return None
+    number = _parse_study_number(match.group("value"))
+    if number is None:
+        return None
+    unit = match.group("unit")
+    if unit in {"小时", "钟头", "h", "H"}:
+        return int(number * 60)
+    return int(number)
+
+
+def _extract_short_review_subjects(text: str) -> list[str]:
+    match = re.search(
+        r"复习(?:一下|下)?(?P<subjects>.+?)(?:，|,|。|；|;|你来|帮我|给我|做一下|规划|安排|吧|$)",
+        text or "",
+    )
+    if match is None:
+        return []
+    raw_subjects = match.group("subjects")
+    raw_subjects = re.sub(r"(?:一下|下|内容|任务|计划)$", "", raw_subjects).strip()
+    parts = re.split(r"\s*(?:和|与|以及|、|/|，|,)\s*", raw_subjects)
+    subjects: list[str] = []
+    for part in parts:
+        subject = part.strip(" ：:，,。.?？；;！!的")
+        if not subject or subject in {"复习", "学习", "今晚", "今天晚上", "晚上"}:
+            continue
+        if subject not in subjects:
+            subjects.append(subject)
+    return subjects[:4]
+
+
+def _extract_tonight_review_request(user_message: str) -> dict[str, Any] | None:
+    text = (user_message or "").strip()
+    if not text or "复习" not in text:
+        return None
+    if not any(keyword in text for keyword in ("今晚", "今天晚上", "晚上")):
+        return None
+    duration_minutes = _extract_total_study_duration_minutes(text)
+    if duration_minutes is None or duration_minutes < 30:
+        return None
+    subjects = _extract_short_review_subjects(text)
+    if not subjects:
+        return None
+    return {"subjects": subjects, "duration_minutes": duration_minutes}
+
+
+def _should_handle_tonight_review_locally(user_message: str) -> bool:
+    return _extract_tonight_review_request(user_message) is not None
 
 
 def _extract_first_iso_date(text: str) -> str | None:
@@ -1813,6 +1871,149 @@ async def _run_missing_task_create_shortcut(
     yield {"type": "done"}
 
 
+def _build_tonight_review_tasks(
+    subjects: list[str],
+    total_minutes: int,
+    free_slots_result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not subjects or total_minutes <= 0:
+        return []
+
+    today = date.today().isoformat()
+    durations: list[int] = []
+    base_duration = total_minutes // len(subjects)
+    remainder = total_minutes % len(subjects)
+    for index in range(len(subjects)):
+        durations.append(base_duration + (1 if index < remainder else 0))
+
+    slots = free_slots_result.get("slots")
+    if not isinstance(slots, list):
+        return []
+
+    free_periods: list[dict[str, Any]] = []
+    for day in slots:
+        if not isinstance(day, dict) or str(day.get("date") or "") != today:
+            continue
+        periods = day.get("free_periods")
+        if isinstance(periods, list):
+            free_periods = [period for period in periods if isinstance(period, dict)]
+        break
+
+    if not free_periods:
+        return []
+
+    evening_start = 18 * 60
+    break_minutes = 15 if len(subjects) > 1 else 0
+    period_index = 0
+    cursor: int | None = None
+    tasks: list[dict[str, Any]] = []
+
+    for subject, duration in zip(subjects, durations):
+        placed = False
+        while period_index < len(free_periods):
+            period = free_periods[period_index]
+            period_start = _time_to_minutes(str(period.get("start") or ""))
+            period_end = _time_to_minutes(str(period.get("end") or ""))
+            if period_start is None or period_end is None:
+                period_index += 1
+                cursor = None
+                continue
+
+            candidate_start = max(period_start, evening_start)
+            if cursor is not None:
+                candidate_start = max(candidate_start, cursor)
+
+            if candidate_start + duration <= period_end:
+                start_time = _time_after_minutes("00:00", candidate_start)
+                end_time = _time_after_minutes(start_time, duration)
+                tasks.append(
+                    {
+                        "title": f"{subject}复习",
+                        "scheduled_date": today,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "description": f"今晚集中复习：{subject}",
+                    }
+                )
+                cursor = candidate_start + duration + break_minutes
+                placed = True
+                break
+
+            period_index += 1
+            cursor = None
+
+        if not placed:
+            return []
+
+    return tasks
+
+
+async def _run_tonight_review_shortcut(
+    user_message: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    request = _extract_tonight_review_request(user_message)
+    if request is None:
+        return
+
+    total_minutes = int(request["duration_minutes"])
+    subjects = list(request["subjects"])
+    today = date.today().isoformat()
+    free_args = {
+        "start_date": today,
+        "end_date": today,
+        "min_duration_minutes": max(30, min(total_minutes // max(len(subjects), 1), total_minutes)),
+    }
+    step = 1
+    yield {"type": "tool_call", "name": "get_free_slots", "args": free_args}
+    free_result = await execute_tool("get_free_slots", free_args, db, user.id)
+    yield {"type": "tool_result", "name": "get_free_slots", "result": free_result}
+    await _persist_local_tool_step(db, session_id, user.id, step, "get_free_slots", free_args, free_result)
+
+    if "error" in free_result:
+        message_id = str(uuid.uuid4())
+        text = str(free_result.get("error") or "查询今晚空闲时间失败，请稍后重试。")
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    tasks = _build_tonight_review_tasks(subjects, total_minutes, free_result)
+    if not tasks:
+        message_id = str(uuid.uuid4())
+        text = "今晚可用空闲时间不够完整排下这次复习。你可以减少总时长，或告诉我允许排到更晚一点。"
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    shortcut = _run_confirmed_plan_write(
+        tasks,
+        user,
+        session_id,
+        db,
+        step,
+        _normalize_study_plan_tasks,
+        "复习任务",
+        "今晚复习计划已经生成，但里面没有可写入日程的完整任务时间。请调整后再试。",
+        "今晚 {count} 段复习已经排好。确认后我会写入你的日程。",
+        "好的，我先不写入今晚的复习安排。你调整科目或时长后再告诉我。",
+    )
+    try:
+        event = await shortcut.__anext__()
+        while True:
+            if event["type"] == "ask_user":
+                user_response = yield event
+                event = await shortcut.asend(user_response)
+            else:
+                yield event
+                event = await shortcut.__anext__()
+    except StopAsyncIteration:
+        pass
+
+
 async def _run_confirmed_plan_write(
     raw_tasks: Any,
     user: User,
@@ -2335,6 +2536,21 @@ async def run_agent_loop(
 
     if _should_handle_schedule_import_locally(user_message):
         shortcut = _run_schedule_import_shortcut(user_message, user, session_id, db)
+        try:
+            event = await shortcut.__anext__()
+            while True:
+                if event["type"] == "ask_user":
+                    user_response = yield event
+                    event = await shortcut.asend(user_response)
+                else:
+                    yield event
+                    event = await shortcut.__anext__()
+        except StopAsyncIteration:
+            pass
+        return
+
+    if _should_handle_tonight_review_locally(user_message):
+        shortcut = _run_tonight_review_shortcut(user_message, user, session_id, db)
         try:
             event = await shortcut.__anext__()
             while True:

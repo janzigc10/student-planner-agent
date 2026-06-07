@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode } from 'react'
 
 import { api, getStoredToken } from '../api/client'
 import { createClientId } from '../createClientId'
@@ -50,6 +50,16 @@ interface ScheduleReviewNotice {
   note: string | null
 }
 
+type AssistantResultTone = 'success' | 'warning'
+
+interface AssistantResultView {
+  tone: AssistantResultTone
+  eyebrow: string
+  title: string
+  body: string | null
+  chips: string[]
+}
+
 const CHAT_RESPONSE_TIMEOUT_MS = 30000
 const IMAGE_PARSE_BRIDGE_START = 18
 const IMAGE_PARSE_BRIDGE_MAX = 92
@@ -60,8 +70,12 @@ const IMAGE_PARSE_POLL_TIMEOUT_MS = 90000
 const ATTACHMENT_INPUT_ID = 'chat-attachment-input'
 const DEFAULT_CONFIRM_OPTIONS = ['确认', '取消']
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const DEFAULT_THINKING_STEPS = ['理解你的需求', '检查日程上下文', '整理回复格式']
+const TASK_PREVIEW_VISIBLE_COUNT = 3
+const COURSE_PREVIEW_VISIBLE_COUNT = 4
+const COURSE_ACTION_VISIBLE_COUNT = 3
 const COURSE_ENTRY_KEYS = ['courses', 'course_list', 'courseList', '课程列表', '课程清单', '课表列表'] as const
-const TASK_ENTRY_KEYS = ['tasks', 'task_list', 'taskList', '计划任务', '任务列表'] as const
+const TASK_ENTRY_KEYS = ['tasks', 'task_list', 'taskList', 'plan', 'plans', '计划', '计划任务', '任务列表'] as const
 const COURSE_ACTION_KEYS = ['actions', 'course_actions', 'courseActions', '修改动作'] as const
 const REVIEW_COUNT_KEYS = ['count', 'course_count', 'courseCount', 'total', '共识别课程条目', '识别课程数', '课程数量'] as const
 
@@ -473,12 +487,13 @@ function toTaskPreview(entry: unknown, index: number): TaskPreview {
   }
 
   const record = entry as Record<string, unknown>
-  const title = pickText(record, ['title', 'name', '任务', '任务名', '标题']) ?? `任务 ${index + 1}`
+  const title = pickText(record, ['title', 'name', 'content', '任务', '任务名', '标题', '内容']) ?? `任务 ${index + 1}`
   const date = formatDateLabel(record.scheduled_date ?? record.date ?? record.日期)
   const startTime = pickText(record, ['start_time', 'startTime', '开始时间'])
   const endTime = pickText(record, ['end_time', 'endTime', '结束时间'])
   const time = startTime && endTime ? `${startTime}-${endTime}` : startTime ?? endTime ?? pickText(record, ['time', '时间'])
-  const description = pickText(record, ['description', 'note', '说明', '描述', '内容'])
+  const rawDescription = pickText(record, ['description', 'note', '说明', '描述', '内容'])
+  const description = rawDescription && rawDescription !== title ? rawDescription : null
 
   return { title, date, time, description }
 }
@@ -569,6 +584,298 @@ function progressSummary(progress: ToolProgress[]) {
   }
 }
 
+function renderInlineRichText(text: string, keyPrefix: string): ReactNode[] {
+  const parts: ReactNode[] = []
+  const pattern = /(\*\*([^*]+)\*\*|`([^`]+)`)/g
+  let cursor = 0
+  let match: RegExpExecArray | null
+  let index = 0
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > cursor) {
+      parts.push(text.slice(cursor, match.index))
+    }
+
+    if (match[2]) {
+      parts.push(
+        <strong className="message__strong" key={`${keyPrefix}-strong-${index}`}>
+          {match[2]}
+        </strong>,
+      )
+    } else if (match[3]) {
+      parts.push(
+        <code className="message__code" key={`${keyPrefix}-code-${index}`}>
+          {match[3]}
+        </code>,
+      )
+    }
+
+    cursor = pattern.lastIndex
+    index += 1
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor))
+  }
+
+  return parts
+}
+
+function renderRichTextContent(content: string, keyPrefix: string): ReactNode {
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const blocks: ReactNode[] = []
+  let listItems: ReactNode[] = []
+  let listKind: 'ol' | 'ul' | null = null
+
+  function flushList() {
+    if (listItems.length === 0 || listKind === null) {
+      return
+    }
+    const ListTag = listKind
+    blocks.push(
+      <ListTag className="message__list" key={`${keyPrefix}-list-${blocks.length}`}>
+        {listItems}
+      </ListTag>,
+    )
+    listItems = []
+    listKind = null
+  }
+
+  lines.forEach((line, lineIndex) => {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flushList()
+      return
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/)
+    if (heading) {
+      flushList()
+      const headingText = heading[2] ?? ''
+      blocks.push(
+        <p className="message__heading" key={`${keyPrefix}-heading-${lineIndex}`}>
+          {renderInlineRichText(headingText, `${keyPrefix}-heading-${lineIndex}`)}
+        </p>,
+      )
+      return
+    }
+
+    const unordered = trimmed.match(/^[-*•]\s+(.+)$/)
+    if (unordered) {
+      const itemText = unordered[1] ?? ''
+      if (listKind !== 'ul') {
+        flushList()
+        listKind = 'ul'
+      }
+      listItems.push(
+        <li key={`${keyPrefix}-li-${lineIndex}`}>
+          {renderInlineRichText(itemText, `${keyPrefix}-li-${lineIndex}`)}
+        </li>,
+      )
+      return
+    }
+
+    const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/)
+    if (ordered) {
+      const itemText = ordered[1] ?? ''
+      if (listKind !== 'ol') {
+        flushList()
+        listKind = 'ol'
+      }
+      listItems.push(
+        <li key={`${keyPrefix}-oli-${lineIndex}`}>
+          {renderInlineRichText(itemText, `${keyPrefix}-oli-${lineIndex}`)}
+        </li>,
+      )
+      return
+    }
+
+    flushList()
+    blocks.push(
+      <p className="message__paragraph" key={`${keyPrefix}-p-${lineIndex}`}>
+        {renderInlineRichText(trimmed, `${keyPrefix}-p-${lineIndex}`)}
+      </p>,
+    )
+  })
+
+  flushList()
+
+  if (blocks.length === 0) {
+    return null
+  }
+
+  return blocks
+}
+
+function splitResultText(content: string) {
+  const normalized = content.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
+  const firstSentence = normalized.match(/^(.+?[。！？!?])(?:\s*(.+))?$/s)
+  if (!firstSentence) {
+    return { title: normalized, body: null }
+  }
+
+  const title = firstSentence[1]?.trim() ?? normalized
+  const body = firstSentence[2]?.trim() || null
+  return { title, body }
+}
+
+function classifyAssistantResult(content: string): AssistantResultView | null {
+  const text = content.trim()
+  if (!text || text.includes('```') || /^#{1,6}\s/m.test(text)) {
+    return null
+  }
+
+  const hasUnresolvedConflict = /冲突/.test(text) && !/自动重排/.test(text)
+  const hasFailureSignal = /(未写入|没有写入成功|暂时没有|失败|参数不完整|请调整后再试)/.test(text) || hasUnresolvedConflict
+  const hasCompletionTarget = /(写入日程|创建.*任务|导入课表|更新课表|设置提醒|安排妥当|自动重排)/.test(text)
+  const hasSuccessSignal = /(已把|已写入|已经|成功|安排妥当)/.test(text)
+
+  if (!hasFailureSignal && !(hasCompletionTarget && hasSuccessSignal)) {
+    return null
+  }
+
+  const { title, body } = splitResultText(text)
+  const chips: string[] = []
+  const count = text.match(/(\d+)\s*条/)
+  if (count?.[1]) {
+    chips.push(`${count[1]} 条记录`)
+  }
+  if (/自动重排/.test(text)) {
+    chips.push('含自动重排')
+  }
+  if (/未写入|没有写入成功|失败/.test(text)) {
+    chips.push('需要处理')
+  }
+
+  return {
+    tone: hasFailureSignal ? 'warning' : 'success',
+    eyebrow: hasFailureSignal ? '需要确认' : '已完成',
+    title,
+    body,
+    chips,
+  }
+}
+
+function thinkingStepsFromProgress(progress: ToolProgress[]) {
+  if (progress.length === 0) {
+    return DEFAULT_THINKING_STEPS
+  }
+
+  return progress.map((item) => (item.status === 'done' ? `${item.label}完成` : `正在${item.label}`))
+}
+
+function ThinkingOrb() {
+  return (
+    <span className="thinking-orb" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+    </span>
+  )
+}
+
+function ThinkingStatus({
+  activeStep,
+  steps,
+  title,
+}: {
+  activeStep: string
+  steps: string[]
+  title: string
+}) {
+  return (
+    <section className="thinking-card" role="status" aria-live="polite">
+      <div className="thinking-card__head">
+        <ThinkingOrb />
+        <strong>{title}</strong>
+      </div>
+      <p className="thinking-card__active">{activeStep}</p>
+      <div className="thinking-card__trail" aria-label="处理轨迹">
+        {steps.map((step) => (
+          <span className={step === activeStep ? 'is-active' : undefined} key={step}>
+            {step}
+          </span>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function AssistantResultCard({ result, messageId }: { result: AssistantResultView; messageId: string }) {
+  return (
+    <section className={`assistant-result assistant-result--${result.tone}`} aria-label={result.eyebrow}>
+      <div className="assistant-result__mark" aria-hidden="true">
+        {result.tone === 'success' ? '✓' : '!'}
+      </div>
+      <div className="assistant-result__content">
+        <span className="assistant-result__eyebrow">{result.eyebrow}</span>
+        <p className="assistant-result__title">{result.title}</p>
+        {result.body ? (
+          <div className="assistant-result__body">{renderRichTextContent(result.body, `${messageId}-result`)}</div>
+        ) : null}
+        {result.chips.length > 0 ? (
+          <div className="assistant-result__chips" aria-label="结果摘要">
+            {result.chips.map((chip) => (
+              <span key={chip}>{chip}</span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function TaskPreviewItem({ task, index }: { task: TaskPreview; index: number }) {
+  return (
+    <article className="ask-card__plan-item">
+      <div className="ask-card__plan-marker" aria-hidden="true">
+        {index + 1}
+      </div>
+      <div className="ask-card__plan-body">
+        <div className="ask-card__plan-meta">
+          <span>{task.date ?? '安排'}</span>
+          <strong>{task.time ?? '待安排'}</strong>
+        </div>
+        <p className="ask-card__plan-title">{task.title}</p>
+        {task.description ? <p className="ask-card__plan-desc">{task.description}</p> : null}
+      </div>
+    </article>
+  )
+}
+
+function CourseActionPreviewItem({ action }: { action: CourseActionPreview }) {
+  return (
+    <article className={`ask-card__course-action ask-card__course-action--${action.action}`}>
+      <div className="ask-card__course-action-main">
+        <p>
+          {action.nextName ? (
+            <>
+              <span>{action.courseName}</span>
+              <strong>→</strong>
+              <span>{action.nextName}</span>
+            </>
+          ) : (
+            <span>{action.courseName}</span>
+          )}
+        </p>
+        {action.timeLine ? <span>{action.timeLine}</span> : null}
+        {action.metaLine ? <span>{action.metaLine}</span> : null}
+      </div>
+      {action.reason ? <p className="ask-card__plan-desc">{action.reason}</p> : null}
+    </article>
+  )
+}
+
+function CoursePreviewItem({ course }: { course: CoursePreview }) {
+  return (
+    <article className="ask-card__schedule-item">
+      <p className="ask-card__schedule-name">{course.name}</p>
+      {course.timeLine ? <p className="ask-card__schedule-line">{course.timeLine}</p> : null}
+      {course.metaLine ? <p className="ask-card__schedule-line ask-card__schedule-line--muted">{course.metaLine}</p> : null}
+    </article>
+  )
+}
+
 function isUploadParsed(status: ScheduleUploadStatusResponse['status']) {
   return status === 'PARSED' || status === 'READY' || status === 'NEED_PERIOD_TIMES'
 }
@@ -590,6 +897,7 @@ export function ChatPage() {
     pendingAsk,
     progress,
     progressAnchorMessageId,
+    streamingMessageId,
   } = useChatStore()
   const [draft, setDraft] = useState('')
   const [askDraft, setAskDraft] = useState('')
@@ -597,8 +905,11 @@ export function ChatPage() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [isBusySending, setIsBusySending] = useState(false)
   const [imageParseBridge, setImageParseBridge] = useState<ImageParseBridgeState | null>(null)
+  const [thinkingStepIndex, setThinkingStepIndex] = useState(0)
   const hasSpeech = typeof window !== 'undefined' && 'webkitSpeechRecognition' in window
   const inlineTextAsk = isInlineTextAsk(pendingAsk)
+  const hasConversation =
+    messages.some((message) => message.id !== 'welcome') || pendingAsk !== null || progress.length > 0 || isBusySending
   const shouldRenderAskCard = pendingAsk !== null && !inlineTextAsk && !(pendingAsk.answered && progress.length > 0)
   const isAskBridgePending = Boolean(pendingAsk?.answered && isSending && progress.length === 0)
 
@@ -613,6 +924,9 @@ export function ChatPage() {
     progress.length > 0 ? anchorOrder(progressAnchorMessageId, messageOrderMap, tailOrder, 1) : null
   const imageParseBridgeOrder = imageParseBridge ? tailOrder + 1 : null
   const progressInfo = useMemo(() => progressSummary(progress), [progress])
+  const thinkingSteps = useMemo(() => thinkingStepsFromProgress(progress), [progress])
+  const activeThinkingStep = thinkingSteps[thinkingStepIndex % thinkingSteps.length] ?? DEFAULT_THINKING_STEPS[0]
+  const showLooseThinking = isBusySending && !imageParseBridge && progress.length === 0 && !pendingAsk?.answered
   const canSend = draft.trim().length > 0 || pendingAttachments.length > 0
   const pendingAttachmentKind = pendingAttachments[0]?.kind ?? null
   const canAddMoreAttachments =
@@ -684,6 +998,21 @@ export function ChatPage() {
     }
     return buildScheduleReviewNotice(pendingAsk.question, reviewCount)
   }, [coursePreviews, pendingAsk, reviewCount])
+
+  useEffect(() => {
+    if (!isBusySending && progress.length === 0 && !isAskBridgePending) {
+      setThinkingStepIndex(0)
+      return
+    }
+
+    const timerId = window.setInterval(() => {
+      setThinkingStepIndex((current) => current + 1)
+    }, 1300)
+
+    return () => {
+      window.clearInterval(timerId)
+    }
+  }, [isAskBridgePending, isBusySending, progress.length, thinkingSteps.length])
 
   useEffect(() => {
     if (!imageParseBridge) {
@@ -1008,29 +1337,43 @@ export function ChatPage() {
   }
 
   return (
-    <main className="page chat-page">
-      <section className="chat-hero" aria-label="学习规划助手">
-        <div className="chat-hero__status">
-          <span>今日工作台</span>
+    <main className={`page chat-page${hasConversation ? ' chat-page--active' : ''}`}>
+      {hasConversation ? (
+        <section className="chat-session-bar" aria-label="当前对话状态">
+          <span>学习规划助手</span>
           <strong>Agent 在线</strong>
-        </div>
-        <h1>把学习安排说清楚就行</h1>
-        <p>考试、作业、课表和提醒都可以直接发给我。我会先整理成计划，确认后再写入日程。</p>
-        <div className="chat-hero__suggestions" aria-label="常用请求">
-          {['帮我拆一个复习计划', '把报告安排到本周', '检查今天的空闲时间', '修改课表里的课程'].map((suggestion) => (
-            <button type="button" key={suggestion} onClick={() => setDraft(suggestion)}>
-              {suggestion}
-            </button>
-          ))}
-        </div>
-      </section>
+        </section>
+      ) : (
+        <section className="chat-hero" aria-label="学习规划助手">
+          <div className="chat-hero__status">
+            <span>今日工作台</span>
+            <strong>Agent 在线</strong>
+          </div>
+          <h1>把学习安排说清楚就行</h1>
+          <p>考试、作业、课表和提醒都可以直接发给我。我会先整理成计划，确认后再写入日程。</p>
+          <div className="chat-hero__suggestions" aria-label="常用请求">
+            {['帮我拆一个复习计划', '把报告安排到本周', '检查今天的空闲时间', '修改课表里的课程'].map((suggestion) => (
+              <button type="button" key={suggestion} onClick={() => setDraft(suggestion)}>
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="message-list">
         {messages.map((message, index) => (
           (() => {
             const uploadReceipt = message.role === 'user' ? parseUploadReceipt(message.content) : null
+            const isStreamingMessage = message.role === 'assistant' && streamingMessageId === message.id
+            const assistantResult =
+              message.role === 'assistant' && !isStreamingMessage ? classifyAssistantResult(message.content) : null
             return (
               <div
-                className={`message message--${message.role}${uploadReceipt ? ' message--upload-receipt' : ''}`}
+                className={`message message--${message.role}${uploadReceipt ? ' message--upload-receipt' : ''}${
+                  isStreamingMessage ? ' message--streaming' : ''
+                }${assistantResult ? ` message--result message--result-${assistantResult.tone}` : ''}${
+                  message.id === 'welcome' ? ' message--welcome' : ''
+                }`}
                 key={message.id}
                 style={{ order: (index + 1) * 10 }}
               >
@@ -1047,6 +1390,13 @@ export function ChatPage() {
                         : `共 ${uploadReceipt.count} 个，等待助手解析`}
                     </span>
                   </div>
+                ) : assistantResult ? (
+                  <AssistantResultCard result={assistantResult} messageId={message.id} />
+                ) : message.role === 'assistant' ? (
+                  <div className="message__rich">
+                    {renderRichTextContent(message.content, message.id)}
+                    {isStreamingMessage ? <span className="message__cursor" aria-hidden="true" /> : null}
+                  </div>
                 ) : (
                   message.content
                 )}
@@ -1058,7 +1408,10 @@ export function ChatPage() {
         {imageParseBridge && imageParseBridgeOrder !== null ? (
           <section className="progress-card progress-card--image-bridge" aria-label="image-parse-bridge" style={{ order: imageParseBridgeOrder }}>
             <div className="progress-card__header">
-              <strong>{`正在解析图片${imageParseBridge.count > 1 ? ` (${imageParseBridge.count} 张)` : ''}...`}</strong>
+              <div className="progress-card__title">
+                <ThinkingOrb />
+                <strong>{`正在解析图片${imageParseBridge.count > 1 ? ` (${imageParseBridge.count} 张)` : ''}`}</strong>
+              </div>
               <span className="progress-card__ratio">{`${Math.round(imageParseBridge.progress)}%`}</span>
             </div>
             <div
@@ -1070,13 +1423,17 @@ export function ChatPage() {
             >
               <span className="progress-card__fill progress-card__fill--running" style={{ width: `${imageParseBridge.progress}%` }} />
             </div>
+            <p className="progress-card__hint">识别课程结构，整理为可确认的课表卡片</p>
           </section>
         ) : null}
 
         {progress.length > 0 && progressCardOrder !== null ? (
           <section className="progress-card" aria-label="处理进度" style={{ order: progressCardOrder }}>
             <div className="progress-card__header">
-              <strong>{isSending ? '正在处理...' : '处理完成'}</strong>
+              <div className="progress-card__title">
+                {isSending ? <ThinkingOrb /> : null}
+                <strong>{isSending ? '正在处理' : '处理完成'}</strong>
+              </div>
               <span className="progress-card__ratio">{progressInfo.ratio}</span>
             </div>
             <div
@@ -1092,21 +1449,23 @@ export function ChatPage() {
               />
             </div>
             <p className="progress-card__hint">
-              当前：{progressInfo.currentLabel ?? (isSending ? '等待确认' : '已完成')}
+              {isSending ? activeThinkingStep : '处理完成，正在整理回复'}
             </p>
-            {progress.map((item) => (
-              <div className="progress-card__item" key={item.name}>
-                <span
-                  className={`progress-card__status ${
-                    item.status === 'done' ? 'progress-card__status--done' : 'progress-card__status--running'
-                  }`}
-                  aria-hidden="true"
-                >
-                  {item.status === 'done' ? '✓' : '…'}
-                </span>
-                <span>{item.label}</span>
-              </div>
-            ))}
+            <div className="progress-card__items" aria-label="处理轨迹">
+              {progress.map((item) => (
+                <div className="progress-card__item" key={item.name}>
+                  <span
+                    className={`progress-card__status ${
+                      item.status === 'done' ? 'progress-card__status--done' : 'progress-card__status--running'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {item.status === 'done' ? '✓' : '…'}
+                  </span>
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
           </section>
         ) : null}
 
@@ -1118,13 +1477,19 @@ export function ChatPage() {
           >
             {scheduleReviewNotice ? (
               <div className="ask-card__review-copy">
+                <span className="ask-card__eyebrow">课表确认</span>
                 <p className="ask-card__review-title">{scheduleReviewNotice.title}</p>
                 {scheduleReviewNotice.note ? (
                   <p className="ask-card__review-note">{scheduleReviewNotice.note}</p>
                 ) : null}
               </div>
             ) : (
-              <p>{pendingAsk.question}</p>
+              <div className="ask-card__intro">
+                <span className="ask-card__eyebrow">
+                  {pendingAsk.type === 'confirm' ? '确认操作' : pendingAsk.type === 'select' ? '选择下一步' : '需要确认'}
+                </span>
+                <div className="ask-card__question">{renderRichTextContent(pendingAsk.question, 'ask-question')}</div>
+              </div>
             )}
 
             {pendingAsk.type === 'review' && normalizedAskData != null ? (
@@ -1137,18 +1502,23 @@ export function ChatPage() {
                     </div>
                   </header>
                   <div className="ask-card__plan-list">
-                    {taskPreviews.map((task, index) => (
-                      <article className="ask-card__plan-item" key={`${task.title}-${index}`}>
-                        <div className="ask-card__plan-time">
-                          <span>{task.date ?? '待定'}</span>
-                          <strong>{task.time ?? '待安排'}</strong>
-                        </div>
-                        <div className="ask-card__plan-body">
-                          <p className="ask-card__plan-title">{task.title}</p>
-                          {task.description ? <p className="ask-card__plan-desc">{task.description}</p> : null}
-                        </div>
-                      </article>
+                    {taskPreviews.slice(0, TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
+                      <TaskPreviewItem task={task} index={index} key={`${task.title}-${index}`} />
                     ))}
+                    {taskPreviews.length > TASK_PREVIEW_VISIBLE_COUNT ? (
+                      <details className="ask-card__details">
+                        <summary>{`展开剩余 ${taskPreviews.length - TASK_PREVIEW_VISIBLE_COUNT} 条任务`}</summary>
+                        <div className="ask-card__details-list">
+                          {taskPreviews.slice(TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
+                            <TaskPreviewItem
+                              task={task}
+                              index={index + TASK_PREVIEW_VISIBLE_COUNT}
+                              key={`${task.title}-${index + TASK_PREVIEW_VISIBLE_COUNT}`}
+                            />
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                 </section>
               ) : courseActionPreviews ? (
@@ -1160,26 +1530,22 @@ export function ChatPage() {
                     </div>
                   </header>
                   <div className="ask-card__course-action-list">
-                    {courseActionPreviews.map((action, index) => (
-                      <article className={`ask-card__course-action ask-card__course-action--${action.action}`} key={`${action.courseName}-${index}`}>
-                        <div className="ask-card__course-action-main">
-                          <p>
-                            {action.nextName ? (
-                              <>
-                                <span>{action.courseName}</span>
-                                <strong>→</strong>
-                                <span>{action.nextName}</span>
-                              </>
-                            ) : (
-                              <span>{action.courseName}</span>
-                            )}
-                          </p>
-                          {action.timeLine ? <span>{action.timeLine}</span> : null}
-                          {action.metaLine ? <span>{action.metaLine}</span> : null}
-                        </div>
-                        {action.reason ? <p className="ask-card__plan-desc">{action.reason}</p> : null}
-                      </article>
+                    {courseActionPreviews.slice(0, COURSE_ACTION_VISIBLE_COUNT).map((action, index) => (
+                      <CourseActionPreviewItem action={action} key={`${action.courseName}-${index}`} />
                     ))}
+                    {courseActionPreviews.length > COURSE_ACTION_VISIBLE_COUNT ? (
+                      <details className="ask-card__details">
+                        <summary>{`展开剩余 ${courseActionPreviews.length - COURSE_ACTION_VISIBLE_COUNT} 条修改`}</summary>
+                        <div className="ask-card__details-list">
+                          {courseActionPreviews.slice(COURSE_ACTION_VISIBLE_COUNT).map((action, index) => (
+                            <CourseActionPreviewItem
+                              action={action}
+                              key={`${action.courseName}-${index + COURSE_ACTION_VISIBLE_COUNT}`}
+                            />
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                 </section>
               ) : coursePreviews ? (
@@ -1190,15 +1556,21 @@ export function ChatPage() {
                   </header>
                   <div className="ask-card__schedule-list" aria-label="识别课程列表">
                     {coursePreviews.length > 0 ? (
-                      coursePreviews.map((course, index) => (
-                        <article className="ask-card__schedule-item" key={`${course.name}-${index}`}>
-                          <p className="ask-card__schedule-name">{course.name}</p>
-                          {course.timeLine ? <p className="ask-card__schedule-line">{course.timeLine}</p> : null}
-                          {course.metaLine ? (
-                            <p className="ask-card__schedule-line ask-card__schedule-line--muted">{course.metaLine}</p>
-                          ) : null}
-                        </article>
-                      ))
+                      <>
+                        {coursePreviews.slice(0, COURSE_PREVIEW_VISIBLE_COUNT).map((course, index) => (
+                          <CoursePreviewItem course={course} key={`${course.name}-${index}`} />
+                        ))}
+                        {coursePreviews.length > COURSE_PREVIEW_VISIBLE_COUNT ? (
+                          <details className="ask-card__details">
+                            <summary>{`展开剩余 ${coursePreviews.length - COURSE_PREVIEW_VISIBLE_COUNT} 门课程`}</summary>
+                            <div className="ask-card__details-list">
+                              {coursePreviews.slice(COURSE_PREVIEW_VISIBLE_COUNT).map((course, index) => (
+                                <CoursePreviewItem course={course} key={`${course.name}-${index + COURSE_PREVIEW_VISIBLE_COUNT}`} />
+                              ))}
+                            </div>
+                          </details>
+                        ) : null}
+                      </>
                     ) : (
                       <p className="ask-card__schedule-empty">未识别到课程内容，请返回检查文件。</p>
                     )}
@@ -1225,8 +1597,8 @@ export function ChatPage() {
                 <p className="ask-card__answered-title">已选择：{pendingAsk.answered}</p>
                 {isAskBridgePending ? (
                   <p className="ask-card__answered-hint">
-                    <span className="ask-card__answered-dot" aria-hidden="true" />
-                    正在继续处理，请稍候…
+                    <ThinkingOrb />
+                    <span>{activeThinkingStep}</span>
                   </p>
                 ) : null}
               </div>
@@ -1319,10 +1691,8 @@ export function ChatPage() {
         </p>
       ) : null}
 
-      {isBusySending && !imageParseBridge ? (
-        <p role="status" className="status-inline">
-          正在发送，请稍候…
-        </p>
+      {showLooseThinking ? (
+        <ThinkingStatus activeStep={activeThinkingStep} steps={thinkingSteps} title="正在思考" />
       ) : null}
 
       <form className="chat-input" onSubmit={submit}>

@@ -1311,6 +1311,56 @@ async def test_agent_loop_collects_context_for_detailed_study_plan(setup_db):
         event = await generator.__anext__()
         assert event["type"] == "ask_user"
         assert "拆得更准" in event["question"]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_handles_tonight_fixed_duration_review_without_exam_intake(setup_db):
+    mock_client = AsyncMock()
+
+    async with TestSession() as db:
+        user = User(
+            id="user-agent-tonight-review",
+            username="agent-tonight-review",
+            hashed_password="x",
+        )
+        db.add(user)
+        await db.commit()
+
+        generator = run_agent_loop(
+            "今晚我想花三个小时复习一下英语六级和高数，你来帮我做一下规划吧",
+            user,
+            "session-agent-tonight-review",
+            db,
+            mock_client,
+        )
+
+        events = []
+        event = await generator.__anext__()
+        while True:
+            events.append(event)
+            try:
+                if event["type"] == "ask_user":
+                    event = await generator.asend("取消")
+                else:
+                    event = await generator.__anext__()
+            except StopAsyncIteration:
+                break
+
+        assert not any(event["type"] == "ask_user" and "考试" in event["question"] for event in events)
+        assert not any(event["type"] == "ask_user" and "拆得更准" in event["question"] for event in events)
+        assert any(event["type"] == "tool_call" and event["name"] == "get_free_slots" for event in events)
+        review_events = [
+            event
+            for event in events
+            if event["type"] == "ask_user" and isinstance(event.get("data"), dict)
+        ]
+        assert len(review_events) == 1
+        assert review_events[0]["data"]["count"] == 2
+        assert [task["title"] for task in review_events[0]["data"]["tasks"]] == [
+            "英语六级复习",
+            "高数复习",
+        ]
+        assert [task["start_time"] for task in review_events[0]["data"]["tasks"]] == ["18:00", "19:45"]
         await generator.aclose()
 
 
