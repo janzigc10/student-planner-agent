@@ -14,9 +14,17 @@
 
 下面两张图来自最新一轮移动端全页面截图与 Agent Loop live E2E 视觉回归。
 
-![移动端全页面截图汇总](./docs/assets/readme/agent-loop-full-ui-pages.png)
+<img
+  src="./docs/assets/readme/agent-loop-full-ui-pages.png"
+  alt="移动端全页面截图汇总"
+  width="100%"
+/>
 
-![Agent Loop live E2E 证据汇总](./docs/assets/readme/agent-loop-live-e2e.png)
+<img
+  src="./docs/assets/readme/agent-loop-live-e2e.png"
+  alt="Agent Loop live E2E 证据汇总"
+  width="100%"
+/>
 
 ## Agent 架构定位
 
