@@ -10,6 +10,22 @@
 - 移动端 PWA：提供适合手机使用的聊天、日历、课程与通知体验。
 - 提醒系统：支持 Web Push 推送与服务端定时调度。
 
+## 当前体验快照
+
+下面两张图来自最新一轮移动端全页面截图与 Agent Loop live E2E 视觉回归。
+
+<img
+  src="./docs/assets/readme/agent-loop-full-ui-pages.png"
+  alt="移动端全页面截图汇总"
+  width="100%"
+/>
+
+<img
+  src="./docs/assets/readme/agent-loop-live-e2e.png"
+  alt="Agent Loop live E2E 证据汇总"
+  width="100%"
+/>
+
 ## 技术栈
 
 - Backend: FastAPI, SQLAlchemy Async, Alembic, APScheduler
