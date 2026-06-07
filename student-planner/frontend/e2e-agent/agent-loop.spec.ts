@@ -131,6 +131,74 @@ async function installWebSocketRecorder(page: Page) {
   })
 }
 
+async function readWebSocketRecorder(page: Page) {
+  return page.evaluate(() => {
+    return (window as unknown as { __agentE2eEvents?: unknown[] }).__agentE2eEvents ?? []
+  })
+}
+
+async function waitForTerminalServerEvent(page: Page, timeout = 8_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    const events = (await readWebSocketRecorder(page)) as Array<{ direction?: string; payload?: { type?: unknown } }>
+    const lastClientIndex = events.reduce((lastIndex, event, index) => {
+      return event.direction === 'client' ? index : lastIndex
+    }, -1)
+    const terminalAfterLastClient = events.slice(lastClientIndex + 1).some((event) => {
+      if (event.direction !== 'server') return false
+      return event.payload?.type === 'done' || event.payload?.type === 'ask_user' || event.payload?.type === 'error'
+    })
+    if (terminalAfterLastClient) {
+      return true
+    }
+    await page.waitForTimeout(500)
+  }
+  return false
+}
+
+async function waitForWebSocketEvent<T>(
+  page: Page,
+  predicate: (event: unknown) => event is T,
+  timeout = 15_000,
+) {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    const events = await readWebSocketRecorder(page)
+    const found = events.find(predicate)
+    if (found) {
+      return found
+    }
+    await page.waitForTimeout(500)
+  }
+  return undefined
+}
+
+async function waitForVisualIdle(page: Page, timeout = 20_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    const busy = await page.evaluate(() => {
+      const visible = (element: Element) => {
+        const rect = element.getBoundingClientRect()
+        const style = window.getComputedStyle(element)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+      }
+      const hasRunningProgress = Array.from(document.querySelectorAll('section[aria-label="处理进度"]')).some((card) => {
+        if (!visible(card)) return false
+        return card.textContent?.includes('正在处理') || card.querySelector('.progress-card__status--running') !== null
+      })
+      const hasLooseThinking = Array.from(document.querySelectorAll('.thinking-card')).some(visible)
+      const hasAnsweredAskBridge = Array.from(document.querySelectorAll('.ask-card__answered-hint .thinking-orb')).some(visible)
+      return hasRunningProgress || hasLooseThinking || hasAnsweredAskBridge
+    })
+    if (!busy) {
+      await page.waitForTimeout(300)
+      return
+    }
+    await page.waitForTimeout(500)
+  }
+  throw new Error('Timed out waiting for visual idle')
+}
+
 async function registerAndLogin(page: Page, username: string) {
   const password = 'agent-loop-e2e-password'
   await page.goto('/register')
@@ -157,6 +225,9 @@ async function hasInlineAsk(page: Page) {
     return false
   }
   const latest = (await assistantMessages.nth(count - 1).innerText()).trim()
+  if (/还有.*(需要|要).*(调整|修改|帮助).*吗[？?]?$/.test(latest)) {
+    return false
+  }
   return /确认|请.*(告诉|补充|输入|确认)|需要.*(日期|时间|提醒|信息)|哪天|几点|是否|吗[？?]?|[？?]$/.test(latest)
 }
 
@@ -190,6 +261,15 @@ async function answerVisibleAsk(page: Page, answer: string, timeout = 20_000) {
       return true
     }
     return false
+  }
+
+  const confirmAnswer = /^(确认|可以|确定|是)$/.test(answer.trim())
+  if (confirmAnswer) {
+    const preferred = askCard.getByRole('button', { name: /^(确认|可以|确定|是)$/ }).first()
+    if (await preferred.isVisible().catch(() => false)) {
+      await preferred.click()
+      return true
+    }
   }
 
   const answerInput = askCard.getByLabel('回复内容')
@@ -249,6 +329,11 @@ async function driveUntilDbInvariant(
     const answered = await answerVisibleAsk(page, answer, 15_000)
     if (answered) {
       responseIndex += 1
+      try {
+        return await waitForSnapshot(username, predicate, { timeout: 10_000, interval: 500 })
+      } catch {
+        // The answer may have led to another prompt instead of the final DB state.
+      }
       continue
     }
     await page.waitForTimeout(2_000)
@@ -351,10 +436,10 @@ async function writeEvidence(
   const safeTitle = testInfo.title.replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '')
   const baseName = `agent-loop-e2e-${scenario}-${safeTitle}`
   const screenshotPath = path.join(outputDir, `${baseName}.png`)
+  await waitForTerminalServerEvent(page)
+  await waitForVisualIdle(page)
   await page.screenshot({ path: screenshotPath, fullPage: true })
-  const websocketEvents = await page.evaluate(() => {
-    return (window as unknown as { __agentE2eEvents?: unknown[] }).__agentE2eEvents ?? []
-  })
+  const websocketEvents = await readWebSocketRecorder(page)
   const evidencePath = path.join(outputDir, `${baseName}.json`)
   fs.writeFileSync(
     evidencePath,
@@ -378,6 +463,8 @@ async function writeEvidence(
 }
 
 test.describe('Agent Loop E2E', () => {
+  test.describe.configure({ timeout: 240_000 })
+
   test('creates a task with an integrated reminder', async ({ page }, testInfo) => {
     const username = scenarioUsername('create')
     cleanupUser(username)
@@ -643,8 +730,8 @@ test.describe('Agent Loop E2E', () => {
     await registerAndLogin(page, username)
 
     const studyContextAnswer = '范围 Unit1-6，听力和写作薄弱，目标80分，每天最多2小时。'
-    await sendMessage(page, '下周四（2026-06-11）有大学英语3考试，帮我做一个复习计划。')
-    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认', studyContextAnswer, '确认', '确认'], (state) => {
+    await sendMessage(page, '下周四（2026-06-11）有大学英语3考试，帮我做一个详细复习计划。')
+    const dbSnapshot = await driveUntilDbInvariant(page, username, [studyContextAnswer, '确认', '确认'], (state) => {
       const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
       const englishTasks = state.tasks.filter((task) => {
         const haystack = `${task.title}\n${task.description ?? ''}`
@@ -685,6 +772,22 @@ test.describe('Agent Loop E2E', () => {
     expect(
       englishTasks.every((task) => task.scheduled_date >= '2026-06-02' && task.scheduled_date <= '2026-06-10'),
     ).toBe(true)
+    const planWriteResult = await waitForWebSocketEvent(page, (event): event is {
+      direction?: unknown
+      payload?: { type?: unknown; data?: { kind?: unknown; created_count?: unknown } }
+    } => {
+      const payload = (event as { direction?: unknown; payload?: unknown }).payload as
+        | { type?: unknown; data?: { kind?: unknown; created_count?: unknown } }
+        | undefined
+      return (
+        (event as { direction?: unknown }).direction === 'server' &&
+        payload?.type === 'result' &&
+        payload.data?.kind === 'plan_write' &&
+        typeof payload.data.created_count === 'number' &&
+        payload.data.created_count >= 1
+      )
+    })
+    expect(planWriteResult).toBeTruthy()
     await writeEvidence(page, testInfo, 'study-plan-confirmed-write', username, dbSnapshot, {
       taskCount: englishTasks.length,
       taskIds: englishTasks.map((task) => task.id),
@@ -692,6 +795,7 @@ test.describe('Agent Loop E2E', () => {
       studyContextHints: ['Unit1-6', '听力', '写作', '目标80分', '每天最多2小时'],
       toolSequence: toolNames,
       expectedExamDate: '2026-06-11',
+      structuredResultEvent: planWriteResult,
     })
   })
 

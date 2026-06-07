@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -1285,6 +1286,143 @@ async def test_agent_loop_writes_confirmed_study_plan_tasks(setup_db):
             tool_names = list(log_result.scalars().all())
             assert tool_names.count("create_study_plan") == 1
             assert tool_names.count("create_task") == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_applies_review_override_before_confirmed_plan_write(setup_db):
+    mock_client = AsyncMock()
+    llm_call_count = 0
+    generated_tasks = [
+        {
+            "title": "大学英语3 - 词汇与短语",
+            "exam_name": "大学英语3",
+            "date": "2026-06-03",
+            "start_time": "09:00",
+            "end_time": "10:30",
+            "description": "复习核心词汇。",
+        },
+        {
+            "title": "大学英语3 - 阅读训练",
+            "exam_name": "大学英语3",
+            "date": "2026-06-04",
+            "start_time": "14:00",
+            "end_time": "16:00",
+            "description": "完成阅读训练。",
+        },
+    ]
+
+    async def fake_generate_study_plan(exams, available_slots, strategy, study_context=None):
+        return generated_tasks
+
+    def mock_chat_completion_stream(client, messages, tools=None, tool_choice=None):
+        nonlocal llm_call_count
+        llm_call_count += 1
+
+        if llm_call_count == 1:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "free_slots_override",
+                            "type": "function",
+                            "function": {
+                                "name": "get_free_slots",
+                                "arguments": '{"start_date":"2026-06-03","end_date":"2026-06-10"}',
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 2:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "study_plan_override",
+                            "type": "function",
+                            "function": {
+                                "name": "create_study_plan",
+                                "arguments": (
+                                    '{"exams":[{"course_name":"大学英语3","exam_date":"2026-06-11"}],'
+                                    '"available_slots":{"total_free_hours":42,"free_slot_count":8},'
+                                    '"strategy":"balanced"}'
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        raise AssertionError("The loop should stop after confirmed override write")
+
+    override = {
+        "tasks": [
+            {
+                "title": "大学英语3 - 听力精修",
+                "scheduled_date": "2026-06-05",
+                "start_time": "18:00",
+                "end_time": "19:00",
+                "description": "只保留这一条。",
+            }
+        ]
+    }
+
+    with (
+        patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
+        patch("app.agent.tool_executor.generate_study_plan", side_effect=fake_generate_study_plan),
+    ):
+        async with TestSession() as db:
+            user = User(
+                id="user-agent-study-plan-override",
+                username="agent-study-plan-override",
+                hashed_password="x",
+            )
+            db.add(user)
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop(
+                "下周四（2026-06-11）有大学英语3考试，帮我做一个复习计划。",
+                user,
+                "session-agent-study-plan-override",
+                db,
+                mock_client,
+            )
+
+            event = await generator.__anext__()
+            while True:
+                events.append(event)
+                try:
+                    if event["type"] == "ask_user" and isinstance(event.get("data"), dict):
+                        event = await generator.asend(
+                            "确认\nreview_override="
+                            + json.dumps(override, ensure_ascii=False)
+                        )
+                    elif event["type"] == "ask_user":
+                        event = await generator.asend("确认")
+                    else:
+                        event = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+
+            create_task_calls = [
+                event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
+            ]
+            assert len(create_task_calls) == 1
+            assert create_task_calls[0]["args"]["title"] == "大学英语3 - 听力精修"
+            assert create_task_calls[0]["args"]["scheduled_date"] == "2026-06-05"
+            assert any(event["type"] == "result" and event["chips"] == ["1 条记录"] for event in events)
+
+            task_result = await db.execute(
+                select(Task).where(Task.user_id == "user-agent-study-plan-override")
+            )
+            tasks = list(task_result.scalars().all())
+            assert [task.title for task in tasks] == ["大学英语3 - 听力精修"]
 
 
 @pytest.mark.asyncio

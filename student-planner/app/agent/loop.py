@@ -1406,6 +1406,62 @@ def _is_confirmed_answer(answer: str) -> bool:
     positive_prefixes = ("确认", "好", "可以", "行", "是", "yes", "ok")
     return any(normalized.startswith(prefix) for prefix in positive_prefixes)
 
+
+def _extract_review_override(answer: str) -> dict[str, Any] | None:
+    marker = "review_override="
+    marker_index = (answer or "").find(marker)
+    if marker_index < 0:
+        return None
+
+    payload = answer[marker_index + len(marker) :].strip()
+    if not payload:
+        return None
+
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _build_plan_write_result_event(
+    *,
+    message_id: str,
+    text: str,
+    task_label: str,
+    created_count: int,
+    failed_count: int,
+    rescheduled_count: int,
+) -> dict[str, Any]:
+    has_failure = failed_count > 0 or created_count == 0
+    chips: list[str] = []
+    if created_count > 0:
+        chips.append(f"{created_count} 条记录")
+    if rescheduled_count > 0:
+        chips.append("含自动重排")
+    if failed_count > 0:
+        chips.append(f"{failed_count} 条待处理")
+
+    return {
+        "type": "result",
+        "message_id": message_id,
+        "content": text,
+        "tone": "warning" if has_failure else "success",
+        "eyebrow": "需要处理" if has_failure else "已完成",
+        "title": text,
+        "body": None,
+        "chips": chips,
+        "data": {
+            "kind": "plan_write",
+            "task_label": task_label,
+            "created_count": created_count,
+            "failed_count": failed_count,
+            "rescheduled_count": rescheduled_count,
+        },
+    }
+
+
 def _extract_schedule_file_id(user_message: str) -> str | None:
     match = _SCHEDULE_FILE_ID_RE.search(user_message or "")
     if match is None:
@@ -2048,6 +2104,26 @@ async def _run_confirmed_plan_write(
         yield {"type": "done"}
         return
 
+    review_override = _extract_review_override(str(confirm_answer or ""))
+    if review_override is not None:
+        override_tasks = normalize_tasks(review_override.get("tasks"))
+        tasks = override_tasks
+        if not tasks:
+            message_id = str(uuid.uuid4())
+            text = f"你已经删除了全部{task_label}，这次没有写入日程。"
+            yield _build_plan_write_result_event(
+                message_id=message_id,
+                text=text,
+                task_label=task_label,
+                created_count=0,
+                failed_count=0,
+                rescheduled_count=0,
+            )
+            yield {"type": "text", "message_id": message_id, "content": text}
+            await _save_message(db, session_id, "assistant", text)
+            yield {"type": "done"}
+            return
+
     step = start_step
     plan_date_range = _plan_task_date_range(tasks)
     created_results: list[dict[str, Any]] = []
@@ -2139,6 +2215,14 @@ async def _run_confirmed_plan_write(
     else:
         text = f"已把 {len(created_results)} 条{task_label}写入日程。"
 
+    yield _build_plan_write_result_event(
+        message_id=message_id,
+        text=text,
+        task_label=task_label,
+        created_count=len(created_results),
+        failed_count=len(failed_results),
+        rescheduled_count=len(rescheduled_results),
+    )
     yield {"type": "text", "message_id": message_id, "content": text}
     await _save_message(db, session_id, "assistant", text)
     yield {"type": "done"}

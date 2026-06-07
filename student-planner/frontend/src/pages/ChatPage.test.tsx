@@ -52,7 +52,14 @@ class MockWebSocket {
   constructor(url: string) {
     this.url = url
     MockWebSocket.instances.push(this)
-    queueMicrotask(() => this.onopen?.())
+    queueMicrotask(() => {
+      this.onopen?.()
+      this.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({ type: 'connected', session_id: 'mock-session' }),
+        }),
+      )
+    })
   }
 }
 
@@ -63,6 +70,14 @@ function readOrder(node: Node) {
 
 function expectNodeBefore(first: Node, second: Node) {
   expect(readOrder(first)).toBeLessThan(readOrder(second))
+}
+
+async function renderReadyChatPage() {
+  const result = render(<ChatPage />)
+  await act(async () => {
+    await Promise.resolve()
+  })
+  return result
 }
 
 describe('ChatPage attachment drafting', () => {
@@ -485,20 +500,21 @@ describe('ChatPage attachment drafting', () => {
       }),
     )
 
-    render(<ChatPage />)
+    await renderReadyChatPage()
 
     const socket = MockWebSocket.instances[0]
     expect(socket).toBeDefined()
     if (!socket) {
       return
     }
+    socket.send.mockClear()
     socket.readyState = 0
 
     const input = screen.getByLabelText('上传课表')
     await user.upload(input, createFile('math-1.png', 'image/png'))
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('聊天连接不可用，请稍后重试')
+    expect(await screen.findByRole('alert', undefined, { timeout: 6200 })).toHaveTextContent('聊天连接不可用，请稍后重试')
     expect(screen.getByRole('region', { name: '待发送附件' })).toHaveTextContent('待发送附件 1')
     expect(screen.getByText('math-1.png')).toBeInTheDocument()
     expect(screen.queryByText('已发送 1 张课表图片')).not.toBeInTheDocument()
@@ -508,24 +524,25 @@ describe('ChatPage attachment drafting', () => {
         message: '我上传了课表图片 file_id=schedule-file-3，请解析并展示确认卡片。',
       }),
     )
-  })
+  }, 8000)
 
   it('does not append a text message when the websocket cannot send it', async () => {
     const user = userEvent.setup()
 
-    render(<ChatPage />)
+    await renderReadyChatPage()
 
     const socket = MockWebSocket.instances[0]
     expect(socket).toBeDefined()
     if (!socket) {
       return
     }
+    socket.send.mockClear()
     socket.readyState = 0
 
     await user.type(screen.getByLabelText('输入消息'), '帮我安排今天的复习')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('聊天连接不可用，请稍后重试')
+    expect(await screen.findByRole('alert', undefined, { timeout: 6200 })).toHaveTextContent('聊天连接不可用，请稍后重试')
     expect(screen.getByLabelText('输入消息')).toHaveValue('帮我安排今天的复习')
     expect(screen.queryByText('帮我安排今天的复习')).not.toBeInTheDocument()
     expect(socket.send).not.toHaveBeenCalledWith(
@@ -533,11 +550,61 @@ describe('ChatPage attachment drafting', () => {
         message: '帮我安排今天的复习',
       }),
     )
+  }, 8000)
+
+  it('waits briefly for a reconnecting websocket before sending text', async () => {
+    vi.useFakeTimers()
+
+    try {
+      render(<ChatPage />)
+
+      const socket = MockWebSocket.instances[0]
+      expect(socket).toBeDefined()
+      if (!socket) {
+        return
+      }
+      await act(async () => {
+        await Promise.resolve()
+      })
+      socket.send.mockClear()
+      socket.readyState = 0
+
+      fireEvent.change(screen.getByLabelText('输入消息'), {
+        target: { value: '帮我安排今天的复习' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(700)
+      })
+      expect(socket.send).not.toHaveBeenCalled()
+
+      socket.readyState = MockWebSocket.OPEN
+      socket.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({ type: 'connected', session_id: 'mock-reconnected-session' }),
+        }),
+      )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100)
+        await Promise.resolve()
+      })
+
+      expect(socket.send).toHaveBeenLastCalledWith(
+        JSON.stringify({
+          message: '帮我安排今天的复习',
+        }),
+      )
+      expect(screen.getByText('帮我安排今天的复习')).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('routes plain review follow-up answers through the main input as ask_user answers', async () => {
     const user = userEvent.setup()
-    render(<ChatPage />)
+    await renderReadyChatPage()
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -563,7 +630,7 @@ describe('ChatPage attachment drafting', () => {
 
   it('routes typed text to answer channel when a confirm card is pending', async () => {
     const user = userEvent.setup()
-    render(<ChatPage />)
+    await renderReadyChatPage()
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -588,7 +655,7 @@ describe('ChatPage attachment drafting', () => {
 
   it('shows selected option text immediately after selecting a confirm option', async () => {
     const user = userEvent.setup()
-    render(<ChatPage />)
+    await renderReadyChatPage()
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -603,12 +670,90 @@ describe('ChatPage attachment drafting', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm' }))
 
     expect(screen.getByText('已选择：Confirm')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('理解你的需求')
+    expect(screen.getByRole('status')).toHaveTextContent('确认已收到')
+    expect(screen.getByText('执行确认操作')).toBeInTheDocument()
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   })
 
-  it('renders a dynamic progress card with ratio and current step', () => {
-    render(<ChatPage />)
+  it('shows a plan write stage after confirming a task review card', async () => {
+    const user = userEvent.setup()
+    await renderReadyChatPage()
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'ask_user',
+        question: '确认后写入这些任务',
+        ask_type: 'review',
+        options: ['确认', '取消'],
+        data: {
+          tasks: [{ time: '08:00-09:00', content: '背单词' }],
+        },
+      })
+    })
+
+    await user.click(screen.getByRole('button', { name: '确认' }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('确认已收到')
+    expect(screen.getByText('写入日程任务')).toBeInTheDocument()
+    expect(screen.getByText('整理写入结果')).toBeInTheDocument()
+  })
+
+  it('sends edited task review payload while displaying only the selected confirm label', async () => {
+    const user = userEvent.setup()
+    await renderReadyChatPage()
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'ask_user',
+        question: '确认后写入这些任务',
+        ask_type: 'review',
+        options: ['确认', '取消'],
+        data: {
+          tasks: [
+            {
+              title: '背单词',
+              scheduled_date: '2026-06-08',
+              start_time: '08:00',
+              end_time: '09:00',
+              description: 'Unit 1',
+            },
+            {
+              title: '阅读训练',
+              scheduled_date: '2026-06-08',
+              start_time: '09:30',
+              end_time: '10:30',
+              description: '两篇阅读',
+            },
+          ],
+        },
+      })
+    })
+
+    const titleInputs = screen.getAllByLabelText('标题')
+    await user.clear(titleInputs[0]!)
+    await user.type(titleInputs[0]!, '背单词精修')
+    await user.click(screen.getAllByRole('button', { name: '删除这条' })[1]!)
+    await user.click(screen.getByRole('button', { name: '确认' }))
+
+    const rawPayload = MockWebSocket.instances[0]?.send.mock.calls.at(-1)?.[0]
+    expect(typeof rawPayload).toBe('string')
+    const payload = JSON.parse(rawPayload as string) as { answer: string }
+    expect(payload.answer).toContain('review_override=')
+    const override = JSON.parse(payload.answer.split('review_override=')[1])
+    expect(override.tasks).toHaveLength(1)
+    expect(override.tasks[0]).toMatchObject({
+      title: '背单词精修',
+      scheduled_date: '2026-06-08',
+      start_time: '08:00',
+      end_time: '09:00',
+      description: 'Unit 1',
+    })
+    expect(screen.getByText('已选择：确认')).toBeInTheDocument()
+    expect(screen.queryByText(/review_override/)).not.toBeInTheDocument()
+  })
+
+  it('renders a dynamic progress card with ratio and current step', async () => {
+    await renderReadyChatPage()
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -618,7 +763,9 @@ describe('ChatPage attachment drafting', () => {
     })
 
     expect(screen.getByRole('progressbar')).toBeInTheDocument()
-    expect(screen.getByText('正在解析课表')).toBeInTheDocument()
+    expect(screen.getByText('解析课表')).toBeInTheDocument()
+    expect(screen.getByText('理解需求')).toBeInTheDocument()
+    expect(screen.getAllByText('解析课表结构').length).toBeGreaterThan(0)
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -628,10 +775,12 @@ describe('ChatPage attachment drafting', () => {
     })
 
     expect(screen.getByText('1/1')).toBeInTheDocument()
+    expect(screen.getByText('课表结构已解析')).toBeInTheDocument()
+    expect(screen.getAllByText('整理最终回复').length).toBeGreaterThan(0)
   })
 
-  it('renders common assistant markdown as readable rich text', () => {
-    render(<ChatPage />)
+  it('renders common assistant markdown as readable rich text', async () => {
+    await renderReadyChatPage()
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -664,8 +813,35 @@ describe('ChatPage attachment drafting', () => {
     expect(screen.getByText('含自动重排')).toBeInTheDocument()
   })
 
-  it('renders streamed assistant deltas as one growing message bubble', () => {
-    render(<ChatPage />)
+  it('renders structured result events without keyword classification', () => {
+    const { container } = render(<ChatPage />)
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'result',
+        message_id: 'structured-result',
+        content: 'Plan write completed',
+        tone: 'success',
+        eyebrow: '已完成',
+        title: '已写入计划',
+        body: '2 条任务已经落到日程。',
+        chips: ['2 条记录'],
+      })
+      useChatStore.getState().applyServerEvent({
+        type: 'text',
+        message_id: 'structured-result',
+        content: 'Plan write completed',
+      })
+    })
+
+    expect(container.querySelector('.assistant-result--success')).toBeTruthy()
+    expect(screen.getByLabelText('已完成')).toHaveTextContent('已写入计划')
+    expect(screen.getByText('2 条任务已经落到日程。')).toBeInTheDocument()
+    expect(screen.getByText('2 条记录')).toBeInTheDocument()
+  })
+
+  it('renders streamed assistant deltas as one growing message bubble', async () => {
+    await renderReadyChatPage()
 
     act(() => {
       useChatStore.getState().applyServerEvent({
@@ -983,8 +1159,8 @@ describe('ChatPage attachment drafting', () => {
 
     expect(container.querySelector('.ask-card__plan-list')).toBeTruthy()
     expect(screen.getByText('计划任务 2')).toBeInTheDocument()
-    expect(screen.getByText('英语六级复习')).toBeInTheDocument()
-    expect(screen.getByText('高等数学复习')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('英语六级复习')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('高等数学复习')).toBeInTheDocument()
     expect(screen.getByText('19:00-20:30')).toBeInTheDocument()
     expect(screen.queryByText('plan')).not.toBeInTheDocument()
   })
@@ -1093,7 +1269,15 @@ describe('ChatPage attachment drafting', () => {
       fireEvent.change(screen.getByLabelText('输入消息'), {
         target: { value: '帮我安排今天的复习' },
       })
+      await act(async () => {
+        await Promise.resolve()
+      })
       fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
 
       expect(MockWebSocket.instances[0]?.send).toHaveBeenLastCalledWith(
         JSON.stringify({

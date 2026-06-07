@@ -182,6 +182,33 @@ describe('chat event reducer', () => {
     expect(streamedMessages[0]?.content).toBe('Hello world!')
   })
 
+  it('merges structured result and final text events with the same message id', () => {
+    let state = createInitialChatState()
+
+    state = reduceChatEvent(state, {
+      type: 'result',
+      message_id: 'result-1',
+      content: '已把 2 条复习任务写入日程。',
+      tone: 'success',
+      eyebrow: '已完成',
+      title: '已把 2 条复习任务写入日程。',
+      chips: ['2 条记录'],
+    })
+    state = reduceChatEvent(state, {
+      type: 'text',
+      message_id: 'result-1',
+      content: '已把 2 条复习任务写入日程。',
+    })
+
+    const resultMessages = state.messages.filter((message) => message.id === 'result-1')
+    expect(resultMessages).toHaveLength(1)
+    expect(resultMessages[0]?.result).toMatchObject({
+      tone: 'success',
+      title: '已把 2 条复习任务写入日程。',
+      chips: ['2 条记录'],
+    })
+  })
+
   it('appends a user message even when crypto.randomUUID is unavailable', () => {
     vi.stubGlobal('crypto', {} as Crypto)
 

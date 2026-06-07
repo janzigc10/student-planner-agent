@@ -93,9 +93,13 @@ a {
 .app-frame {
   width: min(100%, 430px);
   min-height: 100svh;
+  min-height: 100dvh;
+  height: 100svh;
+  height: 100dvh;
   margin: 0 auto;
   display: grid;
   grid-template-rows: 82px minmax(0, 1fr) 84px;
+  overflow: hidden;
   background: var(--color-app);
   box-shadow: var(--shadow-frame);
 }
@@ -427,6 +431,7 @@ a {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
   overflow: hidden;
+  min-height: 0;
 }
 
 .chat-hero {
@@ -798,6 +803,11 @@ a {
   font-size: 13px;
 }
 
+.progress-card > .thinking-card__trail,
+.ask-card__answered > .thinking-card__trail {
+  margin-top: 10px;
+}
+
 .progress-card__items {
   margin-top: 10px;
   display: grid;
@@ -895,6 +905,15 @@ a {
   align-items: start;
 }
 
+.ask-card__plan-item--removed {
+  opacity: 0.72;
+  background: #f8eeee;
+}
+
+.ask-card__plan-item--editable {
+  background: #f2f7f5;
+}
+
 .ask-card__plan-marker {
   width: 26px;
   height: 26px;
@@ -940,6 +959,60 @@ a {
   margin: 0;
   color: var(--color-text);
   font-weight: 850;
+}
+
+.ask-card__task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.ask-card__task-grid .ask-card__task-field:first-child {
+  grid-column: 1 / -1;
+}
+
+.ask-card__task-field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.ask-card__task-field input,
+.ask-card__task-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--color-text);
+  padding: 0 10px;
+  box-shadow: inset 0 0 0 1px rgba(21, 33, 43, 0.06);
+}
+
+.ask-card__task-field textarea {
+  min-height: 58px;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.ask-card__link-button {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-primary-strong);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.ask-card__link-button--danger {
+  color: var(--color-danger);
 }
 
 .ask-card__course-action-main {
@@ -1176,7 +1249,7 @@ a {
   bottom: 0;
   z-index: 4;
   min-height: 62px;
-  padding: 8px;
+  padding: 8px 8px max(8px, env(safe-area-inset-bottom));
   border-radius: 26px;
   background: rgba(255, 255, 255, 0.95);
   box-shadow: var(--shadow-float);
@@ -1198,8 +1271,14 @@ a {
 
 .chat-input__file-input {
   position: absolute;
+  min-width: 0;
   width: 1px;
+  max-width: 1px;
   height: 1px;
+  padding: 0;
+  border: 0;
+  font-size: 0;
+  line-height: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
@@ -1562,6 +1641,9 @@ a {
   position: relative;
   width: min(100%, 430px);
   margin: 0 auto;
+  max-height: calc(100svh - 18px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 18px 18px max(18px, env(safe-area-inset-bottom));
   border-radius: 28px 28px 0 0;
   background: var(--color-surface);
@@ -1603,7 +1685,16 @@ a {
 .preferences-page,
 .notifications-page {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 16px;
+}
+
+.me-page > *,
+.courses-page > *,
+.preferences-page > *,
+.notifications-page > * {
+  min-height: max-content;
 }
 
 .profile-card,
@@ -1643,8 +1734,9 @@ a {
 .profile-card h1 {
   margin: 6px 0 0;
   color: var(--color-text);
-  font-size: 32px;
-  line-height: 1.05;
+  font-size: 24px;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
 }
 
 .profile-card p {

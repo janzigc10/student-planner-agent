@@ -1,4 +1,4 @@
-from app.agent.prompt import TASK_TOOL_RULES
+from app.agent.prompt import RESPONSE_FORMAT_RULES, TASK_TOOL_RULES
 from app.agent.tools import TOOL_DEFINITIONS
 
 
@@ -103,3 +103,9 @@ def test_agent_task_rules_require_work_context_before_work_planning():
     assert "create_work_plan" in TASK_TOOL_RULES
     assert "work_context" in TASK_TOOL_RULES
     assert "每日最大可工作时长" in TASK_TOOL_RULES
+
+
+def test_response_format_rules_keep_plain_replies_compact():
+    assert "1-3 个短段落" in RESPONSE_FORMAT_RULES
+    assert "Markdown 表格" in RESPONSE_FORMAT_RULES
+    assert "ask_user" in RESPONSE_FORMAT_RULES

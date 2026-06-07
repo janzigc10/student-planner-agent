@@ -4,7 +4,7 @@ import type { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, MutableRefObjec
 import { api, getStoredToken } from '../api/client'
 import { createClientId } from '../createClientId'
 import { MicIcon, PaperclipIcon, PlusIcon, SendIcon } from '../components/icons'
-import type { ChatServerEvent, PendingAsk, ToolProgress } from '../stores/chatStore'
+import type { ChatMessageResult, ChatServerEvent, PendingAsk, ToolProgress } from '../stores/chatStore'
 import type { ScheduleUploadStatusResponse } from '../types/api'
 import { useChatStore } from '../stores/chatStore'
 
@@ -36,6 +36,16 @@ interface TaskPreview {
   description: string | null
 }
 
+interface EditableTaskDraft {
+  id: string
+  title: string
+  scheduled_date: string
+  start_time: string
+  end_time: string
+  description: string
+  removed: boolean
+}
+
 interface CourseActionPreview {
   action: string
   courseName: string
@@ -50,15 +60,7 @@ interface ScheduleReviewNotice {
   note: string | null
 }
 
-type AssistantResultTone = 'success' | 'warning'
-
-interface AssistantResultView {
-  tone: AssistantResultTone
-  eyebrow: string
-  title: string
-  body: string | null
-  chips: string[]
-}
+type AssistantResultView = ChatMessageResult
 
 const CHAT_RESPONSE_TIMEOUT_MS = 30000
 const IMAGE_PARSE_BRIDGE_START = 18
@@ -71,6 +73,26 @@ const ATTACHMENT_INPUT_ID = 'chat-attachment-input'
 const DEFAULT_CONFIRM_OPTIONS = ['确认', '取消']
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const DEFAULT_THINKING_STEPS = ['理解你的需求', '检查日程上下文', '整理回复格式']
+const TOOL_THINKING_COPY: Record<string, { running: string; done: string }> = {
+  add_course: { running: '新增课程记录', done: '课程记录已新增' },
+  get_free_slots: { running: '查询可用时间', done: '可用时间已确认' },
+  create_study_plan: { running: '生成复习计划', done: '复习计划已生成' },
+  create_work_plan: { running: '拆解作业计划', done: '作业计划已生成' },
+  parse_schedule: { running: '解析课表结构', done: '课表结构已解析' },
+  parse_schedule_image: { running: '识别课表图片', done: '课表图片已识别' },
+  save_schedule_metadata: { running: '补全课表信息', done: '课表信息已补全' },
+  bulk_import_courses: { running: '导入课程', done: '课程已导入' },
+  list_courses: { running: '读取课程列表', done: '课程列表已读取' },
+  update_course: { running: '更新课程信息', done: '课程信息已更新' },
+  delete_course: { running: '删除错误课程', done: '错误课程已删除' },
+  list_tasks: { running: '读取已有任务', done: '已有任务已读取' },
+  create_task: { running: '写入日程任务', done: '日程任务已写入' },
+  update_task: { running: '更新日程任务', done: '日程任务已更新' },
+  complete_task: { running: '完成任务', done: '任务已完成' },
+  set_reminder: { running: '设置提醒', done: '提醒已设置' },
+  recall_memory: { running: '读取学习记忆', done: '学习记忆已读取' },
+  ask_user: { running: '等待你的确认', done: '确认已收到' },
+}
 const TASK_PREVIEW_VISIBLE_COUNT = 3
 const COURSE_PREVIEW_VISIBLE_COUNT = 4
 const COURSE_ACTION_VISIBLE_COUNT = 3
@@ -101,12 +123,56 @@ function wsUrl() {
   return `${protocol}//${window.location.host}/ws/chat`
 }
 
-function sendJson(socketRef: MutableRefObject<WebSocket | null>, payload: unknown) {
-  if (socketRef.current?.readyState === WebSocket.OPEN) {
+function sendJson(
+  socketRef: MutableRefObject<WebSocket | null>,
+  connectionReadyRef: MutableRefObject<boolean>,
+  payload: unknown,
+) {
+  if (socketRef.current?.readyState === WebSocket.OPEN && connectionReadyRef.current) {
     socketRef.current.send(JSON.stringify(payload))
     return true
   }
   return false
+}
+
+async function waitForSocketReady(
+  socketRef: MutableRefObject<WebSocket | null>,
+  connectionReadyRef: MutableRefObject<boolean>,
+  timeoutMs = 5000,
+) {
+  if (socketRef.current?.readyState === WebSocket.OPEN && connectionReadyRef.current) {
+    return true
+  }
+
+  const startedAt = Date.now()
+  return new Promise<boolean>((resolve) => {
+    function tick() {
+      if (socketRef.current?.readyState === WebSocket.OPEN && connectionReadyRef.current) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        resolve(false)
+        return
+      }
+      window.setTimeout(tick, 100)
+    }
+    tick()
+  })
+}
+
+async function sendJsonWhenReady(
+  socketRef: MutableRefObject<WebSocket | null>,
+  connectionReadyRef: MutableRefObject<boolean>,
+  payload: unknown,
+) {
+  if (sendJson(socketRef, connectionReadyRef, payload)) {
+    return true
+  }
+  if (!(await waitForSocketReady(socketRef, connectionReadyRef))) {
+    return false
+  }
+  return sendJson(socketRef, connectionReadyRef, payload)
 }
 
 function buildAttachmentPrompt(fileId: string, kind: AttachmentKind) {
@@ -498,6 +564,73 @@ function toTaskPreview(entry: unknown, index: number): TaskPreview {
   return { title, date, time, description }
 }
 
+function parseTimeRange(value: unknown) {
+  const text = asText(value)
+  if (!text) {
+    return { start_time: '', end_time: '' }
+  }
+  const match = text.match(/(\d{1,2}:\d{2})\s*[-~～—–到]\s*(\d{1,2}:\d{2})/)
+  if (!match) {
+    return { start_time: '', end_time: '' }
+  }
+  return {
+    start_time: match[1] ?? '',
+    end_time: match[2] ?? '',
+  }
+}
+
+function toEditableTaskDraft(entry: unknown, index: number): EditableTaskDraft {
+  const fallbackTitle = `任务 ${index + 1}`
+  if (!entry || typeof entry !== 'object') {
+    return {
+      id: createClientId(),
+      title: asText(entry) ?? fallbackTitle,
+      scheduled_date: '',
+      start_time: '',
+      end_time: '',
+      description: '',
+      removed: false,
+    }
+  }
+
+  const record = entry as Record<string, unknown>
+  const range = parseTimeRange(record.time ?? record.时间)
+  return {
+    id: createClientId(),
+    title: pickText(record, ['title', 'name', 'content', '任务', '任务名', '标题', '内容']) ?? fallbackTitle,
+    scheduled_date: pickText(record, ['scheduled_date', 'date', '日期']) ?? '',
+    start_time: pickText(record, ['start_time', 'startTime', '开始时间']) ?? range.start_time,
+    end_time: pickText(record, ['end_time', 'endTime', '结束时间']) ?? range.end_time,
+    description: pickText(record, ['description', 'note', '说明', '描述']) ?? '',
+    removed: false,
+  }
+}
+
+function taskDraftToPreview(task: EditableTaskDraft): TaskPreview {
+  const time = task.start_time && task.end_time ? `${task.start_time}-${task.end_time}` : task.start_time || task.end_time || null
+  return {
+    title: task.title || '未命名任务',
+    date: formatDateLabel(task.scheduled_date),
+    time,
+    description: task.description || null,
+  }
+}
+
+function taskDraftToPayload(task: EditableTaskDraft) {
+  return {
+    title: task.title.trim(),
+    scheduled_date: task.scheduled_date,
+    start_time: task.start_time,
+    end_time: task.end_time,
+    description: task.description.trim(),
+  }
+}
+
+function isConfirmOption(option: string) {
+  const normalized = option.trim().toLowerCase()
+  return /^(确认|可以|确定|好|行|是|yes|ok)/.test(normalized)
+}
+
 function toCourseActionPreview(entry: unknown, index: number): CourseActionPreview {
   const fallback = {
     action: 'update',
@@ -569,7 +702,6 @@ function progressSummary(progress: ToolProgress[]) {
   const total = progress.length
   const done = progress.filter((item) => item.status === 'done').length
   const running = progress.find((item) => item.status === 'running') ?? null
-  const current = running ?? progress.at(-1) ?? null
   const hasRunning = running !== null
   const fillRaw = total > 0 ? (done / total) * 100 : 0
   const fillPercent = hasRunning ? Math.max(fillRaw, 40) : fillRaw
@@ -577,11 +709,22 @@ function progressSummary(progress: ToolProgress[]) {
   return {
     total,
     done,
-    currentLabel: current?.label ?? null,
     ratio: `${done}/${total}`,
     fillPercent,
     hasRunning,
   }
+}
+
+function dedupeSteps(steps: string[]) {
+  return steps.filter((step, index) => step && steps.indexOf(step) === index)
+}
+
+function describeToolStep(item: ToolProgress) {
+  const copy = TOOL_THINKING_COPY[item.name]
+  if (copy) {
+    return item.status === 'done' ? copy.done : copy.running
+  }
+  return item.status === 'done' ? `${item.label}完成` : `正在${item.label}`
 }
 
 function renderInlineRichText(text: string, keyPrefix: string): ReactNode[] {
@@ -761,7 +904,43 @@ function thinkingStepsFromProgress(progress: ToolProgress[]) {
     return DEFAULT_THINKING_STEPS
   }
 
-  return progress.map((item) => (item.status === 'done' ? `${item.label}完成` : `正在${item.label}`))
+  const hasRunning = progress.some((item) => item.status === 'running')
+  return dedupeSteps([
+    '理解需求',
+    ...progress.map((item) => describeToolStep(item)),
+    hasRunning ? '整理执行结果' : '整理最终回复',
+  ])
+}
+
+function activeStepFromProgress(progress: ToolProgress[]) {
+  const running = progress.find((item) => item.status === 'running')
+  if (running) {
+    return describeToolStep(running)
+  }
+  if (progress.length > 0) {
+    return '整理最终回复'
+  }
+  return null
+}
+
+function thinkingStepsFromAnsweredAsk(pendingAsk: PendingAsk | null, normalizedAskData: unknown) {
+  if (!pendingAsk?.answered) {
+    return DEFAULT_THINKING_STEPS
+  }
+
+  if (pendingAsk.type === 'review') {
+    if (getArrayEntries(normalizedAskData, TASK_ENTRY_KEYS)) {
+      return ['确认已收到', '写入日程任务', '整理写入结果']
+    }
+    if (getArrayEntries(normalizedAskData, COURSE_ACTION_KEYS)) {
+      return ['确认已收到', '更新课表信息', '整理更新结果']
+    }
+    if (getCourseEntries(normalizedAskData)) {
+      return ['确认已收到', '导入课表课程', '整理导入结果']
+    }
+  }
+
+  return ['确认已收到', '执行确认操作', '整理结果']
 }
 
 function ThinkingOrb() {
@@ -771,6 +950,18 @@ function ThinkingOrb() {
       <span />
       <span />
     </span>
+  )
+}
+
+function ThinkingTrail({ activeStep, steps }: { activeStep: string; steps: string[] }) {
+  return (
+    <div className="thinking-card__trail" aria-label="处理阶段">
+      {steps.map((step) => (
+        <span className={step === activeStep ? 'is-active' : undefined} key={step}>
+          {step}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -790,13 +981,7 @@ function ThinkingStatus({
         <strong>{title}</strong>
       </div>
       <p className="thinking-card__active">{activeStep}</p>
-      <div className="thinking-card__trail" aria-label="处理轨迹">
-        {steps.map((step) => (
-          <span className={step === activeStep ? 'is-active' : undefined} key={step}>
-            {step}
-          </span>
-        ))}
-      </div>
+      <ThinkingTrail activeStep={activeStep} steps={steps} />
     </section>
   )
 }
@@ -843,6 +1028,77 @@ function TaskPreviewItem({ task, index }: { task: TaskPreview; index: number }) 
   )
 }
 
+function EditableTaskPreviewItem({
+  index,
+  onChange,
+  onRemove,
+  onRestore,
+  task,
+}: {
+  index: number
+  onChange: (patch: Partial<Omit<EditableTaskDraft, 'id' | 'removed'>>) => void
+  onRemove: () => void
+  onRestore: () => void
+  task: EditableTaskDraft
+}) {
+  const preview = taskDraftToPreview(task)
+  if (task.removed) {
+    return (
+      <article className="ask-card__plan-item ask-card__plan-item--removed">
+        <div className="ask-card__plan-marker" aria-hidden="true">
+          {index + 1}
+        </div>
+        <div className="ask-card__plan-body">
+          <p className="ask-card__plan-title">{preview.title}</p>
+          <p className="ask-card__plan-desc">这条任务不会写入日程。</p>
+          <button className="ask-card__link-button" type="button" onClick={onRestore}>
+            恢复
+          </button>
+        </div>
+      </article>
+    )
+  }
+
+  return (
+    <article className="ask-card__plan-item ask-card__plan-item--editable">
+      <div className="ask-card__plan-marker" aria-hidden="true">
+        {index + 1}
+      </div>
+      <div className="ask-card__plan-body">
+        <div className="ask-card__plan-meta">
+          <span>{preview.date ?? '安排'}</span>
+          <strong>{preview.time ?? '待安排'}</strong>
+        </div>
+        <label className="ask-card__task-field">
+          标题
+          <input value={task.title} onChange={(event) => onChange({ title: event.target.value })} />
+        </label>
+        <div className="ask-card__task-grid">
+          <label className="ask-card__task-field">
+            日期
+            <input type="date" value={task.scheduled_date} onChange={(event) => onChange({ scheduled_date: event.target.value })} />
+          </label>
+          <label className="ask-card__task-field">
+            开始
+            <input type="time" value={task.start_time} onChange={(event) => onChange({ start_time: event.target.value })} />
+          </label>
+          <label className="ask-card__task-field">
+            结束
+            <input type="time" value={task.end_time} onChange={(event) => onChange({ end_time: event.target.value })} />
+          </label>
+        </div>
+        <label className="ask-card__task-field">
+          备注
+          <textarea value={task.description} onChange={(event) => onChange({ description: event.target.value })} />
+        </label>
+        <button className="ask-card__link-button ask-card__link-button--danger" type="button" onClick={onRemove}>
+          删除这条
+        </button>
+      </div>
+    </article>
+  )
+}
+
 function CourseActionPreviewItem({ action }: { action: CourseActionPreview }) {
   return (
     <article className={`ask-card__course-action ask-card__course-action--${action.action}`}>
@@ -882,6 +1138,7 @@ function isUploadParsed(status: ScheduleUploadStatusResponse['status']) {
 
 export function ChatPage() {
   const socketRef = useRef<WebSocket | null>(null)
+  const connectionReadyRef = useRef(false)
   const reconnectRef = useRef(0)
   const reconnectTimerRef = useRef<number | null>(null)
   const responseTimeoutRef = useRef<number | null>(null)
@@ -906,6 +1163,7 @@ export function ChatPage() {
   const [isBusySending, setIsBusySending] = useState(false)
   const [imageParseBridge, setImageParseBridge] = useState<ImageParseBridgeState | null>(null)
   const [thinkingStepIndex, setThinkingStepIndex] = useState(0)
+  const [taskDrafts, setTaskDrafts] = useState<EditableTaskDraft[] | null>(null)
   const hasSpeech = typeof window !== 'undefined' && 'webkitSpeechRecognition' in window
   const inlineTextAsk = isInlineTextAsk(pendingAsk)
   const hasConversation =
@@ -924,8 +1182,6 @@ export function ChatPage() {
     progress.length > 0 ? anchorOrder(progressAnchorMessageId, messageOrderMap, tailOrder, 1) : null
   const imageParseBridgeOrder = imageParseBridge ? tailOrder + 1 : null
   const progressInfo = useMemo(() => progressSummary(progress), [progress])
-  const thinkingSteps = useMemo(() => thinkingStepsFromProgress(progress), [progress])
-  const activeThinkingStep = thinkingSteps[thinkingStepIndex % thinkingSteps.length] ?? DEFAULT_THINKING_STEPS[0]
   const showLooseThinking = isBusySending && !imageParseBridge && progress.length === 0 && !pendingAsk?.answered
   const canSend = draft.trim().length > 0 || pendingAttachments.length > 0
   const pendingAttachmentKind = pendingAttachments[0]?.kind ?? null
@@ -969,6 +1225,7 @@ export function ChatPage() {
     }
     return taskEntries.map((entry, index) => toTaskPreview(entry, index))
   }, [normalizedAskData, pendingAsk])
+  const activeTaskDraftCount = taskDrafts?.filter((task) => !task.removed).length ?? 0
 
   const courseActionPreviews = useMemo(() => {
     if (!pendingAsk || pendingAsk.type !== 'review' || normalizedAskData == null) {
@@ -999,6 +1256,18 @@ export function ChatPage() {
     return buildScheduleReviewNotice(pendingAsk.question, reviewCount)
   }, [coursePreviews, pendingAsk, reviewCount])
 
+  const progressThinkingSteps = useMemo(() => thinkingStepsFromProgress(progress), [progress])
+  const askBridgeThinkingSteps = useMemo(
+    () => thinkingStepsFromAnsweredAsk(pendingAsk, normalizedAskData),
+    [normalizedAskData, pendingAsk],
+  )
+  const visibleThinkingSteps = isAskBridgePending ? askBridgeThinkingSteps : progressThinkingSteps
+  const activeProgressStep = useMemo(() => activeStepFromProgress(progress), [progress])
+  const activeThinkingStep =
+    activeProgressStep ??
+    visibleThinkingSteps[thinkingStepIndex % visibleThinkingSteps.length] ??
+    DEFAULT_THINKING_STEPS[0]
+
   useEffect(() => {
     if (!isBusySending && progress.length === 0 && !isAskBridgePending) {
       setThinkingStepIndex(0)
@@ -1012,7 +1281,7 @@ export function ChatPage() {
     return () => {
       window.clearInterval(timerId)
     }
-  }, [isAskBridgePending, isBusySending, progress.length, thinkingSteps.length])
+  }, [isAskBridgePending, isBusySending, progress.length, visibleThinkingSteps.length])
 
   useEffect(() => {
     if (!imageParseBridge) {
@@ -1069,6 +1338,7 @@ export function ChatPage() {
       }
       const socket = new WebSocket(wsUrl())
       socketRef.current = socket
+      connectionReadyRef.current = false
       socket.onopen = () => {
         reconnectRef.current = 0
         socket.send(JSON.stringify({ token }))
@@ -1076,9 +1346,14 @@ export function ChatPage() {
       socket.onmessage = (event) => {
         clearResponseTimeout()
         unlockSending()
-        applyServerEvent(JSON.parse(event.data) as ChatServerEvent)
+        const serverEvent = JSON.parse(event.data) as ChatServerEvent
+        if (serverEvent.type === 'connected' && 'session_id' in serverEvent) {
+          connectionReadyRef.current = true
+        }
+        applyServerEvent(serverEvent)
       }
       socket.onclose = () => {
+        connectionReadyRef.current = false
         const waitingForResponse = responseTimeoutRef.current !== null
         clearResponseTimeout()
         unlockSending()
@@ -1088,7 +1363,7 @@ export function ChatPage() {
         if (closed) {
           return
         }
-        const delay = Math.min(30000, 1000 * 2 ** reconnectRef.current)
+        const delay = Math.min(30000, 250 * 2 ** reconnectRef.current)
         reconnectRef.current += 1
         reconnectTimerRef.current = window.setTimeout(connect, delay)
       }
@@ -1108,6 +1383,35 @@ export function ChatPage() {
   useEffect(() => {
     setAskDraft('')
   }, [pendingAsk?.question, pendingAsk?.type])
+
+  useEffect(() => {
+    if (!pendingAsk || pendingAsk.type !== 'review') {
+      setTaskDrafts(null)
+      return
+    }
+    const entries = getArrayEntries(normalizeReviewData(pendingAsk.data), TASK_ENTRY_KEYS)
+    setTaskDrafts(entries ? entries.map(toEditableTaskDraft) : null)
+  }, [pendingAsk?.data, pendingAsk?.question, pendingAsk?.type])
+
+  function updateTaskDraft(id: string, patch: Partial<Omit<EditableTaskDraft, 'id' | 'removed'>>) {
+    setTaskDrafts((current) =>
+      current?.map((task) => (task.id === id ? { ...task, ...patch } : task)) ?? null,
+    )
+  }
+
+  function setTaskDraftRemoved(id: string, removed: boolean) {
+    setTaskDrafts((current) =>
+      current?.map((task) => (task.id === id ? { ...task, removed } : task)) ?? null,
+    )
+  }
+
+  function buildReviewAnswerPayload(option: string) {
+    if (!pendingAsk || pendingAsk.type !== 'review' || !taskDrafts || !isConfirmOption(option)) {
+      return option
+    }
+    const tasks = taskDrafts.filter((task) => !task.removed).map(taskDraftToPayload)
+    return `${option}\nreview_override=${JSON.stringify({ tasks })}`
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -1136,7 +1440,9 @@ export function ChatPage() {
         if (isImageBatch) {
           await waitForImageParseReady(uploadResponse.file_id)
         }
-        const sent = sendJson(socketRef, { message: buildAttachmentPrompt(uploadResponse.file_id, uploadResponse.kind) })
+        const sent = await sendJsonWhenReady(socketRef, connectionReadyRef, {
+          message: buildAttachmentPrompt(uploadResponse.file_id, uploadResponse.kind),
+        })
         if (!sent) {
           setPendingAttachments(attachments)
           setAttachmentError('聊天连接不可用，请稍后重试')
@@ -1172,7 +1478,7 @@ export function ChatPage() {
     lockSending()
     const shouldAnswerPendingAsk = pendingAsk !== null && !pendingAsk.answered
     const payload = shouldAnswerPendingAsk ? { answer: message } : { message }
-    const sent = sendJson(socketRef, payload)
+    const sent = await sendJsonWhenReady(socketRef, connectionReadyRef, payload)
     if (!sent) {
       applyServerEvent({ type: 'error', message: '聊天连接不可用，请稍后重试' })
       unlockSending()
@@ -1187,8 +1493,9 @@ export function ChatPage() {
     startResponseTimeout()
   }
 
-  function submitAnswer(answer: string) {
+  async function submitAnswer(answer: string, payloadAnswer = answer) {
     const normalized = answer.trim()
+    const payload = payloadAnswer.trim()
     if (!normalized) {
       return
     }
@@ -1198,7 +1505,7 @@ export function ChatPage() {
     }
 
     lockSending()
-    const sent = sendJson(socketRef, { answer: normalized })
+    const sent = await sendJsonWhenReady(socketRef, connectionReadyRef, { answer: payload })
     if (!sent) {
       applyServerEvent({ type: 'error', message: '聊天连接不可用，请稍后重试' })
       unlockSending()
@@ -1366,7 +1673,7 @@ export function ChatPage() {
             const uploadReceipt = message.role === 'user' ? parseUploadReceipt(message.content) : null
             const isStreamingMessage = message.role === 'assistant' && streamingMessageId === message.id
             const assistantResult =
-              message.role === 'assistant' && !isStreamingMessage ? classifyAssistantResult(message.content) : null
+              message.role === 'assistant' && !isStreamingMessage ? (message.result ?? classifyAssistantResult(message.content)) : null
             return (
               <div
                 className={`message message--${message.role}${uploadReceipt ? ' message--upload-receipt' : ''}${
@@ -1451,6 +1758,7 @@ export function ChatPage() {
             <p className="progress-card__hint">
               {isSending ? activeThinkingStep : '处理完成，正在整理回复'}
             </p>
+            <ThinkingTrail activeStep={activeThinkingStep} steps={visibleThinkingSteps} />
             <div className="progress-card__items" aria-label="处理轨迹">
               {progress.map((item) => (
                 <div className="progress-card__item" key={item.name}>
@@ -1497,25 +1805,47 @@ export function ChatPage() {
                 <section className="ask-card__plan" aria-label="任务计划预览">
                   <header className="ask-card__plan-head">
                     <div>
-                      <strong>计划任务 {taskPreviews.length}</strong>
-                      <span>确认后写入日程</span>
+                      <strong>计划任务 {taskDrafts ? activeTaskDraftCount : taskPreviews.length}</strong>
+                      <span>{taskDrafts ? '可编辑后确认' : '确认后写入日程'}</span>
                     </div>
                   </header>
                   <div className="ask-card__plan-list">
-                    {taskPreviews.slice(0, TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
-                      <TaskPreviewItem task={task} index={index} key={`${task.title}-${index}`} />
-                    ))}
-                    {taskPreviews.length > TASK_PREVIEW_VISIBLE_COUNT ? (
+                    {taskDrafts
+                      ? taskDrafts.slice(0, TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
+                          <EditableTaskPreviewItem
+                            index={index}
+                            key={task.id}
+                            onChange={(patch) => updateTaskDraft(task.id, patch)}
+                            onRemove={() => setTaskDraftRemoved(task.id, true)}
+                            onRestore={() => setTaskDraftRemoved(task.id, false)}
+                            task={task}
+                          />
+                        ))
+                      : taskPreviews.slice(0, TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
+                          <TaskPreviewItem task={task} index={index} key={`${task.title}-${index}`} />
+                        ))}
+                    {(taskDrafts ?? taskPreviews).length > TASK_PREVIEW_VISIBLE_COUNT ? (
                       <details className="ask-card__details">
-                        <summary>{`展开剩余 ${taskPreviews.length - TASK_PREVIEW_VISIBLE_COUNT} 条任务`}</summary>
+                        <summary>{`展开剩余 ${(taskDrafts ?? taskPreviews).length - TASK_PREVIEW_VISIBLE_COUNT} 条任务`}</summary>
                         <div className="ask-card__details-list">
-                          {taskPreviews.slice(TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
-                            <TaskPreviewItem
-                              task={task}
-                              index={index + TASK_PREVIEW_VISIBLE_COUNT}
-                              key={`${task.title}-${index + TASK_PREVIEW_VISIBLE_COUNT}`}
-                            />
-                          ))}
+                          {taskDrafts
+                            ? taskDrafts.slice(TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
+                                <EditableTaskPreviewItem
+                                  index={index + TASK_PREVIEW_VISIBLE_COUNT}
+                                  key={task.id}
+                                  onChange={(patch) => updateTaskDraft(task.id, patch)}
+                                  onRemove={() => setTaskDraftRemoved(task.id, true)}
+                                  onRestore={() => setTaskDraftRemoved(task.id, false)}
+                                  task={task}
+                                />
+                              ))
+                            : taskPreviews.slice(TASK_PREVIEW_VISIBLE_COUNT).map((task, index) => (
+                                <TaskPreviewItem
+                                  task={task}
+                                  index={index + TASK_PREVIEW_VISIBLE_COUNT}
+                                  key={`${task.title}-${index + TASK_PREVIEW_VISIBLE_COUNT}`}
+                                />
+                              ))}
                         </div>
                       </details>
                     ) : null}
@@ -1601,6 +1931,7 @@ export function ChatPage() {
                     <span>{activeThinkingStep}</span>
                   </p>
                 ) : null}
+                {isAskBridgePending ? <ThinkingTrail activeStep={activeThinkingStep} steps={visibleThinkingSteps} /> : null}
               </div>
             ) : (
               <div className="ask-card__actions">
@@ -1624,7 +1955,7 @@ export function ChatPage() {
                   )
                 ) : pendingAsk.type === 'review' && pendingAsk.data ? (
                   (pendingAsk.options.length > 0 ? pendingAsk.options : DEFAULT_CONFIRM_OPTIONS).map((option) => (
-                    <button type="button" key={option} onClick={() => submitAnswer(option)}>
+                    <button type="button" key={option} onClick={() => submitAnswer(option, buildReviewAnswerPayload(option))}>
                       {option}
                     </button>
                   ))
@@ -1692,7 +2023,7 @@ export function ChatPage() {
       ) : null}
 
       {showLooseThinking ? (
-        <ThinkingStatus activeStep={activeThinkingStep} steps={thinkingSteps} title="正在思考" />
+        <ThinkingStatus activeStep={activeThinkingStep} steps={visibleThinkingSteps} title="正在思考" />
       ) : null}
 
       <form className="chat-input" onSubmit={submit}>

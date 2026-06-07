@@ -10,6 +10,7 @@ export interface ChatMessage {
   id: string
   role: MessageRole
   content: string
+  result?: ChatMessageResult
 }
 
 export interface ToolProgress {
@@ -27,6 +28,14 @@ export interface PendingAsk {
   anchorMessageId: string | null
 }
 
+export interface ChatMessageResult {
+  tone: 'success' | 'warning'
+  eyebrow: string
+  title: string
+  body: string | null
+  chips: string[]
+}
+
 export interface ChatStateSnapshot {
   messages: ChatMessage[]
   streamingMessageId: string | null
@@ -41,18 +50,34 @@ export type ChatServerEvent =
   | { type: 'connected'; session_id: string }
   | { type: 'tool_call'; name: string; args?: unknown }
   | { type: 'tool_result'; name: string; result?: unknown }
+  | {
+      type: 'result'
+      message_id?: string
+      content: string
+      tone?: ChatMessageResult['tone']
+      eyebrow?: string
+      title?: string
+      body?: string | null
+      chips?: string[]
+    }
   | { type: 'text_delta'; delta: string; message_id?: string }
-  | { type: 'text'; content: string; message_id?: string }
+  | { type: 'text'; content: string; message_id?: string; result?: ChatMessageResult }
   | { type: 'ask_user'; question: string; ask_type?: AskType; mode?: AskType; options?: string[]; data?: unknown }
   | { type: 'error'; message: string; code?: string; recoverable?: boolean }
   | { type: 'done' }
 
 const toolLabels: Record<string, string> = {
+  add_course: '新增课程',
   get_free_slots: '查询空闲时间',
   create_study_plan: '生成复习计划',
+  create_work_plan: '生成作业计划',
   parse_schedule: '解析课表',
   parse_schedule_image: '识别课表图片',
+  save_schedule_metadata: '补全课表信息',
+  bulk_import_courses: '导入课程',
   list_courses: '查看课表',
+  update_course: '更新课程',
+  delete_course: '删除课程',
   list_tasks: '查看任务',
   create_task: '创建任务',
   update_task: '更新任务',
@@ -148,9 +173,39 @@ export function reduceChatEvent(state: ChatStateSnapshot, event: ChatServerEvent
     const nextMessages: ChatMessage[] =
       messageIndex >= 0
         ? state.messages.map((message, index) =>
-            index === messageIndex ? { ...message, role: 'assistant' as const, content: event.content } : message,
+            index === messageIndex
+              ? { ...message, role: 'assistant' as const, content: event.content, result: event.result ?? message.result }
+              : message,
           )
-        : [...state.messages, { id: messageId, role: 'assistant' as const, content: event.content }]
+        : [...state.messages, { id: messageId, role: 'assistant' as const, content: event.content, result: event.result }]
+
+    return {
+      ...clearError(state),
+      messages: nextMessages,
+      streamingMessageId: null,
+      pendingAsk: shouldClearAnsweredAsk ? null : state.pendingAsk,
+    }
+  }
+
+  if (event.type === 'result') {
+    const messageId = event.message_id ?? state.streamingMessageId ?? createClientId()
+    const shouldClearAnsweredAsk = Boolean(state.pendingAsk?.answered)
+    const result: ChatMessageResult = {
+      tone: event.tone ?? 'success',
+      eyebrow: event.eyebrow ?? (event.tone === 'warning' ? '需要确认' : '已完成'),
+      title: event.title || event.content,
+      body: event.body ?? null,
+      chips: event.chips ?? [],
+    }
+    const messageIndex = state.messages.findIndex((message) => message.id === messageId)
+    const nextMessages: ChatMessage[] =
+      messageIndex >= 0
+        ? state.messages.map((message, index) =>
+            index === messageIndex
+              ? { ...message, role: 'assistant' as const, content: event.content, result }
+              : message,
+          )
+        : [...state.messages, { id: messageId, role: 'assistant' as const, content: event.content, result }]
 
     return {
       ...clearError(state),

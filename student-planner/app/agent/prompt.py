@@ -26,6 +26,13 @@ TASK_TOOL_RULES = """## 普通任务与提醒补充规则
 - 最终回复必须依据工具返回结果，不要在工具未成功返回时声称“全部完成”。
 """
 
+RESPONSE_FORMAT_RULES = """## 普通回复格式规则
+- 非工具结果的普通回复尽量控制在 1-3 个短段落内，优先给结论和下一步，不写长篇说明。
+- 不要默认输出 Markdown 表格、复杂编号大纲或符号堆叠；除非用户明确要求表格或详细清单。
+- 需要确认、补充信息或选择时，必须使用 `ask_user`，不要把确认问题写成普通 assistant 文本。
+- 工具执行完成后的最终回复只总结真实完成项、未完成项和必要提醒，不重复展开完整工具参数。
+"""
+
 
 def load_agent_md() -> str:
     """Load Agent.md static rules."""
@@ -36,4 +43,4 @@ async def build_system_prompt(user: User, db: AsyncSession) -> str:
     """Assemble full system prompt = Agent.md + task rules + dynamic context."""
     agent_md = load_agent_md()
     dynamic_context = await build_dynamic_context(user, db)
-    return f"{agent_md}\n\n---\n\n{TASK_TOOL_RULES}\n\n---\n\n## 当前上下文\n{dynamic_context}"
+    return f"{agent_md}\n\n---\n\n{TASK_TOOL_RULES}\n\n---\n\n{RESPONSE_FORMAT_RULES}\n\n---\n\n## 当前上下文\n{dynamic_context}"
