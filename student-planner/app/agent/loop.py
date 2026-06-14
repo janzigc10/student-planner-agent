@@ -36,6 +36,12 @@ from app.services.schedule_upload_cache import get_schedule_upload
 KNOWN_TOOLS = {tool["function"]["name"] for tool in TOOL_DEFINITIONS}
 MAX_ITERATIONS = 20
 VALID_ASK_TYPES = {"confirm", "select", "review"}
+MEMORY_CATEGORY_LABELS = {
+    "preference": "偏好",
+    "habit": "习惯",
+    "decision": "决策",
+    "knowledge": "知识",
+}
 _SCHEDULE_IMPORT_KEYWORDS = (
     "上传",
     "文件",
@@ -276,6 +282,51 @@ def _to_persisted_tool_summary(tool_name: str, tool_result_content: str) -> str:
     if tool_result_content.startswith("[TOOL_SUMMARY:"):
         return tool_result_content
     return f"[TOOL_SUMMARY:{tool_name}:v1] {tool_result_content}"
+
+
+def _memory_category_label(category: Any) -> str:
+    return MEMORY_CATEGORY_LABELS.get(str(category), "记忆")
+
+
+def _build_rag_grounding(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any] | None:
+    if tool_name != "recall_memory" or "error" in tool_result:
+        return None
+
+    raw_memories = tool_result.get("memories")
+    memories = raw_memories if isinstance(raw_memories, list) else []
+    items: list[dict[str, str]] = []
+    for memory in memories[:3]:
+        if not isinstance(memory, dict):
+            continue
+        content = str(memory.get("content") or "").strip()
+        if not content:
+            continue
+        items.append(
+            {
+                "label": _memory_category_label(memory.get("category")),
+                "text": content,
+            }
+        )
+
+    return {
+        "kind": "memory",
+        "label": "基于长期记忆",
+        "empty_label": "没有命中相关长期记忆",
+        "items": items,
+        "count": len(memories),
+    }
+
+
+def _attach_answer_metadata(
+    event: dict[str, Any],
+    answer_kind: str | None,
+    grounding: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if answer_kind is not None:
+        event["answer_kind"] = answer_kind
+    if grounding is not None:
+        event["grounding"] = grounding
+    return event
 
 
 async def _persist_local_tool_step(
@@ -2716,6 +2767,8 @@ async def run_agent_loop(
         preflight_user_texts.append(initial_study_context_text)
     error_count: dict[str, int] = {}
     last_free_slots_result: dict[str, Any] | None = None
+    answer_kind: str | None = None
+    answer_grounding: dict[str, Any] | None = None
     step = 0
 
     for iteration in range(MAX_ITERATIONS):
@@ -2808,16 +2861,24 @@ async def run_agent_loop(
 
             if text:
                 for delta in streamed_deltas:
-                    yield {
-                        "type": "text_delta",
+                    yield _attach_answer_metadata(
+                        {
+                            "type": "text_delta",
+                            "message_id": response_message_id,
+                            "delta": delta,
+                        },
+                        answer_kind,
+                        answer_grounding,
+                    )
+                yield _attach_answer_metadata(
+                    {
+                        "type": "text",
                         "message_id": response_message_id,
-                        "delta": delta,
-                    }
-                yield {
-                    "type": "text",
-                    "message_id": response_message_id,
-                    "content": text,
-                }
+                        "content": text,
+                    },
+                    answer_kind,
+                    answer_grounding,
+                )
                 await _save_message(db, session_id, "assistant", text)
             yield {"type": "done"}
             return
@@ -2980,6 +3041,10 @@ async def run_agent_loop(
                     error_count[tool_name] = error_count.get(tool_name, 0) + 1
                 elif tool_name == "get_free_slots" and isinstance(result.get("slots"), list):
                     last_free_slots_result = result
+                grounding = _build_rag_grounding(tool_name, result)
+                if grounding is not None:
+                    answer_kind = "rag"
+                    answer_grounding = grounding
                 yield {"type": "tool_result", "name": tool_name, "result": result}
                 await _save_message(
                     db,

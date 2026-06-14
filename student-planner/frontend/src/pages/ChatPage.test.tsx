@@ -796,6 +796,29 @@ describe('ChatPage attachment drafting', () => {
     expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument()
   })
 
+  it('renders RAG answer grounding from server metadata', async () => {
+    const { container } = await renderReadyChatPage()
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'text',
+        message_id: 'rag-message',
+        content: '我记得你更适合晚上复习高数，可以优先安排 19:00 后的整块时间。',
+        answer_kind: 'rag',
+        grounding: {
+          kind: 'memory',
+          label: '基于长期记忆',
+          items: [{ label: '偏好', text: '高数复习优先安排在晚上' }],
+        },
+      })
+    })
+
+    expect(container.querySelector('.message--rag')).toBeTruthy()
+    expect(screen.getByLabelText('基于长期记忆')).toHaveTextContent('偏好')
+    expect(screen.getByLabelText('基于长期记忆')).toHaveTextContent('高数复习优先安排在晚上')
+    expect(screen.getByText(/可以优先安排 19:00 后/)).toBeInTheDocument()
+  })
+
   it('renders task write success replies as result cards', () => {
     const { container } = render(<ChatPage />)
 

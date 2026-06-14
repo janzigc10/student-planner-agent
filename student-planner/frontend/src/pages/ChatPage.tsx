@@ -4,7 +4,7 @@ import type { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, MutableRefObjec
 import { api, getStoredToken } from '../api/client'
 import { createClientId } from '../createClientId'
 import { MicIcon, PaperclipIcon, PlusIcon, SendIcon } from '../components/icons'
-import type { ChatMessageResult, ChatServerEvent, PendingAsk, ToolProgress } from '../stores/chatStore'
+import type { ChatGrounding, ChatMessageResult, ChatServerEvent, PendingAsk, ToolProgress } from '../stores/chatStore'
 import type { ScheduleUploadStatusResponse } from '../types/api'
 import { useChatStore } from '../stores/chatStore'
 
@@ -1010,6 +1010,31 @@ function AssistantResultCard({ result, messageId }: { result: AssistantResultVie
   )
 }
 
+function RagGrounding({ grounding }: { grounding?: ChatGrounding }) {
+  if (!grounding) {
+    return null
+  }
+
+  const items = grounding.items.slice(0, 3)
+  return (
+    <aside className="rag-grounding" aria-label={grounding.label}>
+      <span className="rag-grounding__label">{grounding.label}</span>
+      {items.length > 0 ? (
+        <ul className="rag-grounding__list">
+          {items.map((item, index) => (
+            <li key={`${item.label}-${index}`}>
+              <strong>{item.label}</strong>
+              <span>{item.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>{grounding.empty_label ?? '没有命中相关长期记忆'}</p>
+      )}
+    </aside>
+  )
+}
+
 function TaskPreviewItem({ task, index }: { task: TaskPreview; index: number }) {
   return (
     <article className="ask-card__plan-item">
@@ -1672,13 +1697,16 @@ export function ChatPage() {
           (() => {
             const uploadReceipt = message.role === 'user' ? parseUploadReceipt(message.content) : null
             const isStreamingMessage = message.role === 'assistant' && streamingMessageId === message.id
+            const isRagAnswer = message.role === 'assistant' && message.answerKind === 'rag'
             const assistantResult =
               message.role === 'assistant' && !isStreamingMessage ? (message.result ?? classifyAssistantResult(message.content)) : null
             return (
               <div
                 className={`message message--${message.role}${uploadReceipt ? ' message--upload-receipt' : ''}${
                   isStreamingMessage ? ' message--streaming' : ''
-                }${assistantResult ? ` message--result message--result-${assistantResult.tone}` : ''}${
+                }${isRagAnswer ? ' message--rag' : ''}${
+                  assistantResult ? ` message--result message--result-${assistantResult.tone}` : ''
+                }${
                   message.id === 'welcome' ? ' message--welcome' : ''
                 }`}
                 key={message.id}
@@ -1701,6 +1729,7 @@ export function ChatPage() {
                   <AssistantResultCard result={assistantResult} messageId={message.id} />
                 ) : message.role === 'assistant' ? (
                   <div className="message__rich">
+                    {isRagAnswer ? <RagGrounding grounding={message.grounding} /> : null}
                     {renderRichTextContent(message.content, message.id)}
                     {isStreamingMessage ? <span className="message__cursor" aria-hidden="true" /> : null}
                   </div>

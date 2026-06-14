@@ -11,6 +11,8 @@ export interface ChatMessage {
   role: MessageRole
   content: string
   result?: ChatMessageResult
+  answerKind?: ChatAnswerKind
+  grounding?: ChatGrounding
 }
 
 export interface ToolProgress {
@@ -34,6 +36,21 @@ export interface ChatMessageResult {
   title: string
   body: string | null
   chips: string[]
+}
+
+export type ChatAnswerKind = 'rag'
+
+export interface ChatGroundingItem {
+  label: string
+  text: string
+}
+
+export interface ChatGrounding {
+  kind: 'memory'
+  label: string
+  empty_label?: string
+  count?: number
+  items: ChatGroundingItem[]
 }
 
 export interface ChatStateSnapshot {
@@ -60,8 +77,21 @@ export type ChatServerEvent =
       body?: string | null
       chips?: string[]
     }
-  | { type: 'text_delta'; delta: string; message_id?: string }
-  | { type: 'text'; content: string; message_id?: string; result?: ChatMessageResult }
+  | {
+      type: 'text_delta'
+      delta: string
+      message_id?: string
+      answer_kind?: ChatAnswerKind
+      grounding?: ChatGrounding
+    }
+  | {
+      type: 'text'
+      content: string
+      message_id?: string
+      result?: ChatMessageResult
+      answer_kind?: ChatAnswerKind
+      grounding?: ChatGrounding
+    }
   | { type: 'ask_user'; question: string; ask_type?: AskType; mode?: AskType; options?: string[]; data?: unknown }
   | { type: 'error'; message: string; code?: string; recoverable?: boolean }
   | { type: 'done' }
@@ -96,6 +126,16 @@ function clearError(state: ChatStateSnapshot): ChatStateSnapshot {
     return state
   }
   return { ...state, error: null }
+}
+
+function mergeAnswerMetadata(
+  message: ChatMessage,
+  event: { answer_kind?: ChatAnswerKind; grounding?: ChatGrounding },
+): Pick<ChatMessage, 'answerKind' | 'grounding'> {
+  return {
+    answerKind: event.answer_kind ?? message.answerKind,
+    grounding: event.grounding ?? message.grounding,
+  }
 }
 
 export function createInitialChatState(): ChatStateSnapshot {
@@ -152,10 +192,24 @@ export function reduceChatEvent(state: ChatStateSnapshot, event: ChatServerEvent
       messageIndex >= 0
         ? state.messages.map((message, index) =>
             index === messageIndex
-              ? { ...message, role: 'assistant' as const, content: `${message.content}${event.delta}` }
+              ? {
+                  ...message,
+                  role: 'assistant' as const,
+                  content: `${message.content}${event.delta}`,
+                  ...mergeAnswerMetadata(message, event),
+                }
               : message,
           )
-        : [...state.messages, { id: messageId, role: 'assistant' as const, content: event.delta }]
+        : [
+            ...state.messages,
+            {
+              id: messageId,
+              role: 'assistant' as const,
+              content: event.delta,
+              answerKind: event.answer_kind,
+              grounding: event.grounding,
+            },
+          ]
 
     return {
       ...clearError(state),
@@ -174,10 +228,26 @@ export function reduceChatEvent(state: ChatStateSnapshot, event: ChatServerEvent
       messageIndex >= 0
         ? state.messages.map((message, index) =>
             index === messageIndex
-              ? { ...message, role: 'assistant' as const, content: event.content, result: event.result ?? message.result }
+              ? {
+                  ...message,
+                  role: 'assistant' as const,
+                  content: event.content,
+                  result: event.result ?? message.result,
+                  ...mergeAnswerMetadata(message, event),
+                }
               : message,
           )
-        : [...state.messages, { id: messageId, role: 'assistant' as const, content: event.content, result: event.result }]
+        : [
+            ...state.messages,
+            {
+              id: messageId,
+              role: 'assistant' as const,
+              content: event.content,
+              result: event.result,
+              answerKind: event.answer_kind,
+              grounding: event.grounding,
+            },
+          ]
 
     return {
       ...clearError(state),
