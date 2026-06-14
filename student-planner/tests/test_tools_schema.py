@@ -115,6 +115,13 @@ def test_response_format_rules_keep_plain_replies_compact():
     assert "纯知识问答" in RESPONSE_FORMAT_RULES
 
 
+def test_response_format_rules_reject_unsourced_current_news_answers():
+    assert "没有联网检索" in RESPONSE_FORMAT_RULES
+    assert "新闻搜索" in RESPONSE_FORMAT_RULES
+    assert "不要凭模型知识编造" in RESPONSE_FORMAT_RULES
+    assert "公开权威来源" in RESPONSE_FORMAT_RULES
+
+
 def test_ask_user_contract_excludes_pure_informational_qa():
     description = _tool_by_name("ask_user")["function"]["description"]
 

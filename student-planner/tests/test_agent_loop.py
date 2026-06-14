@@ -105,6 +105,34 @@ async def test_simple_text_response(setup_db):
 
 
 @pytest.mark.asyncio
+async def test_current_public_event_request_does_not_call_llm_or_claim_web(setup_db):
+    mock_client = AsyncMock()
+
+    with patch(
+        "app.agent.loop.chat_completion_stream",
+        side_effect=AssertionError("Current public event questions should not reach the LLM"),
+    ), patch(
+        "app.agent.loop.chat_completion",
+        side_effect=AssertionError("Current public event questions should not reach the LLM fallback"),
+    ):
+        async with TestSession() as db:
+            user = User(id="u-current-events", username="current-events", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop("中国最新的大事件有什么", user, "session-current-events", db, mock_client)
+            async for event in generator:
+                events.append(event)
+
+            assert [event["type"] for event in events] == ["text", "done"]
+            text = events[0]["content"]
+            assert "没有联网检索" in text
+            assert "不能可靠回答" in text
+            assert "公开权威" not in text
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_compresses_persisted_history_before_current_turn(setup_db):
     mock_client = AsyncMock()
     session_id = "session-history-compression"

@@ -246,6 +246,42 @@ _TOOL_INTENT_KEYWORDS = (
     "删除",
     "完成",
 )
+_CURRENT_INFO_TIME_MARKERS = (
+    "最新",
+    "最近",
+    "近期",
+    "刚刚",
+    "刚发生",
+    "刚发布",
+    "今天",
+    "现在",
+    "目前",
+    "本周",
+    "这个月",
+    "今年",
+    "2026",
+    "发生了什么",
+)
+_PUBLIC_NEWS_DOMAIN_MARKERS = (
+    "新闻",
+    "大事",
+    "大事件",
+    "时事",
+    "热点",
+    "国家大事",
+    "国家级",
+    "国内",
+    "国际",
+    "世界",
+    "中国",
+    "社会",
+    "政策",
+    "法律",
+    "科技",
+    "航天",
+    "经济",
+    "政治",
+)
 
 _SCHEDULE_FILE_ID_RE = re.compile(r"file_id\s*=\s*([a-zA-Z0-9\-]+)")
 _SCHEDULE_PERIOD_ENTRY_RE = re.compile(
@@ -593,6 +629,28 @@ def _should_use_text_only_stream(user_texts: list[str], tool_history: list[str])
     if tool_history:
         return tool_history[-1] in _TEXT_ONLY_STREAM_AFTER_TOOLS
     return not _looks_like_tool_intent(user_texts)
+
+
+def _looks_like_current_public_info_request(user_message: str) -> bool:
+    compact_text = str(user_message or "").lower().replace(" ", "")
+    if not compact_text:
+        return False
+
+    mentions_current_window = _has_compact_keyword(compact_text, _CURRENT_INFO_TIME_MARKERS)
+    mentions_public_news = _has_compact_keyword(compact_text, _PUBLIC_NEWS_DOMAIN_MARKERS)
+    if not mentions_current_window or not mentions_public_news:
+        return False
+
+    if _looks_like_tool_intent([user_message]) or looks_like_task_update_intent([user_message]):
+        return False
+    return True
+
+
+def _current_public_info_unavailable_text() -> str:
+    return (
+        "我这里没有联网检索、新闻搜索或网页浏览工具，不能可靠回答“最新/最近发生了什么”这类实时公共事件问题。"
+        "如果你提供具体材料或新闻链接内容，我可以帮你整理、提炼重点；如果是课程资料库里的知识点，我可以按本地资料回答。"
+    )
 
 
 async def _build_initial_messages(
@@ -2807,6 +2865,14 @@ async def run_agent_loop(
 
     messages.append({"role": "user", "content": user_message})
     await _save_message(db, session_id, "user", user_message)
+
+    if _looks_like_current_public_info_request(user_message):
+        message_id = str(uuid.uuid4())
+        text = _current_public_info_unavailable_text()
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
 
     initial_study_context_text: str | None = None
     if _should_collect_study_context_locally(user_message):
