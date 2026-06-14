@@ -57,9 +57,58 @@ _CHROMA_VECTOR_STORE_PROVIDERS = {"chroma", "chromadb"}
 RAG_CHUNK_SIZE = 520
 RAG_CHUNK_OVERLAP = 150
 RAG_CONTEXT_EXCERPT_CHARS = 260
+RAG_EVIDENCE_CANDIDATE_K = 10
+RAG_MIN_EVIDENCE_SCORE = 0.08
+RAG_MIN_EVIDENCE_COVERAGE = 0.7
+RAG_MIN_EVIDENCE_SEGMENT_COVERAGE = 0.6
+RAG_MAX_EVIDENCE_UNMATCHED_RUN = 2
+RAG_MIN_EVIDENCE_ANCHOR_COVERAGE = 0.45
 CHROMA_COLLECTION_NAME = "student_planner_rag"
 _RAG_RETRIEVER_CACHE: dict[tuple[Any, ...], "LocalRAGRetriever"] = {}
 _CHROMA_RUNTIME_PROBE: tuple[bool, str] | None = None
+_RAG_QUERY_STOP_FRAGMENTS = {
+    "是什么",
+    "什么",
+    "怎么",
+    "如何",
+    "为什么",
+    "时候",
+    "怎样",
+    "解释",
+    "说明",
+    "总结",
+    "梳理",
+    "最新",
+    "新闻",
+    "当前",
+    "今天",
+    "明天",
+    "最近",
+}
+_RAG_QUERY_STOP_CHARS = set("的是了呢吗吧啊和与在有中对就都而及或")
+_RAG_SHORT_ANCHOR_TERMS = {
+    "宪法",
+    "冷战",
+    "北约",
+    "华约",
+    "五四",
+    "民主",
+    "法治",
+    "鸦片",
+    "抗日",
+    "国共",
+}
+_RAG_QUERY_SEGMENT_SEPARATORS = (
+    "以及",
+    "还有",
+    "或者",
+    "并且",
+    "和",
+    "与",
+    "及",
+    "或",
+    "、",
+)
 
 
 @dataclass
@@ -80,7 +129,9 @@ class HashEmbeddings(Embeddings):
     def embed_query(self, text: str) -> list[float]:
         vector = [0.0 for _ in range(self.dimensions)]
         for token in _tokenize(text):
-            vector[hash(token) % self.dimensions] += 1.0
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            bucket = int.from_bytes(digest[:8], "big") % self.dimensions
+            vector[bucket] += 1.0
         norm = math.sqrt(sum(value * value for value in vector)) or 1.0
         return [value / norm for value in vector]
 
@@ -127,6 +178,154 @@ def _context_excerpt(content: str, query: str, limit: int = RAG_CONTEXT_EXCERPT_
 
     _, _, best_sentence = max(scored, key=lambda item: (item[0], -item[1]))
     return _truncate_context_excerpt(best_sentence, limit)
+
+
+def _salient_query_terms(query: str) -> set[str]:
+    terms: set[str] = set()
+    for raw_token in _tokenize(query):
+        token = raw_token.strip().lower()
+        if len(token) < 2:
+            continue
+        if token in _RAG_QUERY_STOP_FRAGMENTS:
+            continue
+        if any(fragment in token for fragment in _RAG_QUERY_STOP_FRAGMENTS):
+            continue
+        if len(token) <= 2 and any(char in _RAG_QUERY_STOP_CHARS for char in token):
+            continue
+        terms.add(token)
+    return terms
+
+
+def _matched_evidence_terms(query: str, content: str) -> list[str]:
+    content_text = str(content or "").lower()
+    return sorted(term for term in _salient_query_terms(query) if term in content_text)
+
+
+def _anchor_query_terms(query: str) -> set[str]:
+    strong_terms = {
+        term
+        for term in _salient_query_terms(query)
+        if _has_strong_evidence_term([term])
+    }
+    return {
+        term
+        for term in strong_terms
+        if not any(term != other and term in other for other in strong_terms)
+    }
+
+
+def _contentful_query_chars(query: str) -> set[str]:
+    compact = str(query or "").lower()
+    for fragment in _RAG_QUERY_STOP_FRAGMENTS:
+        compact = compact.replace(fragment, "")
+    ignored_chars = _RAG_QUERY_STOP_CHARS | set("里我你请帮")
+    return {
+        char
+        for char in compact
+        if char.isalnum() and char not in ignored_chars
+    }
+
+
+def _evidence_query_coverage(query: str, content: str) -> float:
+    required_chars = _contentful_query_chars(query)
+    if not required_chars:
+        return 0.0
+    content_text = str(content or "").lower()
+    matched_chars = {char for char in required_chars if char in content_text}
+    return len(matched_chars) / len(required_chars)
+
+
+def _query_segment_char_sets(query: str) -> list[set[str]]:
+    compact = str(query or "").lower()
+    for fragment in _RAG_QUERY_STOP_FRAGMENTS:
+        compact = compact.replace(fragment, " ")
+    for separator in _RAG_QUERY_SEGMENT_SEPARATORS:
+        compact = compact.replace(separator, " ")
+
+    ignored_chars = _RAG_QUERY_STOP_CHARS | set("里我你请帮")
+    normalized = "".join(
+        char if char.isalnum() and char not in ignored_chars else " "
+        for char in compact
+    )
+    return [
+        set(segment)
+        for segment in normalized.split()
+        if len(set(segment)) >= 2
+    ]
+
+
+def _evidence_segment_coverage(query: str, content: str) -> float:
+    segment_char_sets = _query_segment_char_sets(query)
+    if not segment_char_sets:
+        return 0.0
+    content_text = str(content or "").lower()
+    segment_coverages = [
+        len({char for char in segment_chars if char in content_text}) / len(segment_chars)
+        for segment_chars in segment_char_sets
+    ]
+    return min(segment_coverages)
+
+
+def _longest_unmatched_query_run(query: str, content: str) -> int:
+    compact = str(query or "").lower()
+    for fragment in _RAG_QUERY_STOP_FRAGMENTS:
+        compact = compact.replace(fragment, " ")
+
+    ignored_chars = _RAG_QUERY_STOP_CHARS | set("里我你请帮")
+    content_text = str(content or "").lower()
+    current_run = 0
+    longest_run = 0
+    for char in compact:
+        if not char.isalnum() or char in ignored_chars:
+            current_run = 0
+            continue
+        if char in content_text:
+            current_run = 0
+            continue
+        current_run += 1
+        longest_run = max(longest_run, current_run)
+    return longest_run
+
+
+def _evidence_anchor_coverage(query: str, content: str) -> float:
+    anchors = _anchor_query_terms(query)
+    if not anchors:
+        return 0.0
+    content_text = str(content or "").lower()
+    matched_anchors = {term for term in anchors if term in content_text}
+    return len(matched_anchors) / len(anchors)
+
+
+def _has_strong_evidence_term(terms: Sequence[str]) -> bool:
+    return any(
+        len(term) >= 3
+        or term in _RAG_SHORT_ANCHOR_TERMS
+        or (term.isascii() and any(char.isalpha() for char in term) and len(term) >= 4)
+        for term in terms
+    )
+
+
+def _evidence_score(hit: dict[str, Any]) -> float:
+    try:
+        return float(hit.get("score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _is_evidence_hit(query: str, hit: dict[str, Any]) -> bool:
+    content = str(hit.get("content") or "")
+    matched_terms = _matched_evidence_terms(query, content)
+    if not matched_terms:
+        return False
+    if _evidence_score(hit) < RAG_MIN_EVIDENCE_SCORE:
+        return False
+    if _evidence_query_coverage(query, content) < RAG_MIN_EVIDENCE_COVERAGE:
+        return False
+    if _evidence_segment_coverage(query, content) < RAG_MIN_EVIDENCE_SEGMENT_COVERAGE:
+        return False
+    if _longest_unmatched_query_run(query, content) > RAG_MAX_EVIDENCE_UNMATCHED_RUN:
+        return False
+    return _has_strong_evidence_term(matched_terms) or len(matched_terms) >= 2
 
 
 class OpenAICompatibleEmbeddings(Embeddings):
@@ -778,16 +977,92 @@ class LocalRAGRetriever:
 
 def build_rag_context(query: str, *, corpus_dir: str | Path | None = None, top_k: int = 3) -> dict[str, Any]:
     retriever = get_rag_retriever(corpus_dir)
-    hits = retriever.retrieve(query, top_k=top_k)
+    candidate_top_k = max(top_k, RAG_EVIDENCE_CANDIDATE_K)
+    candidate_hits = retriever.retrieve(query, top_k=candidate_top_k)
+    hits = candidate_hits[:top_k]
+    evidence_hits = [hit for hit in candidate_hits if _is_evidence_hit(query, hit)]
+    context_hits = evidence_hits[:top_k]
+    evidence_terms = sorted(
+        {
+            term
+            for hit in evidence_hits
+            for term in _matched_evidence_terms(query, str(hit.get("content") or ""))
+        }
+    )
+    evidence_top_score = max((_evidence_score(hit) for hit in candidate_hits), default=0.0)
+    evidence_best_score = max((_evidence_score(hit) for hit in evidence_hits), default=0.0)
+    evidence_top_coverage = max(
+        (_evidence_query_coverage(query, str(hit.get("content") or "")) for hit in candidate_hits),
+        default=0.0,
+    )
+    evidence_best_coverage = max(
+        (_evidence_query_coverage(query, str(hit.get("content") or "")) for hit in evidence_hits),
+        default=0.0,
+    )
+    evidence_top_segment_coverage = max(
+        (_evidence_segment_coverage(query, str(hit.get("content") or "")) for hit in candidate_hits),
+        default=0.0,
+    )
+    evidence_best_segment_coverage = max(
+        (_evidence_segment_coverage(query, str(hit.get("content") or "")) for hit in evidence_hits),
+        default=0.0,
+    )
+    evidence_top_unmatched_run = max(
+        (_longest_unmatched_query_run(query, str(hit.get("content") or "")) for hit in candidate_hits),
+        default=0,
+    )
+    evidence_best_unmatched_run = max(
+        (_longest_unmatched_query_run(query, str(hit.get("content") or "")) for hit in evidence_hits),
+        default=0,
+    )
+    evidence_top_anchor_coverage = max(
+        (_evidence_anchor_coverage(query, str(hit.get("content") or "")) for hit in candidate_hits),
+        default=0.0,
+    )
+    evidence_best_anchor_coverage = max(
+        (_evidence_anchor_coverage(query, str(hit.get("content") or "")) for hit in evidence_hits),
+        default=0.0,
+    )
+    evidence_sufficient = bool(evidence_hits)
+    if evidence_sufficient:
+        evidence_reason = "sufficient"
+    elif candidate_hits:
+        evidence_reason = "no_relevant_local_evidence"
+    else:
+        evidence_reason = "no_local_evidence"
     context = "\n\n".join(
         f"[{index}] 来源：{hit['metadata'].get('source', 'local')}；内容：{_context_excerpt(hit['content'], query)}"
-        for index, hit in enumerate(hits, 1)
+        for index, hit in enumerate(context_hits, 1)
     )
     return {
         "query": query,
         "corpus_dir": str(retriever.corpus_dir),
         "document_count": len(retriever.documents),
+        "requested_top_k": top_k,
+        "candidate_top_k": candidate_top_k,
         "hits": hits,
+        "candidate_hits": candidate_hits,
+        "evidence_hits": evidence_hits,
+        "evidence_context_count": len(context_hits),
+        "evidence_sufficient": evidence_sufficient,
+        "evidence_count": len(evidence_hits),
+        "evidence_reason": evidence_reason,
+        "evidence_top_score": round(evidence_top_score, 4),
+        "evidence_best_score": round(evidence_best_score, 4),
+        "evidence_top_coverage": round(evidence_top_coverage, 4),
+        "evidence_best_coverage": round(evidence_best_coverage, 4),
+        "evidence_top_segment_coverage": round(evidence_top_segment_coverage, 4),
+        "evidence_best_segment_coverage": round(evidence_best_segment_coverage, 4),
+        "evidence_top_unmatched_run": evidence_top_unmatched_run,
+        "evidence_best_unmatched_run": evidence_best_unmatched_run,
+        "evidence_top_anchor_coverage": round(evidence_top_anchor_coverage, 4),
+        "evidence_best_anchor_coverage": round(evidence_best_anchor_coverage, 4),
+        "evidence_terms": evidence_terms,
+        "evidence_min_score": RAG_MIN_EVIDENCE_SCORE,
+        "evidence_min_coverage": RAG_MIN_EVIDENCE_COVERAGE,
+        "evidence_min_segment_coverage": RAG_MIN_EVIDENCE_SEGMENT_COVERAGE,
+        "evidence_max_unmatched_run": RAG_MAX_EVIDENCE_UNMATCHED_RUN,
+        "evidence_min_anchor_coverage": RAG_MIN_EVIDENCE_ANCHOR_COVERAGE,
         "context": context,
         "chunk_size": RAG_CHUNK_SIZE,
         "chunk_overlap": RAG_CHUNK_OVERLAP,

@@ -119,6 +119,86 @@ def test_rag_context_uses_query_relevant_excerpt(tmp_path):
     assert "无关尾部内容" not in result["context"]
 
 
+def test_rag_context_marks_insufficient_evidence_for_uncovered_questions(tmp_path):
+    (tmp_path / "维基百科-改革开放.md").write_text(
+        "改革开放是在 1978 年 12 月中共十一届三中全会后开始正式实施的。",
+        encoding="utf-8",
+    )
+
+    hit = build_rag_context("改革开放是什么时候开始的", corpus_dir=tmp_path, top_k=1)
+    miss = build_rag_context("量子计算的退相干错误怎么解释", corpus_dir=tmp_path, top_k=1)
+
+    assert hit["evidence_sufficient"] is True
+    assert hit["evidence_count"] == 1
+    assert "1978 年" in hit["context"]
+    assert miss["hits"], "retrieval may still return a nearest chunk"
+    assert miss["evidence_sufficient"] is False
+    assert miss["evidence_count"] == 0
+    assert miss["context"] == ""
+
+
+def test_rag_context_rejects_topic_only_overlap_when_requested_detail_is_absent(tmp_path):
+    (tmp_path / "机器学习课程资料.md").write_text(
+        "机器学习课程资料：监督学习、特征工程、模型训练与过拟合。",
+        encoding="utf-8",
+    )
+
+    result = build_rag_context("机器学习里的量子退相干错误怎么解释", corpus_dir=tmp_path, top_k=1)
+
+    assert result["hits"], "retrieval may return a topical nearest chunk"
+    assert result["evidence_sufficient"] is False
+    assert result["evidence_count"] == 0
+    assert result["context"] == ""
+
+    no_separator_result = build_rag_context(
+        "机器学习监督学习特征工程模型训练过拟合火星殖民关系是什么",
+        corpus_dir=tmp_path,
+        top_k=1,
+    )
+
+    assert no_separator_result["hits"], "retrieval may return a strong topical nearest chunk"
+    assert no_separator_result["evidence_sufficient"] is False
+    assert no_separator_result["evidence_count"] == 0
+    assert no_separator_result["context"] == ""
+
+
+def test_rag_context_rejects_mixed_query_when_new_concept_is_absent(tmp_path):
+    (tmp_path / "机器学习课程资料.md").write_text(
+        "机器学习课程资料：监督学习、特征工程、模型训练与过拟合。",
+        encoding="utf-8",
+    )
+
+    result = build_rag_context(
+        "机器学习监督学习特征工程模型训练过拟合与火星殖民关系是什么",
+        corpus_dir=tmp_path,
+        top_k=1,
+    )
+
+    assert result["hits"], "retrieval may return a strong topical nearest chunk"
+    assert result["evidence_sufficient"] is False
+    assert result["evidence_count"] == 0
+    assert result["context"] == ""
+
+
+def test_rag_context_keeps_public_hits_and_context_within_requested_top_k(tmp_path):
+    for index in range(12):
+        (tmp_path / f"改革开放资料{index}.md").write_text(
+            f"改革开放是在 1978 年 12 月中共十一届三中全会后开始正式实施的。资料编号 {index}。",
+            encoding="utf-8",
+        )
+
+    result = build_rag_context("改革开放是什么时候开始的", corpus_dir=tmp_path, top_k=3)
+
+    assert result["requested_top_k"] == 3
+    assert result["candidate_top_k"] == 10
+    assert len(result["hits"]) == 3
+    assert len(result["candidate_hits"]) == 10
+    assert result["evidence_sufficient"] is True
+    assert result["evidence_count"] >= 3
+    assert result["evidence_context_count"] == 3
+    assert result["context"].count("来源：") == 3
+
+
 def test_openai_compatible_embeddings_calls_dashscope_config(monkeypatch):
     captured: dict[str, object] = {}
     calls: list[list[str]] = []
@@ -407,7 +487,7 @@ def test_review_qa_is_not_forced_into_task_write_context():
 
 @pytest.mark.asyncio
 async def test_prepare_langgraph_state_adds_rag_runtime_hint():
-    state = await prepare_langgraph_state("下周四有大学英语3考试，帮我做复习计划")
+    state = await prepare_langgraph_state("改革开放是什么时候开始的")
 
     assert state["should_retrieve"] is True
     assert "retrieve_study_materials" in state["graph_nodes"]
@@ -467,7 +547,7 @@ async def test_langgraph_agent_loop_emits_rag_events_and_delegates_with_hints(se
 
             events = []
             async for event in run_langgraph_agent_loop(
-                "下周四有大学英语3考试，帮我做复习计划",
+                "改革开放是什么时候开始的",
                 user,
                 "session-langgraph-runtime",
                 db,
@@ -482,6 +562,272 @@ async def test_langgraph_agent_loop_emits_rag_events_and_delegates_with_hints(se
     assert events[1]["result"]["embedding_configured_model"] == "text-embedding-v4"
     assert events[-1]["type"] == "done"
     assert any("RAG 检索上下文" in hint for hint in captured["runtime_hints"])
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_blocks_rag_qa_when_evidence_is_insufficient(setup_db):
+    insufficient_rag = {
+        "query": "量子计算的退相干错误怎么解释",
+        "hits": [{"score": 0.01, "content": "改革开放材料", "metadata": {"source": "a.md"}}],
+        "context": "",
+        "evidence_sufficient": False,
+        "evidence_count": 0,
+        "evidence_reason": "no_relevant_local_evidence",
+    }
+
+    with (
+        patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("RAG evidence gate should not delegate to the LLM loop"),
+        ),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-rag-gate-miss", username="rag-gate-miss", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "量子计算的退相干错误怎么解释",
+                user,
+                "session-rag-gate-miss",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
+    assert events[1]["result"]["evidence_sufficient"] is False
+    assert events[2]["content"] == "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_blocks_topic_only_rag_candidate_without_question_word(setup_db):
+    insufficient_rag = {
+        "query": "冷战格局形成过程",
+        "hits": [],
+        "context": "",
+        "evidence_sufficient": False,
+        "evidence_count": 0,
+        "evidence_reason": "no_relevant_local_evidence",
+    }
+
+    with (
+        patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Topic-only RAG candidates should still be evidence gated"),
+        ),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-rag-gate-topic", username="rag-gate-topic", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "冷战格局形成过程",
+                user,
+                "session-rag-gate-topic",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
+    assert events[1]["result"]["evidence_sufficient"] is False
+    assert events[2]["content"] == "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_blocks_rag_qa_when_task_is_domain_word(setup_db):
+    insufficient_rag = {
+        "query": "机器学习任务中的欠拟合是什么",
+        "hits": [],
+        "context": "",
+        "evidence_sufficient": False,
+        "evidence_count": 0,
+        "evidence_reason": "no_relevant_local_evidence",
+    }
+
+    with (
+        patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Domain-word task questions should still be evidence gated"),
+        ),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-rag-gate-domain-task", username="rag-gate-domain-task", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "机器学习任务中的欠拟合是什么",
+                user,
+                "session-rag-gate-domain-task",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
+    assert events[1]["result"]["evidence_sufficient"] is False
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_blocks_arrangement_question_when_evidence_is_insufficient(setup_db):
+    insufficient_rag = {
+        "query": "二战后的国际秩序安排是什么",
+        "hits": [],
+        "context": "",
+        "evidence_sufficient": False,
+        "evidence_count": 0,
+        "evidence_reason": "no_relevant_local_evidence",
+    }
+
+    with (
+        patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Knowledge questions using 安排 should still be evidence gated"),
+        ),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-rag-gate-arrangement", username="rag-gate-arrangement", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "二战后的国际秩序安排是什么",
+                user,
+                "session-rag-gate-arrangement",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
+    assert events[1]["result"]["evidence_sufficient"] is False
+    assert events[2]["content"] == "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_keeps_task_planning_path_when_rag_evidence_is_insufficient(setup_db):
+    captured: dict[str, object] = {}
+    insufficient_rag = {
+        "query": "下周四有大学英语3考试，帮我做复习计划",
+        "hits": [],
+        "context": "",
+        "evidence_sufficient": False,
+        "evidence_count": 0,
+        "evidence_reason": "no_relevant_local_evidence",
+    }
+
+    async def fake_run_agent_loop(*args, **kwargs):
+        captured["runtime_hints"] = kwargs.get("runtime_hints")
+        yield {"type": "done"}
+
+    with (
+        patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
+        patch("app.agent.langgraph_loop.run_agent_loop", side_effect=fake_run_agent_loop),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-rag-gate-plan", username="rag-gate-plan", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "下周四有大学英语3考试，帮我做复习计划",
+                user,
+                "session-rag-gate-plan",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["tool_call", "tool_result", "done"]
+    assert events[1]["result"]["evidence_sufficient"] is False
+    assert captured["runtime_hints"] == []
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_keeps_arrangement_workflow_when_rag_evidence_is_insufficient(setup_db):
+    captured: dict[str, object] = {}
+    insufficient_rag = {
+        "query": "下周四有大学英语3考试，帮我安排一下",
+        "hits": [],
+        "context": "",
+        "evidence_sufficient": False,
+        "evidence_count": 0,
+        "evidence_reason": "no_relevant_local_evidence",
+    }
+
+    async def fake_run_agent_loop(*args, **kwargs):
+        captured["runtime_hints"] = kwargs.get("runtime_hints")
+        yield {"type": "done"}
+
+    with (
+        patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
+        patch("app.agent.langgraph_loop.run_agent_loop", side_effect=fake_run_agent_loop),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-rag-gate-arrange-workflow", username="rag-gate-arrange-workflow", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "下周四有大学英语3考试，帮我安排一下",
+                user,
+                "session-rag-gate-arrange-workflow",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["tool_call", "tool_result", "done"]
+    assert events[1]["result"]["evidence_sufficient"] is False
+    assert captured["runtime_hints"] == []
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_preserves_no_web_guard_for_current_public_events(setup_db):
+    with (
+        patch(
+            "app.agent.langgraph_loop.build_rag_context",
+            side_effect=AssertionError("Current public event questions should skip RAG"),
+        ),
+        patch(
+            "app.agent.loop.chat_completion_stream",
+            side_effect=AssertionError("Current public event questions should not reach the LLM"),
+        ),
+        patch(
+            "app.agent.loop.chat_completion",
+            side_effect=AssertionError("Current public event questions should not reach the LLM fallback"),
+        ),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-langgraph-no-web", username="langgraph-no-web", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "最新政策是什么",
+                user,
+                "session-langgraph-no-web",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["text", "done"]
+    assert "没有联网检索" in events[0]["content"]
 
 
 @pytest.mark.asyncio

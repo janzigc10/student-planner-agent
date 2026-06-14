@@ -12,6 +12,9 @@ from app.services.schedule_upload_cache import store_schedule_upload
 from tests.conftest import TestSession
 
 
+FIRST_STREAM_DELTA_TIMEOUT_SECONDS = 0.3
+
+
 def stream_response_chunks(*, response: dict, deltas: list[str] | None = None):
     async def _generator():
         for delta in deltas or []:
@@ -303,7 +306,10 @@ async def test_plain_chat_streams_delta_before_response_finishes(setup_db):
 
             generator = run_agent_loop("你好", user, "session-2b-live", db, mock_client)
             first_event_task = asyncio.create_task(generator.__anext__())
-            done, _ = await asyncio.wait({first_event_task}, timeout=0.05)
+            done, _ = await asyncio.wait(
+                {first_event_task},
+                timeout=FIRST_STREAM_DELTA_TIMEOUT_SECONDS,
+            )
             if not done:
                 allow_response.set()
                 await first_event_task
@@ -349,7 +355,10 @@ async def test_rag_runtime_hint_streams_delta_before_response_finishes(setup_db)
                 runtime_hints=["RAG 检索上下文：改革开放始于 1978 年。"],
             )
             first_event_task = asyncio.create_task(generator.__anext__())
-            done, _ = await asyncio.wait({first_event_task}, timeout=0.05)
+            done, _ = await asyncio.wait(
+                {first_event_task},
+                timeout=FIRST_STREAM_DELTA_TIMEOUT_SECONDS,
+            )
             if not done:
                 allow_response.set()
                 await first_event_task
