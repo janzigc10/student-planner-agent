@@ -4,10 +4,12 @@ from collections.abc import Iterator
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
+from app.agent.langgraph_loop import run_langgraph_agent_loop
 from app.agent.llm_client import create_llm_client
-from app.agent.loop import run_agent_loop
+from app.agent.loop import run_agent_loop, run_review_override_plan_write
 from app.agent.session_lifecycle import end_session
 from app.auth.jwt import verify_token
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
 
@@ -19,6 +21,12 @@ LLM_PROVIDER_UNAVAILABLE_MESSAGE = (
     "请稍后重试，或检查当前网络/模型服务配置。"
 )
 GENERIC_CHAT_ERROR_MESSAGE = "聊天暂时不可用，请稍后重试"
+
+
+def _select_agent_loop():
+    if settings.agent_runtime.strip().lower() == "langgraph":
+        return run_langgraph_agent_loop
+    return run_agent_loop
 
 
 def _iter_exception_chain(exc: BaseException) -> Iterator[BaseException]:
@@ -123,6 +131,24 @@ async def chat_websocket(websocket: WebSocket) -> None:
             if not user_message:
                 orphan_answer = str(data.get("answer") or "").strip()
                 if orphan_answer:
+                    if "review_override=" in orphan_answer and session_id is not None:
+                        async for db in get_db():
+                            result = await db.execute(select(User).where(User.id == user_id))
+                            user = result.scalar_one_or_none()
+                            if user is None:
+                                await websocket.send_json({"type": "error", "message": "User not found"})
+                                break
+
+                            async for event in run_review_override_plan_write(
+                                orphan_answer,
+                                user,
+                                session_id,
+                                db,
+                            ):
+                                await websocket.send_json(event)
+                            break
+                        continue
+
                     try:
                         await websocket.send_json(
                             {
@@ -141,7 +167,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "error", "message": "User not found"})
                     break
 
-                generator = run_agent_loop(user_message, user, session_id, db, llm_client)
+                generator = _select_agent_loop()(user_message, user, session_id, db, llm_client)
                 try:
                     event = await generator.__anext__()
                     while True:

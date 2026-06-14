@@ -2097,6 +2097,9 @@ async def _run_confirmed_plan_write(
         "options": ["确认", "取消"],
         "data": _study_plan_review_data(tasks),
     }
+    if confirm_answer is None:
+        yield {"type": "done"}
+        return
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         yield {"type": "text", "message_id": message_id, "content": cancel_text}
@@ -2268,6 +2271,47 @@ def _run_confirmed_work_plan_write(
         "我已经拆出 {count} 条作业任务。确认后我会把它们写入你的日程。",
         "好的，我先不写入这些作业任务。你可以调整要求、工作量或空闲时间后再让我重新拆。",
     )
+
+
+async def run_review_override_plan_write(
+    confirm_answer: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    start_step: int = 0,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Write a submitted review payload when the live generator is gone."""
+
+    review_override = _extract_review_override(confirm_answer)
+    if review_override is None:
+        yield {
+            "type": "error",
+            "message": "当前没有待确认的问题，请先发送消息或重新触发操作。",
+        }
+        yield {"type": "done"}
+        return
+
+    shortcut = _run_confirmed_plan_write(
+        review_override.get("tasks"),
+        user,
+        session_id,
+        db,
+        start_step,
+        _normalize_study_plan_tasks,
+        "计划任务",
+        "计划已经生成，但里面没有可写入日程的完整任务时间。请调整后再试。",
+        "我已经拆出 {count} 条计划任务。确认后我会把它们写入你的日程。",
+        "好的，我先不写入这些任务。你调整后再告诉我。",
+    )
+    try:
+        event = await shortcut.__anext__()
+        if event["type"] == "ask_user":
+            event = await shortcut.asend(confirm_answer)
+        while True:
+            yield event
+            event = await shortcut.__anext__()
+    except StopAsyncIteration:
+        pass
 
 
 def _work_plan_date_range(due_date: str) -> tuple[str, str]:
@@ -2563,6 +2607,7 @@ async def run_agent_loop(
     session_id: str,
     db: AsyncSession,
     llm_client: AsyncOpenAI,
+    runtime_hints: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], str | None]:
     """Run the agent loop and yield frontend events."""
     system_prompt = await build_system_prompt(user, db)
@@ -2582,6 +2627,9 @@ async def run_agent_loop(
     task_routing_hint = _build_task_routing_hint(user_message)
     if task_routing_hint:
         messages.append({"role": "system", "content": task_routing_hint})
+    for hint in runtime_hints or []:
+        if hint.strip():
+            messages.append({"role": "system", "content": hint})
 
     messages.append({"role": "user", "content": user_message})
     await _save_message(db, session_id, "user", user_message)

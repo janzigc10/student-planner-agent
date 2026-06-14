@@ -1,0 +1,696 @@
+{
+  "source": "中文维基百科",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hans",
+  "api": "https://zh.wikipedia.org/w/api.php",
+  "variant": "zh-cn",
+  "max_chars": 18000,
+  "requested_count": 80,
+  "imported": [
+    {
+      "title": "五四运动",
+      "resolved_title": "五四运动",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-五四运动.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%94%E5%9B%9B%E8%BF%90%E5%8A%A8",
+      "chars": 18129,
+      "skipped_existing": true
+    },
+    {
+      "title": "辛亥革命",
+      "resolved_title": "辛亥革命",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-辛亥革命.md",
+      "url": "https://zh.wikipedia.org/wiki/%E8%BE%9B%E4%BA%A5%E9%9D%A9%E5%91%BD",
+      "chars": 18206,
+      "skipped_existing": true
+    },
+    {
+      "title": "中国抗日战争",
+      "resolved_title": "中国抗日战争",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-中国抗日战争.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E6%8A%97%E6%97%A5%E6%88%98%E4%BA%89",
+      "chars": 18172,
+      "skipped_existing": true
+    },
+    {
+      "title": "国共内战",
+      "resolved_title": "国共内战",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-国共内战.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%9B%BD%E5%85%B1%E5%86%85%E6%88%98",
+      "chars": 17805,
+      "skipped_existing": true
+    },
+    {
+      "title": "鸦片战争",
+      "resolved_title": "鸦片战争",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-鸦片战争.md",
+      "url": "https://zh.wikipedia.org/wiki/%E9%B8%A6%E7%89%87%E6%88%98%E4%BA%89",
+      "chars": 2620,
+      "skipped_existing": true
+    },
+    {
+      "title": "冷战",
+      "resolved_title": "冷战",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-冷战.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%86%B7%E6%88%98",
+      "chars": 18233,
+      "skipped_existing": true
+    },
+    {
+      "title": "马歇尔计划",
+      "resolved_title": "马歇尔计划",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-马歇尔计划.md",
+      "url": "https://zh.wikipedia.org/wiki/%E9%A9%AC%E6%AD%87%E5%B0%94%E8%AE%A1%E5%88%92",
+      "chars": 15506,
+      "skipped_existing": true
+    },
+    {
+      "title": "欧洲一体化",
+      "resolved_title": "欧洲一体化",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-欧洲一体化.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%AC%A7%E6%B4%B2%E4%B8%80%E4%BD%93%E5%8C%96",
+      "chars": 1363,
+      "skipped_existing": true
+    },
+    {
+      "title": "中华人民共和国宪法",
+      "resolved_title": "中华人民共和国宪法",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-中华人民共和国宪法.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%8D%8E%E4%BA%BA%E6%B0%91%E5%85%B1%E5%92%8C%E5%9B%BD%E5%AE%AA%E6%B3%95",
+      "chars": 10448,
+      "skipped_existing": true
+    },
+    {
+      "title": "全过程人民民主",
+      "resolved_title": "全过程人民民主",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-全过程人民民主.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%85%A8%E8%BF%87%E7%A8%8B%E4%BA%BA%E6%B0%91%E6%B0%91%E4%B8%BB",
+      "chars": 1656,
+      "skipped_existing": true
+    },
+    {
+      "title": "共同富裕",
+      "resolved_title": "共同富裕",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-共同富裕.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%85%B1%E5%90%8C%E5%AF%8C%E8%A3%95",
+      "chars": 2149,
+      "skipped_existing": true
+    },
+    {
+      "title": "第一次鸦片战争",
+      "resolved_title": "第一次鸦片战争",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-第一次鸦片战争.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%AC%AC%E4%B8%80%E6%AC%A1%E9%B8%A6%E7%89%87%E6%88%98%E4%BA%89",
+      "chars": 18203,
+      "skipped_existing": true
+    },
+    {
+      "title": "第二次鸦片战争",
+      "resolved_title": "第二次鸦片战争",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-第二次鸦片战争.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E9%B8%A6%E7%89%87%E6%88%98%E4%BA%89",
+      "chars": 12054,
+      "skipped_existing": true
+    },
+    {
+      "title": "太平天国",
+      "resolved_title": "太平天国",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-太平天国.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%A4%AA%E5%B9%B3%E5%A4%A9%E5%9B%BD",
+      "chars": 18201,
+      "skipped_existing": true
+    },
+    {
+      "title": "洋务运动",
+      "resolved_title": "洋务运动",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-洋务运动.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%B4%8B%E5%8A%A1%E8%BF%90%E5%8A%A8",
+      "chars": 18108,
+      "skipped_existing": true
+    },
+    {
+      "title": "甲午战争",
+      "resolved_title": "甲午战争",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-甲午战争.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%94%B2%E5%8D%88%E6%88%98%E4%BA%89",
+      "chars": 17753,
+      "skipped_existing": true
+    },
+    {
+      "title": "戊戌变法",
+      "resolved_title": "戊戌变法",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-戊戌变法.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%88%8A%E6%88%8C%E5%8F%98%E6%B3%95",
+      "chars": 14214,
+      "skipped_existing": true
+    },
+    {
+      "title": "义和团运动",
+      "resolved_title": "义和团运动",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-义和团运动.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B9%89%E5%92%8C%E5%9B%A2%E8%BF%90%E5%8A%A8",
+      "chars": 17553,
+      "skipped_existing": true
+    },
+    {
+      "title": "中华民国大陆时期",
+      "resolved_title": "中华民国大陆时期",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-中华民国大陆时期.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%8D%8E%E6%B0%91%E5%9B%BD%E5%A4%A7%E9%99%86%E6%97%B6%E6%9C%9F",
+      "chars": 17622,
+      "skipped_existing": true
+    },
+    {
+      "title": "新文化运动",
+      "resolved_title": "新文化运动",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-新文化运动.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%96%B0%E6%96%87%E5%8C%96%E8%BF%90%E5%8A%A8",
+      "chars": 18212,
+      "skipped_existing": true
+    },
+    {
+      "title": "中国共产党",
+      "resolved_title": "中国共产党",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-中国共产党.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E5%85%B1%E4%BA%A7%E5%85%9A",
+      "chars": 18105,
+      "skipped_existing": true
+    },
+    {
+      "title": "北伐战争",
+      "resolved_title": "北伐战争",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-北伐战争.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8C%97%E4%BC%90%E6%88%98%E4%BA%89",
+      "chars": 15570,
+      "skipped_existing": true
+    },
+    {
+      "title": "第一次国共合作",
+      "resolved_title": "第一次国共合作",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-第一次国共合作.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%AC%AC%E4%B8%80%E6%AC%A1%E5%9B%BD%E5%85%B1%E5%90%88%E4%BD%9C",
+      "chars": 18214,
+      "skipped_existing": true
+    },
+    {
+      "title": "南昌起义",
+      "resolved_title": "南昌起义",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-南昌起义.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8D%97%E6%98%8C%E8%B5%B7%E4%B9%89",
+      "chars": 10567,
+      "skipped_existing": true
+    },
+    {
+      "title": "秋收起义",
+      "resolved_title": "秋收起义",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-秋收起义.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%A7%8B%E6%94%B6%E8%B5%B7%E4%B9%89",
+      "chars": 4577,
+      "skipped_existing": true
+    },
+    {
+      "title": "井冈山革命根据地",
+      "resolved_title": "井冈山革命根据地",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-井冈山革命根据地.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%95%E5%86%88%E5%B1%B1%E9%9D%A9%E5%91%BD%E6%A0%B9%E6%8D%AE%E5%9C%B0",
+      "chars": 7186,
+      "skipped_existing": true
+    },
+    {
+      "title": "长征",
+      "resolved_title": "长征",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-长征.md",
+      "url": "https://zh.wikipedia.org/wiki/%E9%95%BF%E5%BE%81",
+      "chars": 17761,
+      "skipped_existing": true
+    },
+    {
+      "title": "遵义会议",
+      "resolved_title": "遵义会议",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-遵义会议.md",
+      "url": "https://zh.wikipedia.org/wiki/%E9%81%B5%E4%B9%89%E4%BC%9A%E8%AE%AE",
+      "chars": 3424,
+      "skipped_existing": true
+    },
+    {
+      "title": "九一八事变",
+      "resolved_title": "九一八事变",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-九一八事变.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B9%9D%E4%B8%80%E5%85%AB%E4%BA%8B%E5%8F%98",
+      "chars": 17982,
+      "skipped_existing": true
+    },
+    {
+      "title": "西安事变",
+      "resolved_title": "西安事变",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-西安事变.md",
+      "url": "https://zh.wikipedia.org/wiki/%E8%A5%BF%E5%AE%89%E4%BA%8B%E5%8F%98",
+      "chars": 17095,
+      "skipped_existing": true
+    },
+    {
+      "title": "南京大屠杀",
+      "resolved_title": "南京大屠杀",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-南京大屠杀.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8D%97%E4%BA%AC%E5%A4%A7%E5%B1%A0%E6%9D%80",
+      "chars": 17370,
+      "skipped_existing": true
+    },
+    {
+      "title": "中华人民共和国成立",
+      "resolved_title": "中华人民共和国成立",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-中华人民共和国成立.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%8D%8E%E4%BA%BA%E6%B0%91%E5%85%B1%E5%92%8C%E5%9B%BD%E6%88%90%E7%AB%8B",
+      "chars": 3664,
+      "skipped_existing": true
+    },
+    {
+      "title": "土地改革运动",
+      "resolved_title": "土地改革运动",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-土地改革运动.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%9C%9F%E5%9C%B0%E6%94%B9%E9%9D%A9%E8%BF%90%E5%8A%A8",
+      "chars": 7380,
+      "skipped_existing": true
+    },
+    {
+      "title": "抗美援朝",
+      "resolved_title": "抗美援朝",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-抗美援朝.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%8A%97%E7%BE%8E%E6%8F%B4%E6%9C%9D",
+      "chars": 18170,
+      "skipped_existing": true
+    },
+    {
+      "title": "改革开放",
+      "resolved_title": "改革开放",
+      "topic": "中国近现代史",
+      "path": "data\\rag\\public\\维基百科-改革开放.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%94%B9%E9%9D%A9%E5%BC%80%E6%94%BE",
+      "chars": 18155,
+      "skipped_existing": true
+    },
+    {
+      "title": "第一次世界大战",
+      "resolved_title": "第一次世界大战",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-第一次世界大战.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%AC%AC%E4%B8%80%E6%AC%A1%E4%B8%96%E7%95%8C%E5%A4%A7%E6%88%98",
+      "chars": 17822,
+      "skipped_existing": true
+    },
+    {
+      "title": "巴黎和会",
+      "resolved_title": "巴黎和会",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-巴黎和会.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%B7%B4%E9%BB%8E%E5%92%8C%E4%BC%9A",
+      "chars": 6528,
+      "skipped_existing": true
+    },
+    {
+      "title": "凡尔赛条约",
+      "resolved_title": "凡尔赛条约",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-凡尔赛条约.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%87%A1%E5%B0%94%E8%B5%9B%E6%9D%A1%E7%BA%A6",
+      "chars": 9259,
+      "skipped_existing": true
+    },
+    {
+      "title": "国际联盟",
+      "resolved_title": "国际联盟",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-国际联盟.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%9B%BD%E9%99%85%E8%81%94%E7%9B%9F",
+      "chars": 17692,
+      "skipped_existing": true
+    },
+    {
+      "title": "第二次世界大战",
+      "resolved_title": "第二次世界大战",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-第二次世界大战.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E4%B8%96%E7%95%8C%E5%A4%A7%E6%88%98",
+      "chars": 18268,
+      "skipped_existing": true
+    },
+    {
+      "title": "雅尔塔会议",
+      "resolved_title": "雅尔塔会议",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-雅尔塔会议.md",
+      "url": "https://zh.wikipedia.org/wiki/%E9%9B%85%E5%B0%94%E5%A1%94%E4%BC%9A%E8%AE%AE",
+      "chars": 8392
+    },
+    {
+      "title": "联合国",
+      "resolved_title": "联合国",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-联合国.md",
+      "url": "https://zh.wikipedia.org/wiki/%E8%81%94%E5%90%88%E5%9B%BD",
+      "chars": 11177
+    },
+    {
+      "title": "杜鲁门主义",
+      "resolved_title": "杜鲁门主义",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-杜鲁门主义.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%9D%9C%E9%B2%81%E9%97%A8%E4%B8%BB%E4%B9%89",
+      "chars": 820,
+      "skipped_existing": true
+    },
+    {
+      "title": "北大西洋公约组织",
+      "resolved_title": "北大西洋公约组织",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-北大西洋公约组织.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8C%97%E5%A4%A7%E8%A5%BF%E6%B4%8B%E5%85%AC%E7%BA%A6%E7%BB%84%E7%BB%87",
+      "chars": 12186,
+      "skipped_existing": true
+    },
+    {
+      "title": "华沙条约组织",
+      "resolved_title": "华沙条约组织",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-华沙条约组织.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8D%8E%E6%B2%99%E6%9D%A1%E7%BA%A6%E7%BB%84%E7%BB%87",
+      "chars": 9976,
+      "skipped_existing": true
+    },
+    {
+      "title": "柏林墙",
+      "resolved_title": "柏林墙",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-柏林墙.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%9F%8F%E6%9E%97%E5%A2%99",
+      "chars": 10769,
+      "skipped_existing": true
+    },
+    {
+      "title": "古巴导弹危机",
+      "resolved_title": "古巴导弹危机",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-古巴导弹危机.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8F%A4%E5%B7%B4%E5%AF%BC%E5%BC%B9%E5%8D%B1%E6%9C%BA",
+      "chars": 16082,
+      "skipped_existing": true
+    },
+    {
+      "title": "苏联解体",
+      "resolved_title": "苏联解体",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-苏联解体.md",
+      "url": "https://zh.wikipedia.org/wiki/%E8%8B%8F%E8%81%94%E8%A7%A3%E4%BD%93",
+      "chars": 11137,
+      "skipped_existing": true
+    },
+    {
+      "title": "欧洲联盟",
+      "resolved_title": "欧洲联盟",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-欧洲联盟.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%AC%A7%E6%B4%B2%E8%81%94%E7%9B%9F",
+      "chars": 10513,
+      "skipped_existing": true
+    },
+    {
+      "title": "第三次科技革命",
+      "resolved_title": "第三次科技革命",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-第三次科技革命.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%AC%AC%E4%B8%89%E6%AC%A1%E7%A7%91%E6%8A%80%E9%9D%A9%E5%91%BD",
+      "chars": 3603,
+      "skipped_existing": true
+    },
+    {
+      "title": "经济全球化",
+      "resolved_title": "经济全球化",
+      "topic": "世界现代史",
+      "path": "data\\rag\\public\\维基百科-经济全球化.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%BB%8F%E6%B5%8E%E5%85%A8%E7%90%83%E5%8C%96",
+      "chars": 1317,
+      "skipped_existing": true
+    },
+    {
+      "title": "人民代表大会制度",
+      "resolved_title": "人民代表大会制度",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-人民代表大会制度.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E6%B0%91%E4%BB%A3%E8%A1%A8%E5%A4%A7%E4%BC%9A%E5%88%B6%E5%BA%A6",
+      "chars": 4616,
+      "skipped_existing": true
+    },
+    {
+      "title": "中国人民政治协商会议",
+      "resolved_title": "中国人民政治协商会议",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-中国人民政治协商会议.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E4%BA%BA%E6%B0%91%E6%94%BF%E6%B2%BB%E5%8D%8F%E5%95%86%E4%BC%9A%E8%AE%AE",
+      "chars": 15121
+    },
+    {
+      "title": "基层群众自治制度",
+      "resolved_title": "基层群众自治制度",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-基层群众自治制度.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%9F%BA%E5%B1%82%E7%BE%A4%E4%BC%97%E8%87%AA%E6%B2%BB%E5%88%B6%E5%BA%A6",
+      "chars": 509,
+      "skipped_existing": true
+    },
+    {
+      "title": "中国特色社会主义",
+      "resolved_title": "中国特色社会主义",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-中国特色社会主义.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E7%89%B9%E8%89%B2%E7%A4%BE%E4%BC%9A%E4%B8%BB%E4%B9%89",
+      "chars": 6131,
+      "skipped_existing": true
+    },
+    {
+      "title": "中国特色社会主义理论体系",
+      "resolved_title": "中国特色社会主义理论体系",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-中国特色社会主义理论体系.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E7%89%B9%E8%89%B2%E7%A4%BE%E4%BC%9A%E4%B8%BB%E4%B9%89%E7%90%86%E8%AE%BA%E4%BD%93%E7%B3%BB",
+      "chars": 6171,
+      "skipped_existing": true
+    },
+    {
+      "title": "社会主义核心价值观",
+      "resolved_title": "社会主义核心价值观",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-社会主义核心价值观.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%A4%BE%E4%BC%9A%E4%B8%BB%E4%B9%89%E6%A0%B8%E5%BF%83%E4%BB%B7%E5%80%BC%E8%A7%82",
+      "chars": 1343,
+      "skipped_existing": true
+    },
+    {
+      "title": "依法治国",
+      "resolved_title": "依法治国",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-依法治国.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BE%9D%E6%B3%95%E6%B2%BB%E5%9B%BD",
+      "chars": 18021,
+      "skipped_existing": true
+    },
+    {
+      "title": "法治中国",
+      "resolved_title": "法治中国",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-法治中国.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%B3%95%E6%B2%BB%E4%B8%AD%E5%9B%BD",
+      "chars": 377,
+      "skipped_existing": true
+    },
+    {
+      "title": "新发展理念",
+      "resolved_title": "新发展理念",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-新发展理念.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%96%B0%E5%8F%91%E5%B1%95%E7%90%86%E5%BF%B5",
+      "chars": 1423,
+      "skipped_existing": true
+    },
+    {
+      "title": "中国式现代化",
+      "resolved_title": "中国式现代化",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-中国式现代化.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E5%BC%8F%E7%8E%B0%E4%BB%A3%E5%8C%96",
+      "chars": 1438,
+      "skipped_existing": true
+    },
+    {
+      "title": "人类命运共同体",
+      "resolved_title": "人类命运共同体",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-人类命运共同体.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E7%B1%BB%E5%91%BD%E8%BF%90%E5%85%B1%E5%90%8C%E4%BD%93",
+      "chars": 6372,
+      "skipped_existing": true
+    },
+    {
+      "title": "马克思主义中国化",
+      "resolved_title": "马克思主义中国化",
+      "topic": "思想政治理论",
+      "path": "data\\rag\\public\\维基百科-马克思主义中国化.md",
+      "url": "https://zh.wikipedia.org/wiki/%E9%A9%AC%E5%85%8B%E6%80%9D%E4%B8%BB%E4%B9%89%E4%B8%AD%E5%9B%BD%E5%8C%96",
+      "chars": 1235,
+      "skipped_existing": true
+    },
+    {
+      "title": "机器学习",
+      "resolved_title": "机器学习",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-机器学习.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%9C%BA%E5%99%A8%E5%AD%A6%E4%B9%A0",
+      "chars": 8250
+    },
+    {
+      "title": "监督学习",
+      "resolved_title": "监督学习",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-监督学习.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%9B%91%E7%9D%A3%E5%AD%A6%E4%B9%A0",
+      "chars": 3704,
+      "skipped_existing": true
+    },
+    {
+      "title": "决策树",
+      "resolved_title": "决策树",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-决策树.md",
+      "url": "https://zh.wikipedia.org/wiki/%E5%86%B3%E7%AD%96%E6%A0%91",
+      "chars": 3801,
+      "skipped_existing": true
+    },
+    {
+      "title": "支持向量机",
+      "resolved_title": "支持向量机",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-支持向量机.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%94%AF%E6%8C%81%E5%90%91%E9%87%8F%E6%9C%BA",
+      "chars": 17302,
+      "skipped_existing": true
+    },
+    {
+      "title": "逻辑回归",
+      "resolved_title": "逻辑回归",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-逻辑回归.md",
+      "url": "https://zh.wikipedia.org/wiki/%E9%80%BB%E8%BE%91%E5%9B%9E%E5%BD%92",
+      "chars": 5586,
+      "skipped_existing": true
+    },
+    {
+      "title": "人工神经网络",
+      "resolved_title": "人工神经网络",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-人工神经网络.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E7%A5%9E%E7%BB%8F%E7%BD%91%E7%BB%9C",
+      "chars": 8707,
+      "skipped_existing": true
+    },
+    {
+      "title": "深度学习",
+      "resolved_title": "深度学习",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-深度学习.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%B7%B1%E5%BA%A6%E5%AD%A6%E4%B9%A0",
+      "chars": 10892
+    },
+    {
+      "title": "过拟合",
+      "resolved_title": "過適",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-过拟合.md",
+      "url": "https://zh.wikipedia.org/wiki/%E8%BF%87%E6%8B%9F%E5%90%88",
+      "chars": 2687
+    },
+    {
+      "title": "主成分分析",
+      "resolved_title": "主成分分析",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-主成分分析.md",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%BB%E6%88%90%E5%88%86%E5%88%86%E6%9E%90",
+      "chars": 15852
+    },
+    {
+      "title": "特征工程",
+      "resolved_title": "特征工程",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-特征工程.md",
+      "url": "https://zh.wikipedia.org/wiki/%E7%89%B9%E5%BE%81%E5%B7%A5%E7%A8%8B",
+      "chars": 583,
+      "skipped_existing": true
+    },
+    {
+      "title": "数据清洗",
+      "resolved_title": "数据清洗",
+      "topic": "机器学习课程报告",
+      "path": "data\\rag\\public\\维基百科-数据清洗.md",
+      "url": "https://zh.wikipedia.org/wiki/%E6%95%B0%E6%8D%AE%E6%B8%85%E6%B4%97",
+      "chars": 669,
+      "skipped_existing": true
+    }
+  ],
+  "errors": [
+    {
+      "title": "抗日民族统一战线",
+      "error": "RuntimeError: Missing page: 抗日民族统一战线"
+    },
+    {
+      "title": "民族区域自治制度",
+      "error": "HTTPError: HTTP Error 429: Too Many Requests"
+    },
+    {
+      "title": "习近平新时代中国特色社会主义思想",
+      "error": "HTTPError: HTTP Error 429: Too Many Requests"
+    },
+    {
+      "title": "无监督学习",
+      "error": "RuntimeError: Missing page: 无监督学习"
+    },
+    {
+      "title": "线性回归",
+      "error": "RuntimeError: Missing page: 线性回归"
+    },
+    {
+      "title": "交叉验证",
+      "error": "RuntimeError: Missing page: 交叉验证"
+    }
+  ]
+}

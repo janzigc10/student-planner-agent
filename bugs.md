@@ -4,6 +4,9 @@
 - 当前 PATH 上的默认 `python` 不是项目测试使用的版本；后端测试统一使用 `py -3.12 -m pytest`。
 - `py -3.12 -m pip install -e ".[dev]"` 仍会因为 setuptools 顶层包识别冲突失败；当前做法是安装 `pyproject.toml` 中的直接依赖与测试依赖继续验证。
 - Python 3.12 环境需要保留 `openai` 依赖，认证相关依赖需保持 `bcrypt<5`。
+- 2026-06-13 确认 Chroma 本地向量引擎在当前 Anaconda Python 3.12 环境不可直接依赖：`chromadb` 1.5.9、1.4.1、1.0.21 都会在 `collection.upsert()` 触发 native access violation，退出码 `3221225477`；`chromadb` 0.4/0.5 需要编译 `chroma-hnswlib`，本机没有 Microsoft Visual C++ Build Tools，安装失败。改用系统原生 Python 3.12 创建的 `student-planner/.venv-native` 后，`chromadb 1.5.9` 的 upsert/query 和真实 RAG Chroma 持久化均已通过。当前 RAG 代码仍会先用 subprocess 探针检测 Chroma，失败时自动退到 SQLite 持久化 fallback，避免主进程崩溃和重复 embed 文档库。
+- 2026-06-14 隔离 worktree `D:\tmp\student-planner-langgraph-final` 首次执行 Git 时也会触发 `dubious ownership`，需要加入 `safe.directory`；不能只给主仓库 `D:\student_time_plan` 配 safe directory。
+- 2026-06-14 在 native venv 跑 pytest 时，默认临时目录 `C:\Users\Chen\AppData\Local\Temp\pytest-of-Chen` 可能报 `PermissionError: [WinError 5] 拒绝访问`；本 worktree 的可行做法是先设置 `TMP` / `TEMP` 为 `D:\tmp\pytest-tmp-native`，再运行 `.\.venv-native\Scripts\python.exe -m pytest ...`。
 - 后端全量 `py -3.12 -m pytest -q` 若与前端 `npm test` / `npm run build` 并行执行，测试共享的 SQLite `test.db` 偶发会在 teardown 报 `database is locked`；基线验证请串行跑，若遇到该报错先单独重跑后端全量确认。
 - PWA 真机安装不能直接依赖局域网 HTTP 地址；`http://<LAN-IP>:4173` 下 `navigator.serviceWorker` 不可用，后续 Task 3 需要先准备 HTTPS origin（临时隧道、同域 HTTPS 环境或受信本地证书）。
 - 当前临时 HTTPS 方案使用 Cloudflare Quick Tunnel：地址是随机的 `trycloudflare.com` 子域名，服务重启后 URL 可能变化，且官方明确说明这类 account-less tunnel 没有 uptime guarantee，不适合作为长期正式入口。
