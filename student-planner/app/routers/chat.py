@@ -46,10 +46,17 @@ def _is_llm_provider_unavailable(exc: BaseException) -> bool:
         "APIError",
         "RateLimitError",
         "InternalServerError",
+        "AuthenticationError",
+        "PermissionDeniedError",
+        "BadRequestError",
     }
     network_markers = (
         "apiconnectionerror",
         "apitimeouterror",
+        "authenticationerror",
+        "permissiondeniederror",
+        "badrequesterror",
+        "data_inspection_failed",
         "failed to establish",
         "network is unreachable",
         "connection refused",

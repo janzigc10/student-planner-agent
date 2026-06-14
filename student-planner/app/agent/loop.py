@@ -91,7 +91,6 @@ _COURSE_DISAMBIGUATION_KEYWORDS = (
 _TASK_WRITE_CONTEXT_KEYWORDS = (
     "任务",
     "提醒",
-    "复习",
     "作业",
     "安排",
     "创建",
@@ -104,6 +103,71 @@ _TASK_WRITE_CONTEXT_KEYWORDS = (
     "调整",
     "换到",
     "挪到",
+)
+_TASK_WRITE_CONTEXT_PHRASES = (
+    "复习计划",
+    "学习计划",
+    "备考计划",
+    "拆复习任务",
+    "拆学习任务",
+    "复习任务",
+    "学习任务",
+    "写入日程",
+    "加入日程",
+    "落到日程",
+)
+_TASK_WRITE_ACTION_MARKERS = (
+    "任务",
+    "提醒",
+    "日程",
+    "创建",
+    "新建",
+    "新增",
+    "写入",
+    "落库",
+    "加入",
+    "安排",
+    "规划",
+    "制定",
+    "生成",
+    "拆",
+    "分解",
+    "改到",
+    "改成",
+    "改为",
+    "修改",
+    "调整",
+    "换到",
+    "挪到",
+)
+_INFORMATIONAL_QA_MARKERS = (
+    "是什么",
+    "为什么",
+    "怎么理解",
+    "如何理解",
+    "解释",
+    "说明",
+    "区别",
+    "关系",
+    "作用",
+    "意义",
+    "原因",
+    "概念",
+    "定义",
+    "判断",
+    "简述",
+    "论述",
+    "分析",
+    "怎么答",
+    "怎么回答",
+    "如何回答",
+    "简答题",
+    "考点",
+    "用一句话",
+    "一句话",
+    "讲讲",
+    "梳理",
+    "总结",
 )
 _PLAIN_TEXT_ASK_CONFIRM_MARKERS = (
     "确认",
@@ -125,6 +189,63 @@ _PLAIN_TEXT_ASK_INFO_MARKERS = (
     "提前多久",
 )
 _TASK_WRITE_TOOLS = {"create_task", "update_task", "complete_task", "set_reminder"}
+_TEXT_ONLY_STREAM_AFTER_TOOLS = {"recall_memory"}
+_TOOL_INTENT_KEYWORDS = (
+    *_SCHEDULE_IMPORT_KEYWORDS,
+    *_COURSE_CONTEXT_KEYWORDS,
+    *_COURSE_VIEW_KEYWORDS,
+    *_COURSE_EDIT_KEYWORDS,
+    *_TASK_WRITE_CONTEXT_KEYWORDS,
+    *_TASK_WRITE_CONTEXT_PHRASES,
+    "course",
+    "schedule",
+    "timetable",
+    "task",
+    "todo",
+    "reminder",
+    "studyplan",
+    "workplan",
+    "deadline",
+    "assignment",
+    "exam",
+    "memory",
+    "今天",
+    "明天",
+    "后天",
+    "下周",
+    "本周",
+    "周一",
+    "周二",
+    "周三",
+    "周四",
+    "周五",
+    "周六",
+    "周日",
+    "星期",
+    "几点",
+    "时间",
+    "课",
+    "上课",
+    "日程",
+    "空闲",
+    "有空",
+    "计划",
+    "考试",
+    "截止",
+    "记忆",
+    "长期记忆",
+    "记得",
+    "记住",
+    "保存",
+    "偏好",
+    "习惯",
+    "帮我",
+    "查看",
+    "查一下",
+    "列出",
+    "删除",
+    "完成",
+)
 
 _SCHEDULE_FILE_ID_RE = re.compile(r"file_id\s*=\s*([a-zA-Z0-9\-]+)")
 _SCHEDULE_PERIOD_ENTRY_RE = re.compile(
@@ -382,9 +503,56 @@ def _build_task_routing_hint(user_message: str) -> str | None:
     )
 
 
+def _compact_user_texts(user_texts: list[str]) -> str:
+    texts = [str(text or "") for text in user_texts if str(text or "").strip()]
+    return "\n".join(texts).lower().replace(" ", "")
+
+
+def _latest_compact_user_text(user_texts: list[str]) -> str:
+    texts = [str(text or "") for text in user_texts if str(text or "").strip()]
+    return texts[-1].lower().replace(" ", "") if texts else ""
+
+
+def _has_compact_keyword(compact_text: str, keywords: tuple[str, ...]) -> bool:
+    return any(str(keyword).lower().replace(" ", "") in compact_text for keyword in keywords)
+
+
 def _looks_like_task_write_context(user_texts: list[str]) -> bool:
-    compact_text = "\n".join(str(text or "") for text in user_texts).lower().replace(" ", "")
+    compact_text = _compact_user_texts(user_texts)
+    if not compact_text:
+        return False
+
+    latest_text = _latest_compact_user_text(user_texts)
+    explicit_write_intent = any(marker in latest_text for marker in _TASK_WRITE_ACTION_MARKERS)
+    explicit_write_intent = explicit_write_intent or any(
+        phrase in latest_text for phrase in _TASK_WRITE_CONTEXT_PHRASES
+    )
+    is_informational_qa = any(marker in latest_text for marker in _INFORMATIONAL_QA_MARKERS)
+    if is_informational_qa and not explicit_write_intent:
+        return False
+
+    if any(phrase in compact_text for phrase in _TASK_WRITE_CONTEXT_PHRASES):
+        return True
     return any(keyword in compact_text for keyword in _TASK_WRITE_CONTEXT_KEYWORDS)
+
+
+def _looks_like_tool_intent(user_texts: list[str]) -> bool:
+    compact_text = _compact_user_texts(user_texts)
+    if not compact_text:
+        return False
+
+    latest_text = _latest_compact_user_text(user_texts)
+    explicit_write_intent = any(marker in latest_text for marker in _TASK_WRITE_ACTION_MARKERS)
+    explicit_write_intent = explicit_write_intent or any(
+        phrase in latest_text for phrase in _TASK_WRITE_CONTEXT_PHRASES
+    )
+    is_informational_qa = any(marker in latest_text for marker in _INFORMATIONAL_QA_MARKERS)
+    if is_informational_qa and not explicit_write_intent:
+        return False
+
+    if _looks_like_task_write_context(user_texts) or looks_like_task_update_intent(user_texts):
+        return True
+    return _has_compact_keyword(compact_text, _TOOL_INTENT_KEYWORDS)
 
 
 def _looks_like_plain_text_ask(text: str) -> bool:
@@ -419,6 +587,12 @@ def _should_require_task_tool_response(user_texts: list[str], tool_history: list
     if not _looks_like_task_write_context(user_texts):
         return False
     return not any(tool_name in _TASK_WRITE_TOOLS for tool_name in tool_history)
+
+
+def _should_use_text_only_stream(user_texts: list[str], tool_history: list[str]) -> bool:
+    if tool_history:
+        return tool_history[-1] in _TEXT_ONLY_STREAM_AFTER_TOOLS
+    return not _looks_like_tool_intent(user_texts)
 
 
 async def _build_initial_messages(
@@ -2771,10 +2945,14 @@ async def run_agent_loop(
         response: dict[str, Any] | None = None
         response_message_id = str(uuid.uuid4())
         streamed_deltas: list[str] = []
-        tool_choice = "required" if _should_require_task_tool_response(preflight_user_texts, tool_history) else "auto"
-        completion_kwargs: dict[str, Any] = {"tools": TOOL_DEFINITIONS}
-        if tool_choice != "auto":
-            completion_kwargs["tool_choice"] = tool_choice
+        streamed_deltas_emitted = False
+        use_text_only_stream = _should_use_text_only_stream(preflight_user_texts, tool_history)
+        completion_kwargs: dict[str, Any] = {}
+        if not use_text_only_stream:
+            tool_choice = "required" if _should_require_task_tool_response(preflight_user_texts, tool_history) else "auto"
+            completion_kwargs = {"tools": TOOL_DEFINITIONS}
+            if tool_choice != "auto":
+                completion_kwargs["tool_choice"] = tool_choice
         try:
             async for stream_event in chat_completion_stream(
                 llm_client,
@@ -2787,6 +2965,13 @@ async def run_agent_loop(
                     if not delta:
                         continue
                     streamed_deltas.append(delta)
+                    if use_text_only_stream:
+                        streamed_deltas_emitted = True
+                        yield {
+                            "type": "text_delta",
+                            "message_id": response_message_id,
+                            "delta": delta,
+                        }
                     continue
 
                 if event_type == "response":
@@ -2855,12 +3040,13 @@ async def run_agent_loop(
                 continue
 
             if text:
-                for delta in streamed_deltas:
-                    yield {
-                        "type": "text_delta",
-                        "message_id": response_message_id,
-                        "delta": delta,
-                    }
+                if not streamed_deltas_emitted:
+                    for delta in streamed_deltas:
+                        yield {
+                            "type": "text_delta",
+                            "message_id": response_message_id,
+                            "delta": delta,
+                        }
                 yield {
                     "type": "text",
                     "message_id": response_message_id,

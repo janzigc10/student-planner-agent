@@ -361,7 +361,11 @@ TOOL_DEFINITIONS: list[dict] = [
         "type": "function",
         "function": {
             "name": "ask_user",
-            "description": "Request confirmation or a choice from the user.",
+            "description": (
+                "Request a blocking confirmation, choice, or required missing information before writing/updating/deleting "
+                "schedule, task, course, reminder, or memory data. Do not use for pure informational Q&A, concept "
+                "explanations, exam-review answers, summaries, or optional follow-up offers."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

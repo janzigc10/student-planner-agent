@@ -8,12 +8,24 @@ from sqlalchemy import select
 from app.agent import rag as rag_module
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
 from app.agent.langgraph_loop import prepare_langgraph_state, run_langgraph_agent_loop
-from app.agent.loop import run_review_override_plan_write
+from app.agent.loop import (
+    _looks_like_task_write_context,
+    _should_require_task_tool_response,
+    run_agent_loop,
+    run_review_override_plan_write,
+)
 from app.agent.rag import LocalRAGRetriever, OpenAICompatibleEmbeddings, build_rag_context, clear_rag_cache
 from app.config import settings
 from app.models.task import Task
 from app.models.user import User
 from tests.conftest import TestSession
+
+
+def stream_response_chunks(*, response: dict):
+    async def _generator():
+        yield {"type": "response", "response": response}
+
+    return _generator()
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +104,19 @@ def test_large_rag_corpus_routes_history_and_politics_queries(tmp_path):
         result = build_rag_context(query, corpus_dir=tmp_path, top_k=3)
         sources = [str(hit["metadata"].get("source", "")).replace("\\", "/") for hit in result["hits"]]
         assert expected_sources.intersection(sources)
+
+
+def test_rag_context_uses_query_relevant_excerpt(tmp_path):
+    (tmp_path / "维基百科-改革开放.md").write_text(
+        "改革开放是在 1978 年 12 月中共十一届三中全会后开始正式实施的。"
+        "无关尾部内容用于模拟同一 chunk 中和问题无关的长背景材料，不应进入最终 RAG 提示。",
+        encoding="utf-8",
+    )
+
+    result = build_rag_context("改革开放是什么时候开始的", corpus_dir=tmp_path, top_k=1)
+
+    assert "1978 年" in result["context"]
+    assert "无关尾部内容" not in result["context"]
 
 
 def test_openai_compatible_embeddings_calls_dashscope_config(monkeypatch):
@@ -372,6 +397,14 @@ def test_langchain_tool_schemas_expose_assignment_tools():
     assert all("parameters" in schema for schema in schemas)
 
 
+def test_review_qa_is_not_forced_into_task_write_context():
+    qa_message = "帮我复习一下：冷战格局形成过程中，杜鲁门主义、马歇尔计划、北约和华约分别起什么作用？"
+
+    assert _looks_like_task_write_context([qa_message]) is False
+    assert _should_require_task_tool_response([qa_message], []) is False
+    assert _looks_like_task_write_context(["下周四有大学英语3考试，帮我做复习计划"]) is True
+
+
 @pytest.mark.asyncio
 async def test_prepare_langgraph_state_adds_rag_runtime_hint():
     state = await prepare_langgraph_state("下周四有大学英语3考试，帮我做复习计划")
@@ -380,6 +413,42 @@ async def test_prepare_langgraph_state_adds_rag_runtime_hint():
     assert "retrieve_study_materials" in state["graph_nodes"]
     assert state["uses_langchain_tools"] is True
     assert any("RAG 检索上下文" in hint for hint in state["runtime_hints"])
+    assert any("复习问答" in hint for hint in state["runtime_hints"])
+    assert any("不要在结尾追加" in hint for hint in state["runtime_hints"])
+
+
+@pytest.mark.asyncio
+async def test_review_qa_agent_loop_does_not_require_tools_or_ask_user(setup_db):
+    captured_tool_choices: list[str | None] = []
+
+    def mock_chat_completion_stream(client, messages, tools=None, tool_choice=None):
+        captured_tool_choices.append(tool_choice)
+        return stream_response_chunks(
+            response={
+                "role": "assistant",
+                "content": "杜鲁门主义提出遏制共产主义，马歇尔计划用经济援助巩固西欧，北约把阵营军事化，华约则是苏联阵营的回应。",
+            }
+        )
+
+    with patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream):
+        async with TestSession() as db:
+            user = User(id="user-review-qa", username="review-qa", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_agent_loop(
+                "帮我复习一下：冷战格局形成过程中，杜鲁门主义、马歇尔计划、北约和华约分别起什么作用？",
+                user,
+                "session-review-qa",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert captured_tool_choices == [None]
+    assert not any(event["type"] == "ask_user" for event in events)
+    assert any(event["type"] == "text" and "杜鲁门主义" in event["content"] for event in events)
 
 
 @pytest.mark.asyncio

@@ -56,6 +56,7 @@ _OPENAI_COMPATIBLE_PROVIDERS = {"dashscope", "bailian", "aliyun", "openai-compat
 _CHROMA_VECTOR_STORE_PROVIDERS = {"chroma", "chromadb"}
 RAG_CHUNK_SIZE = 520
 RAG_CHUNK_OVERLAP = 150
+RAG_CONTEXT_EXCERPT_CHARS = 260
 CHROMA_COLLECTION_NAME = "student_planner_rag"
 _RAG_RETRIEVER_CACHE: dict[tuple[Any, ...], "LocalRAGRetriever"] = {}
 _CHROMA_RUNTIME_PROBE: tuple[bool, str] | None = None
@@ -96,6 +97,36 @@ def _tokenize(text: str) -> list[str]:
             for index in range(max(len(chinese_chars) - size + 1, 0))
         )
     return latin_tokens + chinese_ngrams
+
+
+def _truncate_context_excerpt(text: str, limit: int = RAG_CONTEXT_EXCERPT_CHARS) -> str:
+    compact = " ".join(str(text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
+def _context_excerpt(content: str, query: str, limit: int = RAG_CONTEXT_EXCERPT_CHARS) -> str:
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[。！？!?；;])\s*|\n+", str(content or ""))
+        if sentence.strip()
+    ]
+    if not sentences:
+        return ""
+
+    query_terms = {token for token in _tokenize(query) if len(token) >= 2}
+    scored: list[tuple[int, int, str]] = []
+    for index, sentence in enumerate(sentences):
+        score = sum(1 for token in query_terms if token in sentence)
+        if score > 0:
+            scored.append((score, index, sentence))
+
+    if not scored:
+        return _truncate_context_excerpt(sentences[0], limit)
+
+    _, _, best_sentence = max(scored, key=lambda item: (item[0], -item[1]))
+    return _truncate_context_excerpt(best_sentence, limit)
 
 
 class OpenAICompatibleEmbeddings(Embeddings):
@@ -749,7 +780,7 @@ def build_rag_context(query: str, *, corpus_dir: str | Path | None = None, top_k
     retriever = get_rag_retriever(corpus_dir)
     hits = retriever.retrieve(query, top_k=top_k)
     context = "\n\n".join(
-        f"[{index}] 来源：{hit['metadata'].get('source', 'local')}；内容：{hit['content']}"
+        f"[{index}] 来源：{hit['metadata'].get('source', 'local')}；内容：{_context_excerpt(hit['content'], query)}"
         for index, hit in enumerate(hits, 1)
     )
     return {

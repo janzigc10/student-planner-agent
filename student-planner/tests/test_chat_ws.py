@@ -8,6 +8,39 @@ from app.models.user import User
 from tests.conftest import TestSession
 
 
+def test_chat_error_event_classifies_openai_authentication_error():
+    from app.routers.chat import _chat_error_event
+
+    class AuthenticationError(Exception):
+        pass
+
+    AuthenticationError.__module__ = "openai"
+
+    event = _chat_error_event(AuthenticationError("invalid api key"))
+
+    assert event == {
+        "type": "error",
+        "code": "llm_provider_unavailable",
+        "recoverable": True,
+        "message": "模型服务暂时连接不上，刚才的操作还没有执行。请稍后重试，或检查当前网络/模型服务配置。",
+    }
+
+
+def test_chat_error_event_classifies_provider_bad_request():
+    from app.routers.chat import _chat_error_event
+
+    class BadRequestError(Exception):
+        pass
+
+    BadRequestError.__module__ = "openai"
+
+    event = _chat_error_event(BadRequestError("data_inspection_failed"))
+
+    assert event["type"] == "error"
+    assert event["code"] == "llm_provider_unavailable"
+    assert event["recoverable"] is True
+
+
 @pytest.mark.asyncio
 async def test_ws_auth_required(client):
     """WebSocket route should be registered."""

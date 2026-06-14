@@ -96,6 +96,8 @@ def test_agent_task_rules_allow_default_study_context_for_simple_plans():
     assert "using_defaults" in TASK_TOOL_RULES
     assert "简单要求安排复习" in TASK_TOOL_RULES
     assert "详细" in TASK_TOOL_RULES
+    assert "纯知识问答" in TASK_TOOL_RULES
+    assert "不要调用 `ask_user`" in TASK_TOOL_RULES
 
 
 def test_agent_task_rules_require_work_context_before_work_planning():
@@ -109,3 +111,13 @@ def test_response_format_rules_keep_plain_replies_compact():
     assert "1-3 个短段落" in RESPONSE_FORMAT_RULES
     assert "Markdown 表格" in RESPONSE_FORMAT_RULES
     assert "ask_user" in RESPONSE_FORMAT_RULES
+    assert "<br>" in RESPONSE_FORMAT_RULES
+    assert "纯知识问答" in RESPONSE_FORMAT_RULES
+
+
+def test_ask_user_contract_excludes_pure_informational_qa():
+    description = _tool_by_name("ask_user")["function"]["description"]
+
+    assert "blocking confirmation" in description
+    assert "pure informational Q&A" in description
+    assert "exam-review answers" in description
