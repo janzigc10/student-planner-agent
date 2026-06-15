@@ -33,6 +33,26 @@ class RouteDecision:
     expected_next_step: str = "delegate_to_agent_loop"
 
 
+@dataclass(frozen=True)
+class PendingConfirmation:
+    confirmation_id: str
+    route: str
+    tool_name: str
+    ask_type: str
+    question: str
+    options: tuple[str, ...]
+    data: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class DBWritePlan:
+    confirmation_id: str
+    route: str
+    tool_name: str
+    args: dict[str, Any]
+    description: str
+
+
 STATE_SCHEMA_FIELDS = (
     "route",
     "messages",
@@ -89,6 +109,10 @@ CONFIRMATION_ENFORCEMENT_GAP = (
     "Current confirmation is enforced by local shortcuts, prompts, preflight, "
     "and regression tests; a LangGraph-native migration must make it stateful "
     "with pending_confirmation/db_write_plan before write tools execute."
+)
+
+CONFIRMATION_STATE_V1_PILOTS = (
+    "schedule_import",
 )
 
 PLAN_REVIEW_TOOLS = (

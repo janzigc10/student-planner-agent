@@ -1,6 +1,7 @@
 from app.agent.contracts import (
     CONFIRMATION_ENFORCEMENT_GAP,
     CONFIRMATION_REQUIRED_TOOLS,
+    CONFIRMATION_STATE_V1_PILOTS,
     EVENT_REQUIRED_FIELDS,
     GOLDEN_E2E_MATRIX,
     STATE_SCHEMA_FIELDS,
@@ -111,6 +112,10 @@ def test_confirmation_contract_covers_database_and_scheduler_writes():
 
     assert expected <= set(CONFIRMATION_REQUIRED_TOOLS)
     assert "do not validate a confirmation ticket" in CONFIRMATION_ENFORCEMENT_GAP
+
+
+def test_confirmation_state_v1_marks_schedule_import_pilot():
+    assert "schedule_import" in CONFIRMATION_STATE_V1_PILOTS
 
 
 def test_state_and_golden_matrix_contracts_cover_migration_surface():

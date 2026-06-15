@@ -7,6 +7,7 @@ from typing import Any, AsyncGenerator, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.contracts import AgentRoute, DBWritePlan, PendingConfirmation
 from app.agent.guardrails import (
     GuardrailViolation,
     check_consecutive_ask_user,
@@ -1639,6 +1640,52 @@ def _is_confirmed_answer(answer: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in positive_prefixes)
 
 
+def _build_schedule_import_write_state(
+    courses: list[dict[str, Any]],
+) -> tuple[PendingConfirmation, DBWritePlan]:
+    confirmation_id = f"{AgentRoute.SCHEDULE_IMPORT.value}:{uuid.uuid4().hex}"
+    data = {"courses": courses, "count": len(courses)}
+    question = f"以下是解析出的课表（共{len(courses)}条），请确认是否导入？"
+    pending_confirmation = PendingConfirmation(
+        confirmation_id=confirmation_id,
+        route=AgentRoute.SCHEDULE_IMPORT.value,
+        tool_name="bulk_import_courses",
+        ask_type="review",
+        question=question,
+        options=("确认", "取消"),
+        data=data,
+    )
+    db_write_plan = DBWritePlan(
+        confirmation_id=confirmation_id,
+        route=AgentRoute.SCHEDULE_IMPORT.value,
+        tool_name="bulk_import_courses",
+        args={"courses": courses},
+        description=f"Import {len(courses)} parsed schedule courses.",
+    )
+    return pending_confirmation, db_write_plan
+
+
+async def _execute_confirmed_db_write_plan(
+    *,
+    pending_confirmation: PendingConfirmation | None,
+    db_write_plan: DBWritePlan | None,
+    confirmation_answer: str,
+    db: AsyncSession,
+    user_id: str,
+) -> dict[str, Any]:
+    if pending_confirmation is None:
+        return {"error": "Missing pending confirmation state for database write."}
+    if db_write_plan is None:
+        return {"error": "Missing database write plan for confirmed write."}
+    if pending_confirmation.confirmation_id != db_write_plan.confirmation_id:
+        return {"error": "Confirmation state does not match database write plan."}
+    if pending_confirmation.tool_name != db_write_plan.tool_name:
+        return {"error": "Confirmation state does not match database write plan."}
+    if not _is_confirmed_answer(confirmation_answer):
+        return {"status": "cancelled", "message": "Write cancelled before database execution."}
+    return await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
+
+
 def _extract_review_override(answer: str) -> dict[str, Any] | None:
     marker = "review_override="
     marker_index = (answer or "").find(marker)
@@ -1881,12 +1928,13 @@ async def _run_schedule_import_shortcut(
         yield {"type": "done"}
         return
 
+    pending_confirmation, db_write_plan = _build_schedule_import_write_state(courses)
     confirm_answer = yield {
         "type": "ask_user",
-        "ask_type": "review",
-        "question": f"以下是解析出的课表（共{len(courses)}条），请确认是否导入？",
-        "options": ["确认", "取消"],
-        "data": {"courses": courses, "count": len(courses)},
+        "ask_type": pending_confirmation.ask_type,
+        "question": pending_confirmation.question,
+        "options": list(pending_confirmation.options),
+        "data": pending_confirmation.data,
     }
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
@@ -1897,9 +1945,15 @@ async def _run_schedule_import_shortcut(
         return
 
     step += 1
-    import_args = {"courses": courses}
+    import_args = dict(db_write_plan.args)
     yield {"type": "tool_call", "name": "bulk_import_courses", "args": import_args}
-    import_result = await execute_tool("bulk_import_courses", import_args, db, user.id)
+    import_result = await _execute_confirmed_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        db_write_plan=db_write_plan,
+        confirmation_answer=str(confirm_answer or ""),
+        db=db,
+        user_id=user.id,
+    )
     yield {"type": "tool_result", "name": "bulk_import_courses", "result": import_result}
     await _persist_local_tool_step(db, session_id, user.id, step, "bulk_import_courses", import_args, import_result)
 

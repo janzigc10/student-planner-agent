@@ -12,7 +12,8 @@ The current runtime is only partially LangGraph-based:
 2. `langgraph_loop.py` now exposes a Router Shell V1 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, and `delegate_legacy_loop` nodes.
 3. `route` conditionally sends no-web requests directly to the no-web terminal response, sends RAG/context candidates through retrieval, and sends non-RAG requests to legacy delegation.
 4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; all non-gated paths continue through hints and `delegate_legacy_loop`.
-5. Tool workflows, schedule import, course maintenance, study/work plans, `ask_user` pause/resume, preflight, and writes still live in the proven legacy `run_agent_loop()`.
+5. Tool workflows, course maintenance, study/work plans, most `ask_user` pause/resume, preflight, and most writes still live in the proven legacy `run_agent_loop()`.
+6. Confirmation State V1 now has one pilot inside the legacy-delegated schedule import shortcut: the final `bulk_import_courses` write is executed only through a matching `pending_confirmation` plus `db_write_plan`.
 
 ## Router Contract
 
@@ -105,7 +106,9 @@ Tools that must be behind `ask_user` before their write effect:
 
 Plan generators `create_study_plan` and `create_work_plan` create candidate task data only. The generated tasks must go through a review `ask_user` before any `create_task` calls. A cancel response must return a short text response plus `done` and must not write.
 
-Current legacy caveat: `execute_tool` is a direct dispatcher and write handlers can commit if called directly. Existing safety comes from local shortcuts, prompt/tool contracts, preflight, and regression tests, not from a central confirmation ticket. The LangGraph-native migration must close this by requiring `pending_confirmation` and `db_write_plan` state before any write tool node can execute.
+Confirmation State V1 pilot: schedule import now builds a `PendingConfirmation` and `DBWritePlan` before showing the final parsed-course review card. `bulk_import_courses` is called only through `_execute_confirmed_db_write_plan()` after the submitted answer confirms the same confirmation id and tool name. Cancel and negative answers return `text -> done` without executing the write plan.
+
+Current remaining legacy caveat: `execute_tool` is still a direct dispatcher and non-pilot write handlers can commit if called directly. Existing safety outside the schedule-import pilot comes from local shortcuts, prompt/tool contracts, preflight, and regression tests, not from a central confirmation ticket. The next LangGraph-native migration slice should move the same `pending_confirmation` and `db_write_plan` gate to another write path before a shared write-tool node executes.
 
 ## Tool Boundary
 
