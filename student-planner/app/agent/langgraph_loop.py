@@ -8,8 +8,9 @@ from typing import Any, AsyncGenerator, TypedDict
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.contracts import AgentRoute, decide_agent_route
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
-from app.agent.loop import _looks_like_current_public_info_request, _save_message, run_agent_loop
+from app.agent.loop import _current_public_info_unavailable_text, _save_message, run_agent_loop
 from app.agent.rag import build_rag_context
 from app.models.user import User
 
@@ -22,6 +23,9 @@ except Exception:  # pragma: no cover
 
 class PlannerGraphState(TypedDict, total=False):
     user_message: str
+    route: str
+    route_reason: str
+    retrieval_mode: str
     should_retrieve: bool
     rag_result: dict[str, Any]
     runtime_hints: list[str]
@@ -30,125 +34,62 @@ class PlannerGraphState(TypedDict, total=False):
     uses_langgraph: bool
     uses_langchain_tools: bool
     should_gate_rag_answer: bool
+    should_delegate_legacy_loop: bool
+    terminal_response: str
 
 
-_RAG_INTENT_KEYWORDS = (
-    "复习",
-    "考试",
-    "备考",
-    "考点",
-    "简答",
-    "论述",
-    "解释",
-    "说明",
-    "为什么",
-    "是什么",
-    "怎么答",
-    "怎么回答",
-    "作用",
-    "意义",
-    "关系",
-    "区别",
-    "总结",
-    "梳理",
-    "范围",
-    "薄弱",
-    "unit",
-    "作业",
-    "报告",
-    "大作业",
-    "计划",
-    "宪法",
-    "冷战",
-    "五四",
-    "杜鲁门",
-    "马歇尔",
-    "北约",
-    "华约",
-    "机器学习",
-    "欠拟合",
-    "过拟合",
-)
-_RAG_TOOL_WORKFLOW_KEYWORDS = (
-    "复习计划",
-    "学习计划",
-    "作业计划",
-    "帮我做个计划",
-    "帮我做一个计划",
-    "帮我安排",
-    "帮我规划",
-    "给我安排",
-    "请安排",
-    "安排一下",
-    "提醒",
-    "日程",
-    "课表",
-    "导入",
-    "上传",
-    "file_id",
-)
-_RAG_TOOL_ACTION_KEYWORDS = (
-    "安排",
-    "创建",
-    "新建",
-    "写入",
-    "加入",
-    "添加",
-    "修改",
-    "删除",
-    "取消",
-)
-_RAG_TOOL_OBJECT_KEYWORDS = (
-    "任务",
-    "提醒",
-    "日程",
-    "课表",
-    "计划",
-    "待办",
-    "作业",
-    "复习",
-)
 RAG_INSUFFICIENT_EVIDENCE_TEXT = "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
 
 
-def _looks_like_rag_answer_request(message: str) -> bool:
-    compact = (message or "").strip().lower().replace(" ", "")
-    if not compact:
-        return False
-    if any(keyword in compact for keyword in _RAG_TOOL_WORKFLOW_KEYWORDS):
-        return False
-    if any(action in compact for action in _RAG_TOOL_ACTION_KEYWORDS) and any(
-        target in compact for target in _RAG_TOOL_OBJECT_KEYWORDS
-    ):
-        return False
-    return True
-
-
-def _load_context_node(state: PlannerGraphState) -> PlannerGraphState:
+def _route_node(state: PlannerGraphState) -> PlannerGraphState:
     message = state.get("user_message", "")
-    should_retrieve = (
-        not _looks_like_current_public_info_request(message)
-        and any(keyword in message.lower() for keyword in _RAG_INTENT_KEYWORDS)
-    )
+    decision = decide_agent_route(message)
     return {
         **state,
-        "should_retrieve": should_retrieve,
-        "should_gate_rag_answer": should_retrieve and _looks_like_rag_answer_request(message),
+        "route": decision.route.value,
+        "route_reason": decision.reason,
+        "should_retrieve": decision.should_retrieve,
+        "should_gate_rag_answer": decision.should_gate_rag_answer,
+        "retrieval_mode": decision.retrieval_mode,
         "tool_schemas": langchain_tool_schemas(langchain_assignment_tool_names()),
         "uses_langchain_tools": True,
-        "graph_nodes": [*state.get("graph_nodes", []), "load_context"],
+        "graph_nodes": [*state.get("graph_nodes", []), "route"],
     }
 
 
-def _retrieve_node(state: PlannerGraphState) -> PlannerGraphState:
-    if not state.get("should_retrieve"):
-        return {**state, "graph_nodes": [*state.get("graph_nodes", []), "skip_rag"]}
-
-    rag_result = build_rag_context(str(state.get("user_message") or ""))
+def _no_web_node(state: PlannerGraphState) -> PlannerGraphState:
     return {
         **state,
+        "should_retrieve": False,
+        "should_gate_rag_answer": False,
+        "should_delegate_legacy_loop": False,
+        "terminal_response": "no_web",
+        "graph_nodes": [*state.get("graph_nodes", []), "no_web"],
+    }
+
+
+def _retrieve_rag_node(state: PlannerGraphState) -> PlannerGraphState:
+    rag_result = build_rag_context(str(state.get("user_message") or ""))
+    decision = decide_agent_route(str(state.get("user_message") or ""), rag_result=rag_result)
+    return {
+        **state,
+        "route": decision.route.value,
+        "route_reason": decision.reason,
         "rag_result": rag_result,
-        "graph_nodes": [*state.get("graph_nodes", []), "retrieve_study_materials"],
+        "should_retrieve": decision.should_retrieve,
+        "should_gate_rag_answer": decision.should_gate_rag_answer,
+        "retrieval_mode": decision.retrieval_mode,
+        "graph_nodes": [*state.get("graph_nodes", []), "retrieve_rag"],
+    }
+
+
+def _rag_insufficient_node(state: PlannerGraphState) -> PlannerGraphState:
+    return {
+        **state,
+        "route": AgentRoute.RAG_INSUFFICIENT.value,
+        "should_delegate_legacy_loop": False,
+        "terminal_response": "rag_insufficient",
+        "graph_nodes": [*state.get("graph_nodes", []), "rag_insufficient"],
     }
 
 
@@ -172,18 +113,81 @@ def _compose_hints_node(state: PlannerGraphState) -> PlannerGraphState:
     }
 
 
+def _delegate_legacy_loop_node(state: PlannerGraphState) -> PlannerGraphState:
+    return {
+        **state,
+        "should_delegate_legacy_loop": True,
+        "graph_nodes": [*state.get("graph_nodes", []), "delegate_legacy_loop"],
+    }
+
+
+def _route_from_route_node(state: PlannerGraphState) -> str:
+    if state.get("route") == AgentRoute.NO_WEB.value:
+        return "no_web"
+    if state.get("should_retrieve"):
+        return "retrieve_rag"
+    return "delegate_legacy_loop"
+
+
+def _route_after_retrieve_node(state: PlannerGraphState) -> str:
+    rag_result = state.get("rag_result") or {}
+    if state.get("should_gate_rag_answer") and not bool(rag_result.get("evidence_sufficient")):
+        return "rag_insufficient"
+    return "compose_runtime_hints"
+
+
 def _build_graph():
     if StateGraph is None:
         return None
     graph = StateGraph(PlannerGraphState)
-    graph.add_node("load_context", _load_context_node)
-    graph.add_node("retrieve", _retrieve_node)
-    graph.add_node("compose_hints", _compose_hints_node)
-    graph.set_entry_point("load_context")
-    graph.add_edge("load_context", "retrieve")
-    graph.add_edge("retrieve", "compose_hints")
-    graph.add_edge("compose_hints", END)
+    graph.add_node("route", _route_node)
+    graph.add_node("no_web", _no_web_node)
+    graph.add_node("retrieve_rag", _retrieve_rag_node)
+    graph.add_node("compose_runtime_hints", _compose_hints_node)
+    graph.add_node("rag_insufficient", _rag_insufficient_node)
+    graph.add_node("delegate_legacy_loop", _delegate_legacy_loop_node)
+    graph.set_entry_point("route")
+    graph.add_conditional_edges(
+        "route",
+        _route_from_route_node,
+        {
+            "no_web": "no_web",
+            "retrieve_rag": "retrieve_rag",
+            "delegate_legacy_loop": "delegate_legacy_loop",
+        },
+    )
+    graph.add_conditional_edges(
+        "retrieve_rag",
+        _route_after_retrieve_node,
+        {
+            "rag_insufficient": "rag_insufficient",
+            "compose_runtime_hints": "compose_runtime_hints",
+        },
+    )
+    graph.add_edge("compose_runtime_hints", "delegate_legacy_loop")
+    graph.add_edge("no_web", END)
+    graph.add_edge("rag_insufficient", END)
+    graph.add_edge("delegate_legacy_loop", END)
     return graph.compile()
+
+
+def get_langgraph_router_shell_mermaid() -> str:
+    compiled_graph = _build_graph()
+    if compiled_graph is None:
+        return (
+            "graph TD\n"
+            "  __start__ --> route\n"
+            "  route --> no_web\n"
+            "  route --> retrieve_rag\n"
+            "  route --> delegate_legacy_loop\n"
+            "  retrieve_rag --> rag_insufficient\n"
+            "  retrieve_rag --> compose_runtime_hints\n"
+            "  compose_runtime_hints --> delegate_legacy_loop\n"
+            "  no_web --> __end__\n"
+            "  rag_insufficient --> __end__\n"
+            "  delegate_legacy_loop --> __end__"
+        )
+    return compiled_graph.get_graph().draw_mermaid()
 
 
 async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
@@ -198,9 +202,17 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
     if compiled_graph is not None:
         return await compiled_graph.ainvoke(initial_state)
 
-    state = _load_context_node(initial_state)
-    state = _retrieve_node(state)
-    return _compose_hints_node(state)
+    state = _route_node(initial_state)
+    route_target = _route_from_route_node(state)
+    if route_target == "no_web":
+        return _no_web_node(state)
+    if route_target == "delegate_legacy_loop":
+        return _delegate_legacy_loop_node(state)
+    state = _retrieve_rag_node(state)
+    if _route_after_retrieve_node(state) == "rag_insufficient":
+        return _rag_insufficient_node(state)
+    state = _compose_hints_node(state)
+    return _delegate_legacy_loop_node(state)
 
 
 async def run_langgraph_agent_loop(
@@ -214,6 +226,15 @@ async def run_langgraph_agent_loop(
 
     state = await prepare_langgraph_state(user_message)
     rag_result = state.get("rag_result") or {}
+    if state.get("terminal_response") == "no_web":
+        message_id = str(uuid.uuid4())
+        text = _current_public_info_unavailable_text()
+        await _save_message(db, session_id, "user", user_message)
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
     if state.get("should_retrieve"):
         yield {
             "type": "tool_call",
@@ -270,7 +291,7 @@ async def run_langgraph_agent_loop(
                 "evidence_terms": rag_result.get("evidence_terms"),
             },
         }
-        if state.get("should_gate_rag_answer") and not bool(rag_result.get("evidence_sufficient")):
+        if state.get("terminal_response") == "rag_insufficient":
             message_id = str(uuid.uuid4())
             await _save_message(db, session_id, "user", user_message)
             yield {

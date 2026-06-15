@@ -8,7 +8,7 @@ from app.agent.contracts import (
     AgentRoute,
     decide_agent_route,
 )
-from app.agent.langgraph_loop import _load_context_node
+from app.agent.langgraph_loop import _route_node
 
 
 def test_router_contract_prioritizes_no_web_before_rag_or_llm():
@@ -58,7 +58,7 @@ def test_router_contract_matches_current_langgraph_retrieval_side_channel():
     message = "下周四有大学英语3考试，帮我安排一下"
 
     decision = decide_agent_route(message, rag_result={"evidence_sufficient": False})
-    state = _load_context_node({"user_message": message, "runtime_hints": [], "graph_nodes": []})
+    state = _route_node({"user_message": message, "runtime_hints": [], "graph_nodes": []})
 
     assert decision.route == AgentRoute.STUDY_PLAN
     assert decision.should_retrieve == state["should_retrieve"] is True
@@ -69,7 +69,7 @@ def test_router_contract_matches_current_langgraph_rag_answer_gate_flags():
     message = "机器学习里的过拟合是什么"
 
     decision = decide_agent_route(message, rag_result={"evidence_sufficient": False})
-    state = _load_context_node({"user_message": message, "runtime_hints": [], "graph_nodes": []})
+    state = _route_node({"user_message": message, "runtime_hints": [], "graph_nodes": []})
 
     assert decision.route == AgentRoute.RAG_INSUFFICIENT
     assert decision.should_retrieve == state["should_retrieve"] is True

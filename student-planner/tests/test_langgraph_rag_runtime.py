@@ -7,7 +7,11 @@ from sqlalchemy import select
 
 from app.agent import rag as rag_module
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
-from app.agent.langgraph_loop import prepare_langgraph_state, run_langgraph_agent_loop
+from app.agent.langgraph_loop import (
+    get_langgraph_router_shell_mermaid,
+    prepare_langgraph_state,
+    run_langgraph_agent_loop,
+)
 from app.agent.loop import (
     _looks_like_task_write_context,
     _should_require_task_tool_response,
@@ -485,16 +489,159 @@ def test_review_qa_is_not_forced_into_task_write_context():
     assert _looks_like_task_write_context(["下周四有大学英语3考试，帮我做复习计划"]) is True
 
 
+def test_langgraph_router_shell_mermaid_exposes_route_nodes():
+    mermaid = get_langgraph_router_shell_mermaid()
+
+    for node_name in (
+        "route",
+        "no_web",
+        "retrieve_rag",
+        "compose_runtime_hints",
+        "rag_insufficient",
+        "delegate_legacy_loop",
+    ):
+        assert node_name in mermaid
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_routes_no_web_inside_graph(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: (_ for _ in ()).throw(AssertionError("no-web should not retrieve RAG")),
+    )
+
+    state = await prepare_langgraph_state("最新政策是什么")
+
+    assert state["route"] == "no_web"
+    assert state["should_retrieve"] is False
+    assert state["should_delegate_legacy_loop"] is False
+    assert state["terminal_response"] == "no_web"
+    assert state["graph_nodes"] == ["route", "no_web"]
+
+
 @pytest.mark.asyncio
 async def test_prepare_langgraph_state_adds_rag_runtime_hint():
     state = await prepare_langgraph_state("改革开放是什么时候开始的")
 
+    assert state["route"] == "rag_qa"
     assert state["should_retrieve"] is True
-    assert "retrieve_study_materials" in state["graph_nodes"]
+    assert "retrieve_rag" in state["graph_nodes"]
+    assert "compose_runtime_hints" in state["graph_nodes"]
+    assert "delegate_legacy_loop" in state["graph_nodes"]
+    assert state["should_delegate_legacy_loop"] is True
     assert state["uses_langchain_tools"] is True
     assert any("RAG 检索上下文" in hint for hint in state["runtime_hints"])
     assert any("复习问答" in hint for hint in state["runtime_hints"])
     assert any("不要在结尾追加" in hint for hint in state["runtime_hints"])
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_routes_rag_insufficient_inside_graph(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: {
+            "hits": [],
+            "context": "",
+            "evidence_sufficient": False,
+            "evidence_count": 0,
+            "evidence_reason": "no_relevant_local_evidence",
+        },
+    )
+
+    state = await prepare_langgraph_state("量子计算的退相干错误怎么解释")
+
+    assert state["route"] == "rag_insufficient"
+    assert state["should_gate_rag_answer"] is True
+    assert state["should_delegate_legacy_loop"] is False
+    assert state["terminal_response"] == "rag_insufficient"
+    assert state["graph_nodes"] == ["route", "retrieve_rag", "rag_insufficient"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_keeps_study_plan_retrieval_non_gating_delegate(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: {
+            "hits": [],
+            "context": "",
+            "evidence_sufficient": False,
+            "evidence_count": 0,
+            "evidence_reason": "no_relevant_local_evidence",
+        },
+    )
+
+    state = await prepare_langgraph_state("下周四有大学英语3考试，帮我安排一下")
+
+    assert state["route"] == "study_plan"
+    assert state["should_retrieve"] is True
+    assert state["should_gate_rag_answer"] is False
+    assert state["should_delegate_legacy_loop"] is True
+    assert state["runtime_hints"] == []
+    assert state["graph_nodes"] == [
+        "route",
+        "retrieve_rag",
+        "compose_runtime_hints",
+        "delegate_legacy_loop",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_keeps_schedule_import_route_on_legacy_delegate(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: (_ for _ in ()).throw(AssertionError("schedule import should not retrieve RAG")),
+    )
+
+    state = await prepare_langgraph_state("上传课表 file_id=abc123 请导入")
+
+    assert state["route"] == "schedule_import"
+    assert state["should_retrieve"] is False
+    assert state["should_gate_rag_answer"] is False
+    assert state["should_delegate_legacy_loop"] is True
+    assert state["graph_nodes"] == ["route", "delegate_legacy_loop"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_keeps_reminder_route_non_gating_with_rag_side_channel(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: {
+            "hits": [],
+            "context": "",
+            "evidence_sufficient": False,
+            "evidence_count": 0,
+            "evidence_reason": "no_relevant_local_evidence",
+        },
+    )
+
+    state = await prepare_langgraph_state("明天下午3点提醒我复习线代")
+
+    assert state["route"] == "tool_workflow"
+    assert state["should_retrieve"] is True
+    assert state["should_gate_rag_answer"] is False
+    assert state["should_delegate_legacy_loop"] is True
+    assert state["graph_nodes"] == [
+        "route",
+        "retrieve_rag",
+        "compose_runtime_hints",
+        "delegate_legacy_loop",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_keeps_course_maintenance_route_on_legacy_delegate(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: (_ for _ in ()).throw(AssertionError("course maintenance should not retrieve RAG")),
+    )
+
+    state = await prepare_langgraph_state("把自然语言处理课程改名为 NLP")
+
+    assert state["route"] == "course_maintenance"
+    assert state["should_retrieve"] is False
+    assert state["should_gate_rag_answer"] is False
+    assert state["should_delegate_legacy_loop"] is True
+    assert state["graph_nodes"] == ["route", "delegate_legacy_loop"]
 
 
 @pytest.mark.asyncio
@@ -809,6 +956,10 @@ async def test_langgraph_agent_loop_preserves_no_web_guard_for_current_public_ev
         patch(
             "app.agent.loop.chat_completion",
             side_effect=AssertionError("Current public event questions should not reach the LLM fallback"),
+        ),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Current public event questions should not delegate to legacy loop"),
         ),
     ):
         async with TestSession() as db:

@@ -9,9 +9,10 @@ LangGraph should own orchestration: route selection, state transitions, loop lim
 The current runtime is only partially LangGraph-based:
 
 1. `chat.py` chooses `run_langgraph_agent_loop` when `SP_AGENT_RUNTIME=langgraph`.
-2. `langgraph_loop.py` runs a small graph for RAG/context preparation.
-3. RAG evidence gate can return directly before free LLM fallback.
-4. Non-gated paths delegate to the proven legacy `run_agent_loop()`.
+2. `langgraph_loop.py` now exposes a Router Shell V1 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, and `delegate_legacy_loop` nodes.
+3. `route` conditionally sends no-web requests directly to the no-web terminal response, sends RAG/context candidates through retrieval, and sends non-RAG requests to legacy delegation.
+4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; all non-gated paths continue through hints and `delegate_legacy_loop`.
+5. Tool workflows, schedule import, course maintenance, study/work plans, `ask_user` pause/resume, preflight, and writes still live in the proven legacy `run_agent_loop()`.
 
 ## Router Contract
 
@@ -27,6 +28,22 @@ Priority is part of the contract. Later graph edges must keep this order. RAG re
 8. `plain_chat`: no tool/RAG route. Next step: text-only LLM response within normal no-web constraints.
 
 `decide_agent_route()` in `contracts.py` is the executable anchor for this priority. It is intentionally conservative and does not execute tools or call a model.
+
+Router Shell V1 graph shape:
+
+```mermaid
+graph TD
+  __start__ --> route
+  route -.-> no_web
+  route -.-> retrieve_rag
+  route -.-> delegate_legacy_loop
+  retrieve_rag -.-> rag_insufficient
+  retrieve_rag -.-> compose_runtime_hints
+  compose_runtime_hints --> delegate_legacy_loop
+  no_web --> __end__
+  rag_insufficient --> __end__
+  delegate_legacy_loop --> __end__
+```
 
 ## State Schema
 
