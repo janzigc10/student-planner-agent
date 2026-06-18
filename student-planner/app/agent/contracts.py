@@ -42,6 +42,7 @@ class PendingConfirmation:
     question: str
     options: tuple[str, ...]
     data: dict[str, Any] | None = None
+    allowed_tool_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,14 +106,15 @@ CONFIRMATION_REQUIRED_TOOLS = (
 )
 
 CONFIRMATION_ENFORCEMENT_GAP = (
-    "Legacy execute_tool dispatchers do not validate a confirmation ticket. "
-    "Current confirmation is enforced by local shortcuts, prompts, preflight, "
-    "and regression tests; a LangGraph-native migration must make it stateful "
-    "with pending_confirmation/db_write_plan before write tools execute."
+    "execute_tool remains a direct dispatcher for non-agent callers. Agent loop "
+    "database writes must validate a pending_confirmation/db_write_plan ticket "
+    "before write tools execute; later LangGraph-native tool nodes must preserve "
+    "that stateful gate."
 )
 
 CONFIRMATION_STATE_V1_PILOTS = (
     "schedule_import",
+    "agent_loop_write_tools",
 )
 
 PLAN_REVIEW_TOOLS = (

@@ -111,11 +111,13 @@ def test_confirmation_contract_covers_database_and_scheduler_writes():
     }
 
     assert expected <= set(CONFIRMATION_REQUIRED_TOOLS)
-    assert "do not validate a confirmation ticket" in CONFIRMATION_ENFORCEMENT_GAP
+    assert "execute_tool remains a direct dispatcher" in CONFIRMATION_ENFORCEMENT_GAP
+    assert "pending_confirmation/db_write_plan ticket" in CONFIRMATION_ENFORCEMENT_GAP
 
 
 def test_confirmation_state_v1_marks_schedule_import_pilot():
     assert "schedule_import" in CONFIRMATION_STATE_V1_PILOTS
+    assert "agent_loop_write_tools" in CONFIRMATION_STATE_V1_PILOTS
 
 
 def test_state_and_golden_matrix_contracts_cover_migration_surface():

@@ -1022,7 +1022,7 @@ def test_chat_runtime_selector_can_use_langgraph(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_review_override_fallback_writes_tasks_when_pending_generator_is_gone(setup_db):
+async def test_review_override_fallback_without_pending_confirmation_does_not_write(setup_db):
     async with TestSession() as db:
         user = User(id="user-review-fallback", username="review-fallback", hashed_password="x")
         db.add(user)
@@ -1050,12 +1050,6 @@ async def test_review_override_fallback_writes_tasks_when_pending_generator_is_g
         result = await db.execute(select(Task).where(Task.user_id == user.id))
         tasks = result.scalars().all()
 
-    assert [event["type"] for event in events[:2]] == ["tool_call", "tool_result"]
-    assert any(
-        event["type"] == "result"
-        and event["data"]["kind"] == "plan_write"
-        and event["data"]["created_count"] == 1
-        for event in events
-    )
-    assert len(tasks) == 1
-    assert tasks[0].title == "大学英语3 - 听力专项"
+    assert [event["type"] for event in events] == ["error", "done"]
+    assert "确认状态已失效" in events[0]["message"]
+    assert list(tasks) == []

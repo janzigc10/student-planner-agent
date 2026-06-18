@@ -7,7 +7,7 @@ from typing import Any, AsyncGenerator, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.contracts import AgentRoute, DBWritePlan, PendingConfirmation
+from app.agent.contracts import AgentRoute, CONFIRMATION_REQUIRED_TOOLS, DBWritePlan, PendingConfirmation
 from app.agent.guardrails import (
     GuardrailViolation,
     check_consecutive_ask_user,
@@ -190,6 +190,7 @@ _PLAIN_TEXT_ASK_INFO_MARKERS = (
     "提前多久",
 )
 _TASK_WRITE_TOOLS = {"create_task", "update_task", "complete_task", "set_reminder"}
+_CONFIRMED_DB_WRITE_TOOLS = set(CONFIRMATION_REQUIRED_TOOLS)
 _TEXT_ONLY_STREAM_AFTER_TOOLS = {"recall_memory"}
 _TOOL_INTENT_KEYWORDS = (
     *_SCHEDULE_IMPORT_KEYWORDS,
@@ -1665,6 +1666,198 @@ def _build_schedule_import_write_state(
     return pending_confirmation, db_write_plan
 
 
+def _route_for_db_write_tool(tool_name: str) -> str:
+    if tool_name in {"add_course", "update_course", "delete_course", "bulk_import_courses", "save_period_times"}:
+        return AgentRoute.COURSE_MAINTENANCE.value if tool_name != "bulk_import_courses" else AgentRoute.SCHEDULE_IMPORT.value
+    if tool_name in {"create_task", "update_task", "complete_task", "set_reminder"}:
+        return AgentRoute.TOOL_WORKFLOW.value
+    return AgentRoute.TOOL_WORKFLOW.value
+
+
+def _build_pending_confirmation(
+    *,
+    route: str,
+    tool_name: str,
+    question: str,
+    ask_type: str = "confirm",
+    options: tuple[str, ...] = ("确认", "取消"),
+    data: dict[str, Any] | None = None,
+    allowed_tool_names: tuple[str, ...] | None = None,
+) -> PendingConfirmation:
+    return PendingConfirmation(
+        confirmation_id=f"{route}:{uuid.uuid4().hex}",
+        route=route,
+        tool_name=tool_name,
+        ask_type=ask_type,
+        question=question,
+        options=options,
+        data=data,
+        allowed_tool_names=allowed_tool_names or (),
+    )
+
+
+def _build_db_write_plan(
+    *,
+    pending_confirmation: PendingConfirmation,
+    tool_name: str,
+    args: dict[str, Any],
+    description: str | None = None,
+) -> DBWritePlan:
+    return DBWritePlan(
+        confirmation_id=pending_confirmation.confirmation_id,
+        route=pending_confirmation.route,
+        tool_name=tool_name,
+        args=dict(args),
+        description=description or f"Confirmed {tool_name} database write.",
+    )
+
+
+def _confirmed_tool_scope(pending_confirmation: PendingConfirmation) -> tuple[str, ...]:
+    if pending_confirmation.allowed_tool_names:
+        return pending_confirmation.allowed_tool_names
+    return (pending_confirmation.tool_name,)
+
+
+def _is_write_authorized_answer(pending_confirmation: PendingConfirmation, answer: str) -> bool:
+    if _is_confirmed_answer(answer):
+        return True
+    if pending_confirmation.ask_type == "review" and str(answer or "").strip():
+        return not _is_cancelled_answer(answer)
+    return False
+
+
+def _infer_confirmed_write_scope(
+    *,
+    question: str,
+    data: Any,
+    confirmation_answer: str,
+) -> tuple[str, ...]:
+    answer_is_write_authorizing = _is_confirmed_answer(confirmation_answer) or (
+        not _is_cancelled_answer(confirmation_answer)
+        and _looks_like_missing_write_info_question(question)
+    )
+    if not answer_is_write_authorizing:
+        return ()
+
+    if isinstance(data, dict):
+        actions = data.get("actions")
+        if isinstance(actions, list):
+            tools: list[str] = []
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                action_name = str(action.get("action") or "")
+                if action_name == "update":
+                    tools.append("update_course")
+                elif action_name == "delete":
+                    tools.append("delete_course")
+            if tools:
+                return tuple(dict.fromkeys(tools))
+
+        tasks = data.get("tasks")
+        if isinstance(tasks, list):
+            return ("create_task",)
+
+    compact_question = str(question or "").lower().replace(" ", "")
+    if not compact_question:
+        return ()
+
+    if "课程" in compact_question or "课表" in compact_question or "course" in compact_question:
+        course_tools: list[str] = []
+        if any(marker in compact_question for marker in ("修改", "改名", "改成", "改为", "合并", "update", "rename", "merge")):
+            course_tools.append("update_course")
+        if any(marker in compact_question for marker in ("删除", "删掉", "移除", "delete", "remove")):
+            course_tools.append("delete_course")
+        if course_tools:
+            return tuple(dict.fromkeys(course_tools))
+
+    if (
+        "任务" in compact_question
+        or "日程" in compact_question
+        or "提醒" in compact_question
+        or "task" in compact_question
+        or "todo" in compact_question
+        or "reminder" in compact_question
+    ):
+        task_tools: list[str] = []
+        if any(marker in compact_question for marker in ("创建", "新建", "新增", "写入", "加入", "create", "new", "add")):
+            task_tools.append("create_task")
+        if any(
+            marker in compact_question
+            for marker in ("修改", "更新", "改到", "改成", "调整", "取消提醒", "不提醒", "update", "updating", "change", "withoutareminder")
+        ):
+            task_tools.append("update_task")
+        if _looks_like_missing_write_info_question(question) and not any(
+            tool in task_tools for tool in ("create_task", "update_task")
+        ):
+            task_tools.insert(0, "create_task")
+        if "提醒" in compact_question:
+            task_tools.append("set_reminder")
+        if "reminder" in compact_question:
+            task_tools.append("set_reminder")
+        if task_tools:
+            return tuple(dict.fromkeys(task_tools))
+
+    if _looks_like_missing_write_info_question(question):
+        task_tools = ["create_task"]
+        if "提醒" in compact_question or "reminder" in compact_question or "提醒" in confirmation_answer or "reminder" in confirmation_answer.lower():
+            task_tools.append("set_reminder")
+        return tuple(dict.fromkeys(task_tools))
+
+    return ()
+
+
+def _looks_like_missing_write_info_question(question: str) -> bool:
+    compact_question = str(question or "").lower().replace(" ", "")
+    if not compact_question:
+        return False
+    return any(
+        marker in compact_question
+        for marker in (
+            "哪天",
+            "几点",
+            "什么时候",
+            "请告诉我",
+            "请补充",
+            "whichdate",
+            "whatdate",
+            "whatday",
+            "whattime",
+            "when",
+            "date",
+            "time",
+        )
+    )
+
+
+def _build_confirmed_write_state_from_ask(
+    *,
+    tool_args: dict[str, Any],
+    ask_result: dict[str, Any],
+    confirmation_answer: str,
+) -> PendingConfirmation | None:
+    question = str(ask_result.get("question") or tool_args.get("question") or "")
+    data = ask_result.get("data") if ask_result.get("data") is not None else tool_args.get("data")
+    allowed_tool_names = _infer_confirmed_write_scope(
+        question=question,
+        data=data,
+        confirmation_answer=confirmation_answer,
+    )
+    if not allowed_tool_names:
+        return None
+
+    route = _route_for_db_write_tool(allowed_tool_names[0])
+    return _build_pending_confirmation(
+        route=route,
+        tool_name=allowed_tool_names[0],
+        question=question,
+        ask_type=str(ask_result.get("type") or tool_args.get("type") or "confirm"),
+        options=tuple(str(option) for option in (ask_result.get("options") or tool_args.get("options") or ())),
+        data=data if isinstance(data, dict) else None,
+        allowed_tool_names=allowed_tool_names,
+    )
+
+
 async def _execute_confirmed_db_write_plan(
     *,
     pending_confirmation: PendingConfirmation | None,
@@ -1679,9 +1872,11 @@ async def _execute_confirmed_db_write_plan(
         return {"error": "Missing database write plan for confirmed write."}
     if pending_confirmation.confirmation_id != db_write_plan.confirmation_id:
         return {"error": "Confirmation state does not match database write plan."}
-    if pending_confirmation.tool_name != db_write_plan.tool_name:
+    if pending_confirmation.route != db_write_plan.route:
         return {"error": "Confirmation state does not match database write plan."}
-    if not _is_confirmed_answer(confirmation_answer):
+    if db_write_plan.tool_name not in _confirmed_tool_scope(pending_confirmation):
+        return {"error": "Confirmation state does not match database write plan."}
+    if not _is_write_authorized_answer(pending_confirmation, confirmation_answer):
         return {"status": "cancelled", "message": "Write cancelled before database execution."}
     return await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
 
@@ -2066,12 +2261,27 @@ async def _run_course_merge_shortcut(
     elif kind == "merge":
         question = "我准备把这些重复课程合并成每个时段 1 条记录。确认后我就直接处理。"
 
+    allowed_tool_names = tuple(
+        dict.fromkeys(
+            "update_course" if str(item.get("action") or "") == "update" else "delete_course"
+            for item in actions
+            if str(item.get("action") or "") in {"update", "delete"}
+        )
+    )
+    pending_confirmation = _build_pending_confirmation(
+        route=AgentRoute.COURSE_MAINTENANCE.value,
+        tool_name=allowed_tool_names[0] if allowed_tool_names else "update_course",
+        question=question,
+        ask_type="review",
+        data=review_data,
+        allowed_tool_names=allowed_tool_names,
+    )
     confirm_answer = yield {
         "type": "ask_user",
-        "ask_type": "review",
-        "question": question,
-        "options": ["确认", "取消"],
-        "data": review_data,
+        "ask_type": pending_confirmation.ask_type,
+        "question": pending_confirmation.question,
+        "options": list(pending_confirmation.options),
+        "data": pending_confirmation.data,
     }
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
@@ -2092,7 +2302,18 @@ async def _run_course_merge_shortcut(
         if action == "update" and course_id:
             update_args = {"course_id": course_id, **dict(item.get("updates") or {})}
             yield {"type": "tool_call", "name": "update_course", "args": update_args}
-            update_result = await execute_tool("update_course", update_args, db, user.id)
+            update_result = await _execute_confirmed_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                db_write_plan=_build_db_write_plan(
+                    pending_confirmation=pending_confirmation,
+                    tool_name="update_course",
+                    args=update_args,
+                    description="Confirmed course update.",
+                ),
+                confirmation_answer=str(confirm_answer or ""),
+                db=db,
+                user_id=user.id,
+            )
             yield {"type": "tool_result", "name": "update_course", "result": update_result}
             step += 1
             await _persist_local_tool_step(db, session_id, user.id, step, "update_course", update_args, update_result)
@@ -2105,7 +2326,18 @@ async def _run_course_merge_shortcut(
         if action == "delete" and course_id:
             delete_args = {"course_id": course_id}
             yield {"type": "tool_call", "name": "delete_course", "args": delete_args}
-            delete_result = await execute_tool("delete_course", delete_args, db, user.id)
+            delete_result = await _execute_confirmed_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                db_write_plan=_build_db_write_plan(
+                    pending_confirmation=pending_confirmation,
+                    tool_name="delete_course",
+                    args=delete_args,
+                    description="Confirmed course delete.",
+                ),
+                confirmation_answer=str(confirm_answer or ""),
+                db=db,
+                user_id=user.id,
+            )
             yield {"type": "tool_result", "name": "delete_course", "result": delete_result}
             step += 1
             await _persist_local_tool_step(db, session_id, user.id, step, "delete_course", delete_args, delete_result)
@@ -2178,17 +2410,25 @@ async def _run_missing_task_create_shortcut(
         else:
             reminder_text = f"提前{reminder_slot.advance_minutes}分钟提醒"
 
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": "confirm",
-        "question": "请确认是否创建这个任务。",
-        "options": ["确认", "取消"],
-        "data": {
+    pending_confirmation = _build_pending_confirmation(
+        route=AgentRoute.TOOL_WORKFLOW.value,
+        tool_name="create_task",
+        question="请确认是否创建这个任务。",
+        ask_type="confirm",
+        data={
             "title": title,
             "scheduled_date": schedule["scheduled_date"],
             "time": f"{schedule['start_time']}-{schedule['end_time']}",
             "reminder": reminder_text,
         },
+        allowed_tool_names=("create_task",),
+    )
+    confirm_answer = yield {
+        "type": "ask_user",
+        "ask_type": pending_confirmation.ask_type,
+        "question": pending_confirmation.question,
+        "options": list(pending_confirmation.options),
+        "data": pending_confirmation.data,
     }
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
@@ -2199,7 +2439,18 @@ async def _run_missing_task_create_shortcut(
         return
 
     yield {"type": "tool_call", "name": "create_task", "args": create_args}
-    create_result = await execute_tool("create_task", create_args, db, user.id)
+    create_result = await _execute_confirmed_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        db_write_plan=_build_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            tool_name="create_task",
+            args=create_args,
+            description="Confirmed missing-task create shortcut.",
+        ),
+        confirmation_answer=str(confirm_answer or ""),
+        db=db,
+        user_id=user.id,
+    )
     yield {"type": "tool_result", "name": "create_task", "result": create_result}
     await _persist_local_tool_step(db, session_id, user.id, 1, "create_task", create_args, create_result)
 
@@ -2337,6 +2588,7 @@ async def _run_tonight_review_shortcut(
         session_id,
         db,
         step,
+        AgentRoute.STUDY_PLAN.value,
         _normalize_study_plan_tasks,
         "复习任务",
         "今晚复习计划已经生成，但里面没有可写入日程的完整任务时间。请调整后再试。",
@@ -2362,6 +2614,7 @@ async def _run_confirmed_plan_write(
     session_id: str,
     db: AsyncSession,
     start_step: int,
+    route: str,
     normalize_tasks: Callable[[Any], list[dict[str, Any]]],
     task_label: str,
     empty_text: str,
@@ -2376,12 +2629,21 @@ async def _run_confirmed_plan_write(
         yield {"type": "done"}
         return
 
+    pending_confirmation = _build_pending_confirmation(
+        route=route,
+        tool_name="create_task",
+        question=review_question.format(count=len(tasks)),
+        ask_type="review",
+        data=_study_plan_review_data(tasks),
+        allowed_tool_names=("create_task",),
+    )
+
     confirm_answer = yield {
         "type": "ask_user",
-        "ask_type": "review",
-        "question": review_question.format(count=len(tasks)),
-        "options": ["确认", "取消"],
-        "data": _study_plan_review_data(tasks),
+        "ask_type": pending_confirmation.ask_type,
+        "question": pending_confirmation.question,
+        "options": list(pending_confirmation.options),
+        "data": pending_confirmation.data,
     }
     if confirm_answer is None:
         yield {"type": "done"}
@@ -2397,6 +2659,14 @@ async def _run_confirmed_plan_write(
     if review_override is not None:
         override_tasks = normalize_tasks(review_override.get("tasks"))
         tasks = override_tasks
+        pending_confirmation = _build_pending_confirmation(
+            route=route,
+            tool_name="create_task",
+            question=review_question.format(count=len(tasks)),
+            ask_type="review",
+            data=_study_plan_review_data(tasks),
+            allowed_tool_names=("create_task",),
+        )
         if not tasks:
             message_id = str(uuid.uuid4())
             text = f"你已经删除了全部{task_label}，这次没有写入日程。"
@@ -2421,7 +2691,18 @@ async def _run_confirmed_plan_write(
     for task_args in tasks:
         step += 1
         yield {"type": "tool_call", "name": "create_task", "args": task_args}
-        create_result = await execute_tool("create_task", task_args, db, user.id)
+        create_result = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            db_write_plan=_build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="create_task",
+                args=task_args,
+                description=f"Write confirmed {task_label}.",
+            ),
+            confirmation_answer=str(confirm_answer or ""),
+            db=db,
+            user_id=user.id,
+        )
         yield {"type": "tool_result", "name": "create_task", "result": create_result}
         await _persist_local_tool_step(
             db,
@@ -2468,7 +2749,18 @@ async def _run_confirmed_plan_write(
 
         step += 1
         yield {"type": "tool_call", "name": "create_task", "args": rescheduled_args}
-        retry_result = await execute_tool("create_task", rescheduled_args, db, user.id)
+        retry_result = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            db_write_plan=_build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="create_task",
+                args=rescheduled_args,
+                description=f"Write rescheduled confirmed {task_label}.",
+            ),
+            confirmation_answer=str(confirm_answer or ""),
+            db=db,
+            user_id=user.id,
+        )
         yield {"type": "tool_result", "name": "create_task", "result": retry_result}
         await _persist_local_tool_step(
             db,
@@ -2530,6 +2822,7 @@ def _run_confirmed_study_plan_write(
         session_id,
         db,
         start_step,
+        AgentRoute.STUDY_PLAN.value,
         _normalize_study_plan_tasks,
         "复习任务",
         "复习计划已经生成，但里面没有可写入日程的完整任务时间。请补充考试范围或每日可复习时间后再试。",
@@ -2551,6 +2844,7 @@ def _run_confirmed_work_plan_write(
         session_id,
         db,
         start_step,
+        AgentRoute.STUDY_PLAN.value,
         _normalize_work_plan_tasks,
         "作业任务",
         "作业计划已经生成，但里面没有可写入日程的完整任务时间。请补充截止日期、交付要求或每日可投入时间后再试。",
@@ -2577,27 +2871,11 @@ async def run_review_override_plan_write(
         yield {"type": "done"}
         return
 
-    shortcut = _run_confirmed_plan_write(
-        review_override.get("tasks"),
-        user,
-        session_id,
-        db,
-        start_step,
-        _normalize_study_plan_tasks,
-        "计划任务",
-        "计划已经生成，但里面没有可写入日程的完整任务时间。请调整后再试。",
-        "我已经拆出 {count} 条计划任务。确认后我会把它们写入你的日程。",
-        "好的，我先不写入这些任务。你调整后再告诉我。",
-    )
-    try:
-        event = await shortcut.__anext__()
-        if event["type"] == "ask_user":
-            event = await shortcut.asend(confirm_answer)
-        while True:
-            yield event
-            event = await shortcut.__anext__()
-    except StopAsyncIteration:
-        pass
+    yield {
+        "type": "error",
+        "message": "当前确认状态已失效，请重新发送消息生成新的计划确认卡片。",
+    }
+    yield {"type": "done"}
 
 
 def _work_plan_date_range(due_date: str) -> tuple[str, str]:
@@ -2843,12 +3121,20 @@ async def _run_plan_adjustment_shortcut(
         yield {"type": "done"}
         return
 
+    pending_confirmation = _build_pending_confirmation(
+        route=AgentRoute.STUDY_PLAN.value,
+        tool_name="update_task",
+        question=f"我找到 {len(updates)} 条需要压缩的「{query}」任务。确认后我会把它们调整到每天最多 {daily_limit} 分钟。",
+        ask_type="review",
+        data={"daily_limit_minutes": daily_limit, "tasks": updates, "count": len(updates)},
+        allowed_tool_names=("update_task",),
+    )
     confirm_answer = yield {
         "type": "ask_user",
-        "ask_type": "review",
-        "question": f"我找到 {len(updates)} 条需要压缩的「{query}」任务。确认后我会把它们调整到每天最多 {daily_limit} 分钟。",
-        "options": ["确认", "取消"],
-        "data": {"daily_limit_minutes": daily_limit, "tasks": updates, "count": len(updates)},
+        "ask_type": pending_confirmation.ask_type,
+        "question": pending_confirmation.question,
+        "options": list(pending_confirmation.options),
+        "data": pending_confirmation.data,
     }
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
@@ -2867,7 +3153,18 @@ async def _run_plan_adjustment_shortcut(
             "end_time": update["new_end_time"],
         }
         yield {"type": "tool_call", "name": "update_task", "args": update_args}
-        update_result = await execute_tool("update_task", update_args, db, user.id)
+        update_result = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            db_write_plan=_build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="update_task",
+                args=update_args,
+                description="Confirmed plan adjustment task update.",
+            ),
+            confirmation_answer=str(confirm_answer or ""),
+            db=db,
+            user_id=user.id,
+        )
         yield {"type": "tool_result", "name": "update_task", "result": update_result}
         await _persist_local_tool_step(db, session_id, user.id, step, "update_task", update_args, update_result)
         if "error" in update_result:
@@ -3058,6 +3355,8 @@ async def run_agent_loop(
         preflight_user_texts.append(initial_study_context_text)
     error_count: dict[str, int] = {}
     last_free_slots_result: dict[str, Any] | None = None
+    pending_write_confirmation: PendingConfirmation | None = None
+    pending_write_confirmation_answer: str | None = None
     step = 0
 
     for iteration in range(MAX_ITERATIONS):
@@ -3146,6 +3445,12 @@ async def run_agent_loop(
                     preflight_reference_texts.append(question)
                 preflight_reference_texts.append(str(user_response))
                 preflight_user_texts.append(str(user_response))
+                pending_write_confirmation = _build_confirmed_write_state_from_ask(
+                    tool_args=tool_args,
+                    ask_result=result,
+                    confirmation_answer=str(user_response),
+                )
+                pending_write_confirmation_answer = str(user_response) if pending_write_confirmation else None
                 tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)
                 messages.append(
                     {
@@ -3326,9 +3631,33 @@ async def run_agent_loop(
                     preflight_reference_texts.append(question)
                 preflight_reference_texts.append(str(user_response))
                 preflight_user_texts.append(str(user_response))
+                pending_write_confirmation = _build_confirmed_write_state_from_ask(
+                    tool_args=tool_args,
+                    ask_result=result,
+                    confirmation_answer=str(user_response),
+                )
+                pending_write_confirmation_answer = str(user_response) if pending_write_confirmation else None
                 tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)
             else:
-                result = await execute_tool(tool_name, tool_args, db, user.id)
+                if tool_name in _CONFIRMED_DB_WRITE_TOOLS:
+                    result = await _execute_confirmed_db_write_plan(
+                        pending_confirmation=pending_write_confirmation,
+                        db_write_plan=(
+                            _build_db_write_plan(
+                                pending_confirmation=pending_write_confirmation,
+                                tool_name=tool_name,
+                                args=tool_args,
+                                description=f"Confirmed generic {tool_name} write.",
+                            )
+                            if pending_write_confirmation is not None
+                            else None
+                        ),
+                        confirmation_answer=pending_write_confirmation_answer or "",
+                        db=db,
+                        user_id=user.id,
+                    )
+                else:
+                    result = await execute_tool(tool_name, tool_args, db, user.id)
                 tool_result_content = compress_tool_result(tool_name, result)
                 if "error" in result:
                     error_count[tool_name] = error_count.get(tool_name, 0) + 1
