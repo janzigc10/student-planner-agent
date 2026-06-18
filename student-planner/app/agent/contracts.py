@@ -73,6 +73,7 @@ STATE_SCHEMA_FIELDS = (
     "db_write_plan",
     "stream_state",
     "step",
+    "pending_tool_call",
     "initial_study_context_text",
     "graph_nodes",
     "uses_langgraph",

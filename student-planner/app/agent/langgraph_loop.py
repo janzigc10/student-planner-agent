@@ -2,17 +2,40 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, TypedDict
 
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.contracts import AgentRoute, decide_agent_route
+from app.agent.contracts import AgentRoute, CONFIRMATION_REQUIRED_TOOLS, decide_agent_route
+from app.agent.guardrails import (
+    GuardrailViolation,
+    check_consecutive_ask_user,
+    check_max_retries,
+    check_unknown_tool,
+)
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
-from app.agent.loop import _current_public_info_unavailable_text, _save_message, run_agent_loop
+from app.agent.loop import (
+    _current_public_info_unavailable_text,
+    _log_step,
+    _save_message,
+    _to_persisted_tool_summary,
+    run_agent_loop,
+)
 from app.agent.rag import build_rag_context
+from app.agent.tool_executor import TOOL_HANDLERS, execute_tool
+from app.agent.tool_preflight import (
+    apply_tool_preflight,
+    task_tool_preflight_error,
+    tool_schema_preflight_error,
+)
+from app.agent.tools import TOOL_DEFINITIONS
 from app.models.user import User
+from app.services.context_compressor import compress_tool_result
 
 try:  # pragma: no cover - depends on optional runtime package
     from langgraph.graph import END, StateGraph
@@ -36,6 +59,194 @@ class PlannerGraphState(TypedDict, total=False):
     should_gate_rag_answer: bool
     should_delegate_legacy_loop: bool
     terminal_response: str
+    messages: list[dict[str, Any]]
+    pending_tool_call: dict[str, Any]
+    tool_history: list[str]
+    preflight_reference_texts: list[str]
+    preflight_user_texts: list[str]
+    error_count: dict[str, int]
+    events: list[dict[str, Any]]
+    step: int
+    last_tool_result: dict[str, Any]
+    last_free_slots_result: dict[str, Any]
+
+
+ToolExecutor = Callable[
+    [str, dict[str, Any], AsyncSession, str],
+    Awaitable[dict[str, Any]],
+]
+ConfirmedWriteExecutor = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+@dataclass(frozen=True)
+class GraphToolNodeRuntime:
+    db: AsyncSession
+    user_id: str
+    session_id: str
+    execute_tool_func: ToolExecutor | None = None
+    confirmed_write_executor: ConfirmedWriteExecutor | None = None
+    known_tools: set[str] | None = None
+    tool_definitions: list[dict[str, Any]] | None = None
+
+
+def _tool_node_known_tools(runtime: GraphToolNodeRuntime) -> set[str]:
+    return set(runtime.known_tools or set(TOOL_HANDLERS))
+
+
+def _tool_node_definitions(runtime: GraphToolNodeRuntime) -> list[dict[str, Any]]:
+    return list(runtime.tool_definitions or TOOL_DEFINITIONS)
+
+
+def _parse_pending_tool_call(tool_call: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
+    function = tool_call.get("function") if isinstance(tool_call, dict) else None
+    function = function if isinstance(function, dict) else {}
+    tool_name = str(function.get("name") or "")
+    raw_args = function.get("arguments") or "{}"
+    try:
+        parsed_args = json.loads(str(raw_args))
+    except json.JSONDecodeError:
+        parsed_args = {}
+    if not isinstance(parsed_args, dict):
+        parsed_args = {}
+    tool_call_id = str(tool_call.get("id") or f"call_{uuid.uuid4()}")
+    return tool_name, parsed_args, tool_call_id
+
+
+def _append_tool_node_message(
+    messages: list[dict[str, Any]],
+    tool_call_id: str,
+    payload: dict[str, Any] | str,
+) -> None:
+    content = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+    messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
+
+
+async def _execute_tool_from_graph_node(
+    tool_name: str,
+    tool_args: dict[str, Any],
+    runtime: GraphToolNodeRuntime,
+) -> dict[str, Any]:
+    if tool_name in CONFIRMATION_REQUIRED_TOOLS:
+        if runtime.confirmed_write_executor is None:
+            return {"error": "Missing confirmed write executor for database write tool."}
+        return await runtime.confirmed_write_executor(tool_name, tool_args)
+
+    executor = runtime.execute_tool_func or execute_tool
+    return await executor(tool_name, tool_args, runtime.db, runtime.user_id)
+
+
+async def run_langgraph_tool_node(
+    state: PlannerGraphState,
+    runtime: GraphToolNodeRuntime,
+) -> PlannerGraphState:
+    """Execute one LangGraph-native tool node step using graph state.
+
+    This is a node-level harness for the future full loop migration. It mirrors
+    the legacy generic tool boundary without changing the current WebSocket
+    protocol or the delegated legacy workflow shortcuts.
+    """
+
+    pending_tool_call = state.get("pending_tool_call") or {}
+    tool_name, tool_args, tool_call_id = _parse_pending_tool_call(pending_tool_call)
+    messages = list(state.get("messages", []))
+    events = list(state.get("events", []))
+    tool_history = list(state.get("tool_history", []))
+    error_count = dict(state.get("error_count", {}))
+    graph_nodes = [*state.get("graph_nodes", []), "tool_node"]
+    next_state: PlannerGraphState = {
+        **state,
+        "messages": messages,
+        "events": events,
+        "graph_nodes": graph_nodes,
+    }
+
+    try:
+        check_unknown_tool(tool_name, _tool_node_known_tools(runtime))
+        if tool_name == "ask_user":
+            check_consecutive_ask_user(tool_history + [tool_name])
+        else:
+            check_consecutive_ask_user(tool_history)
+        check_max_retries(tool_name, error_count)
+    except GuardrailViolation as exc:
+        tool_result = {"error": exc.message, "suggestion": exc.suggestion}
+        _append_tool_node_message(messages, tool_call_id, tool_result)
+        if exc.user_visible:
+            events.append({"type": "error", "message": exc.message})
+        return next_state
+
+    preflight_error = task_tool_preflight_error(tool_name, state.get("preflight_user_texts", []))
+    if preflight_error is not None:
+        _append_tool_node_message(messages, tool_call_id, preflight_error)
+        return next_state
+
+    schema_preflight_error = tool_schema_preflight_error(
+        tool_name,
+        tool_args,
+        _tool_node_definitions(runtime),
+    )
+    if schema_preflight_error is not None:
+        _append_tool_node_message(messages, tool_call_id, schema_preflight_error)
+        return next_state
+
+    tool_args, _ = apply_tool_preflight(
+        tool_name,
+        tool_args,
+        state.get("preflight_reference_texts", []),
+    )
+    if isinstance(pending_tool_call, dict):
+        pending_tool_call = {
+            **pending_tool_call,
+            "function": {
+                **(
+                    pending_tool_call.get("function")
+                    if isinstance(pending_tool_call.get("function"), dict)
+                    else {}
+                ),
+                "name": tool_name,
+                "arguments": json.dumps(tool_args, ensure_ascii=False),
+            },
+        }
+        next_state["pending_tool_call"] = pending_tool_call
+
+    events.append({"type": "tool_call", "name": tool_name, "args": tool_args})
+
+    if tool_name == "ask_user":
+        result = await _execute_tool_from_graph_node(tool_name, tool_args, runtime)
+        ask_type = str(result.get("ask_type") or result.get("type") or "text")
+        events.append({**result, "type": "ask_user", "ask_type": ask_type})
+        return {
+            **next_state,
+            "tool_history": [*tool_history, tool_name],
+            "last_tool_result": result,
+        }
+
+    result = await _execute_tool_from_graph_node(tool_name, tool_args, runtime)
+    tool_result_content = compress_tool_result(tool_name, result)
+    if "error" in result:
+        error_count[tool_name] = error_count.get(tool_name, 0) + 1
+    events.append({"type": "tool_result", "name": tool_name, "result": result})
+    await _save_message(
+        runtime.db,
+        runtime.session_id,
+        "assistant",
+        _to_persisted_tool_summary(tool_name, tool_result_content),
+        is_compressed=True,
+    )
+    _append_tool_node_message(messages, tool_call_id, tool_result_content)
+
+    step = int(state.get("step", 0)) + 1
+    await _log_step(runtime.db, runtime.user_id, runtime.session_id, step, tool_name, tool_args, result)
+
+    next_state = {
+        **next_state,
+        "tool_history": [*tool_history, tool_name],
+        "error_count": error_count,
+        "last_tool_result": result,
+        "step": step,
+    }
+    if tool_name == "get_free_slots" and isinstance(result.get("slots"), list):
+        next_state["last_free_slots_result"] = result
+    return next_state
 
 
 RAG_INSUFFICIENT_EVIDENCE_TEXT = "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"

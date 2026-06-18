@@ -68,6 +68,7 @@ A LangGraph-native state must include at least:
 - `db_write_plan`: intended write operation awaiting confirmation.
 - `stream_state`: message id, buffered deltas, and whether text deltas were emitted.
 - `step`: persisted agent-log step counter.
+- `pending_tool_call`: the current OpenAI-style tool call being executed by the graph-native tool node.
 - `initial_study_context_text`: early study-context intake answer that must feed later plan preflight.
 - `graph_nodes`, `uses_langgraph`, `uses_langchain_tools`: runtime trace fields used by current LangGraph/RAG evidence events.
 
@@ -127,6 +128,8 @@ The graph-native tool node must preserve the current boundary:
 11. Persist agent log step.
 12. Append tool message for the model.
 13. Update `tool_history` and `error_count`.
+
+Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call. It owns guardrails, schema/task preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, and `last_tool_result` updates through graph state. Full streaming action-loop orchestration still delegates to the legacy loop; future graph-native loop work should reuse this node instead of calling `execute_tool()` directly for agent tool execution.
 
 ## Streaming Strategy
 
