@@ -6,15 +6,16 @@ This is the pre-migration contract for replacing the legacy `run_agent_loop()` w
 
 LangGraph should own orchestration: route selection, state transitions, loop limits, confirmation pauses, tool execution ordering, and event emission order. LangChain chains or Runnables are still useful inside graph nodes for local LLM work, prompt formatting, parsing, retrieval, and tool-bound model calls. The graph is the control plane; chains are node implementation details.
 
-The current runtime is still partial, but the action golden paths now enter explicit
-LangGraph action-route terminals instead of the generic legacy-delegate node:
+The current runtime is still partial, but the golden paths now enter explicit
+LangGraph route terminals instead of the generic legacy-delegate node:
 
 1. `chat.py` chooses `run_langgraph_agent_loop` when `SP_AGENT_RUNTIME=langgraph`.
-2. `langgraph_loop.py` exposes a Router Shell V2 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, `tool_workflow`, `schedule_import`, `study_plan`, `course_maintenance`, and `delegate_legacy_loop` nodes.
+2. `langgraph_loop.py` exposes a Router Shell V2 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, `rag_qa`, `plain_chat`, `tool_workflow`, `schedule_import`, `study_plan`, `course_maintenance`, and `delegate_legacy_loop` nodes.
 3. `route` conditionally sends no-web requests directly to the no-web terminal response, sends RAG/context candidates through retrieval, and sends native action routes to their corresponding action nodes.
-4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; non-gated RAG side-channel paths continue through hints and then to the selected action node or legacy fallback.
+4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; sufficient RAG QA goes through `compose_runtime_hints` and then `rag_qa`, while non-gated RAG side-channel paths continue through hints and then to the selected action node or compatibility fallback.
 5. `run_langgraph_agent_loop()` dispatches `tool_workflow`, `schedule_import`, `study_plan`, and `course_maintenance` through `run_agent_action_loop()`, preserving the existing WebSocket event protocol, `ask_user` pause/resume, preflight, and confirmation write gate without appending `delegate_legacy_loop` to `graph_nodes`.
-6. `delegate_legacy_loop` remains for non-action fallback paths such as plain chat, but golden action workflows must not trace through it.
+6. `run_langgraph_agent_loop()` dispatches `rag_qa` and `plain_chat` through `run_agent_text_loop()`, preserving text streaming without exposing tool calls or appending `delegate_legacy_loop` to `graph_nodes`.
+7. `delegate_legacy_loop` remains only as an explicitly marked compatibility fallback for routes not covered by the golden matrix; golden paths must not trace through it.
 
 ## Router Contract
 
@@ -42,9 +43,11 @@ graph TD
   route -.-> schedule_import
   route -.-> study_plan
   route -.-> course_maintenance
+  route -.-> plain_chat
   route -.-> delegate_legacy_loop
   retrieve_rag -.-> rag_insufficient
   retrieve_rag -.-> compose_runtime_hints
+  compose_runtime_hints -.-> rag_qa
   compose_runtime_hints -.-> tool_workflow
   compose_runtime_hints -.-> schedule_import
   compose_runtime_hints -.-> study_plan
@@ -56,6 +59,8 @@ graph TD
   schedule_import --> __end__
   study_plan --> __end__
   course_maintenance --> __end__
+  rag_qa --> __end__
+  plain_chat --> __end__
   delegate_legacy_loop --> __end__
 ```
 
@@ -142,7 +147,7 @@ The graph-native tool node must preserve the current boundary:
 12. Append tool message for the model.
 13. Update `tool_history` and `error_count`.
 
-Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call. It owns guardrails, schema/task preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, and `last_tool_result` updates through graph state. Full streaming action-route orchestration now enters LangGraph action nodes and calls the shared guarded `run_agent_action_loop()` helper instead of `delegate_legacy_loop`; future graph-native loop work can decompose that helper into finer graph nodes and should reuse `run_langgraph_tool_node()` instead of calling `execute_tool()` directly for agent tool execution.
+Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call. It owns guardrails, schema/task preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, and `last_tool_result` updates through graph state. Full streaming action-route orchestration now enters LangGraph action nodes and calls the shared guarded `run_agent_action_loop()` helper instead of `delegate_legacy_loop`; RAG-hit and plain-chat golden paths enter `rag_qa` / `plain_chat` and call `run_agent_text_loop()` instead of the compatibility fallback. Future graph-native loop work can decompose these helpers into finer graph nodes and should reuse `run_langgraph_tool_node()` instead of calling `execute_tool()` directly for agent tool execution.
 
 ## Streaming Strategy
 
@@ -150,7 +155,7 @@ These modes must be preserved:
 
 - `text_only_stream`: no tool intent. Forward `content_delta` as `text_delta`, then emit final `text` and `done`.
 - `tool_call_preamble_buffer`: tool-capable stream. Buffer model text while waiting for the final response; if the response contains tool calls, do not emit the preamble as user-visible text.
-- `rag_retrieve_then_inner_stream`: LangGraph wrapper emits RAG tool events, then delegates to the inner loop stream.
+- `rag_retrieve_then_inner_stream`: LangGraph wrapper emits RAG tool events, then continues through the native text or action stream selected by the graph route.
 - `rag_insufficient_text_done`: after RAG retrieval, emit fixed insufficient-evidence text and stop.
 - `no_web_text_done`: skip retrieval/model/tool execution and emit the no-web text directly.
 - `structured_result`: emit `result` for structured review/write summaries, then `done`.

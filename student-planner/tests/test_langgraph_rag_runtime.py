@@ -25,8 +25,10 @@ from app.models.user import User
 from tests.conftest import TestSession
 
 
-def stream_response_chunks(*, response: dict):
+def stream_response_chunks(*, response: dict, deltas: list[str] | None = None):
     async def _generator():
+        for delta in deltas or []:
+            yield {"type": "content_delta", "delta": delta}
         yield {"type": "response", "response": response}
 
     return _generator()
@@ -498,6 +500,8 @@ def test_langgraph_router_shell_mermaid_exposes_route_nodes():
         "retrieve_rag",
         "compose_runtime_hints",
         "rag_insufficient",
+        "rag_qa",
+        "plain_chat",
         "tool_workflow",
         "study_plan",
         "schedule_import",
@@ -531,8 +535,9 @@ async def test_prepare_langgraph_state_adds_rag_runtime_hint():
     assert state["should_retrieve"] is True
     assert "retrieve_rag" in state["graph_nodes"]
     assert "compose_runtime_hints" in state["graph_nodes"]
-    assert "delegate_legacy_loop" in state["graph_nodes"]
-    assert state["should_delegate_legacy_loop"] is True
+    assert "rag_qa" in state["graph_nodes"]
+    assert "delegate_legacy_loop" not in state["graph_nodes"]
+    assert state["should_delegate_legacy_loop"] is False
     assert state["uses_langchain_tools"] is True
     assert any("RAG 检索上下文" in hint for hint in state["runtime_hints"])
     assert any("复习问答" in hint for hint in state["runtime_hints"])
@@ -670,6 +675,23 @@ async def test_prepare_langgraph_state_routes_course_maintenance_to_native_actio
 
 
 @pytest.mark.asyncio
+async def test_prepare_langgraph_state_routes_plain_chat_to_native_text_node(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: (_ for _ in ()).throw(AssertionError("plain chat should not retrieve RAG")),
+    )
+
+    state = await prepare_langgraph_state("hello")
+
+    assert state["route"] == "plain_chat"
+    assert state["should_retrieve"] is False
+    assert state["should_gate_rag_answer"] is False
+    assert state["should_delegate_legacy_loop"] is False
+    assert state["graph_nodes"] == ["route", "plain_chat"]
+    assert "delegate_legacy_loop" not in state["graph_nodes"]
+
+
+@pytest.mark.asyncio
 async def test_review_qa_agent_loop_does_not_require_tools_or_ask_user(setup_db):
     captured_tool_choices: list[str | None] = []
 
@@ -704,14 +726,17 @@ async def test_review_qa_agent_loop_does_not_require_tools_or_ask_user(setup_db)
 
 
 @pytest.mark.asyncio
-async def test_langgraph_agent_loop_emits_rag_events_and_delegates_with_hints(setup_db):
-    captured: dict[str, object] = {}
-
-    async def fake_run_agent_loop(*args, **kwargs):
-        captured["runtime_hints"] = kwargs.get("runtime_hints")
-        yield {"type": "done"}
-
-    with patch("app.agent.langgraph_loop.run_agent_loop", side_effect=fake_run_agent_loop):
+async def test_langgraph_agent_loop_emits_rag_events_and_answers_without_legacy_delegate(setup_db):
+    with (
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("RAG hit golden path should not delegate to run_agent_loop"),
+        ),
+        patch("app.agent.loop.chat_completion_stream") as mock_chat_completion_stream,
+    ):
+        mock_chat_completion_stream.return_value = stream_response_chunks(
+            response={"role": "assistant", "content": "改革开放始于 1978 年。"}
+        )
         async with TestSession() as db:
             user = User(id="user-langgraph-runtime", username="langgraph-runtime", hashed_password="x")
             db.add(user)
@@ -732,8 +757,44 @@ async def test_langgraph_agent_loop_emits_rag_events_and_delegates_with_hints(se
     assert events[1]["type"] == "tool_result"
     assert events[1]["result"]["count"] > 0
     assert events[1]["result"]["embedding_configured_model"] == "text-embedding-v4"
+    assert "delegate_legacy_loop" not in events[1]["result"]["graph_nodes"]
+    assert "rag_qa" in events[1]["result"]["graph_nodes"]
+    assert events[2]["type"] == "text"
+    assert events[2]["content"] == "改革开放始于 1978 年。"
     assert events[-1]["type"] == "done"
-    assert any("RAG 检索上下文" in hint for hint in captured["runtime_hints"])
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_streams_plain_chat_without_legacy_delegate(setup_db):
+    with (
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Plain chat golden path should not delegate to run_agent_loop"),
+        ),
+        patch("app.agent.loop.chat_completion_stream") as mock_chat_completion_stream,
+    ):
+        mock_chat_completion_stream.return_value = stream_response_chunks(
+            response={"role": "assistant", "content": "Hello there."},
+            deltas=["Hello ", "there."],
+        )
+        async with TestSession() as db:
+            user = User(id="user-langgraph-plain", username="langgraph-plain", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "hello",
+                user,
+                "session-langgraph-plain",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["text_delta", "text_delta", "text", "done"]
+    assert events[0]["message_id"] == events[2]["message_id"]
+    assert events[2]["content"] == "Hello there."
 
 
 @pytest.mark.asyncio
@@ -1018,19 +1079,25 @@ async def test_langgraph_agent_loop_preserves_no_web_guard_for_current_public_ev
 async def test_langgraph_agent_loop_forwards_ask_user_answers_to_inner_loop(setup_db):
     captured: dict[str, object] = {}
 
-    async def fake_run_agent_loop(*args, **kwargs):
+    async def fake_run_agent_action_loop(*args, **kwargs):
         answer = yield {"type": "ask_user", "question": "确认写入吗？", "ask_type": "confirm"}
         captured["answer"] = answer
         yield {"type": "done"}
 
-    with patch("app.agent.langgraph_loop.run_agent_loop", side_effect=fake_run_agent_loop):
+    with (
+        patch("app.agent.langgraph_loop.run_agent_action_loop", side_effect=fake_run_agent_action_loop),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("ask_user action golden path should not delegate to run_agent_loop"),
+        ),
+    ):
         async with TestSession() as db:
             user = User(id="user-langgraph-ask", username="langgraph-ask", hashed_password="x")
             db.add(user)
             await db.commit()
 
             generator = run_langgraph_agent_loop(
-                "帮我确认一下",
+                "17.00提醒我去做饭",
                 user,
                 "session-langgraph-ask",
                 db,

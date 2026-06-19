@@ -186,6 +186,116 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
 
 
 @pytest.mark.asyncio
+async def test_langgraph_native_study_plan_confirmed_write_does_not_delegate(setup_db):
+    generated_tasks = [
+        {
+            "title": "大学英语3复习 - Unit 1",
+            "course_name": "大学英语3",
+            "date": "2099-06-08",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "description": "复习 Unit 1 重点。",
+        }
+    ]
+    llm_call_count = 0
+
+    async def fake_generate_study_plan(exams, available_slots, strategy, study_context=None):
+        return generated_tasks
+
+    def mock_chat_completion_stream(client, messages, tools=None, tool_choice=None):
+        nonlocal llm_call_count
+        llm_call_count += 1
+
+        if llm_call_count == 1:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "slots_1",
+                            "type": "function",
+                            "function": {
+                                "name": "get_free_slots",
+                                "arguments": json.dumps(
+                                    {
+                                        "start_date": "2099-06-08",
+                                        "end_date": "2099-06-10",
+                                        "min_duration_minutes": 60,
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 2:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "plan_1",
+                            "type": "function",
+                            "function": {
+                                "name": "create_study_plan",
+                                "arguments": json.dumps(
+                                    {
+                                        "exams": [{"course_name": "大学英语3", "exam_date": "2099-06-11"}],
+                                        "available_slots": {"slots": []},
+                                        "study_context": {"raw_notes": "按默认", "using_defaults": True},
+                                        "strategy": "balanced",
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        return stream_response_chunks(response={"role": "assistant", "content": "done"})
+
+    prompt = "下周四有大学英语3考试，帮我做复习计划"
+    state = await prepare_langgraph_state(prompt)
+    assert_native_action_graph(state, "study_plan")
+
+    with (
+        patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
+        patch("app.agent.tool_executor.generate_study_plan", side_effect=fake_generate_study_plan),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Study plan action route should not delegate to run_agent_loop"),
+        ),
+    ):
+        async with TestSession() as db:
+            user = User(id="user-lg-study-plan", username="lg-study-plan", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = await collect_events(
+                run_langgraph_agent_loop(prompt, user, "session-lg-study-plan", db, AsyncMock()),
+                answers=["确认"],
+            )
+
+            task_result = await db.execute(select(Task).where(Task.user_id == user.id))
+            tasks = list(task_result.scalars().all())
+
+    assert [event["name"] for event in events if event["type"] == "tool_call"] == [
+        "rag_retrieve_study_materials",
+        "get_free_slots",
+        "create_study_plan",
+        "create_task",
+    ]
+    assert events[-1]["type"] == "done"
+    assert len(tasks) == 1
+    assert tasks[0].title == "大学英语3复习 - Unit 1"
+
+
+@pytest.mark.asyncio
 async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setup_db):
     generated_tasks = [
         {

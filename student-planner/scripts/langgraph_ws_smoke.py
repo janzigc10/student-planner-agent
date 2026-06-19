@@ -169,6 +169,21 @@ def choose_message(payload):
     calls = tool_call_names(messages)
     tools = tool_messages(messages)
 
+    if "PLAIN_CHAT_SMOKE" in user:
+        return {"role": "assistant", "content": "plain chat done"}
+
+    if "改革开放" in user:
+        return {"role": "assistant", "content": "rag answer done"}
+
+    if "TOOL_FAILURE_SMOKE" in user:
+        if "create_task" not in calls:
+            return {"role": "assistant", "content": None, "tool_calls": [tool_call("create_task", {"title": "Recovered task"})]}
+        if "ask_user" not in calls:
+            return {"role": "assistant", "content": None, "tool_calls": [tool_call("ask_user", {"question": "Confirm recovered task", "type": "review", "data": {"tasks": [{"title": "Recovered task", "scheduled_date": "2099-06-02", "start_time": "10:00", "end_time": "10:30"}]}})]}
+        if calls.count("create_task") >= 2:
+            return {"role": "assistant", "content": "tool failure recovered"}
+        return {"role": "assistant", "content": None, "tool_calls": [tool_call("create_task", {"title": "Recovered task", "scheduled_date": "2099-06-02", "start_time": "10:00", "end_time": "10:30"})]}
+
     if "TASK_UPDATE_SMOKE" in user:
         if "list_tasks" not in calls:
             return {"role": "assistant", "content": None, "tool_calls": [tool_call("list_tasks", {"date_from": "2099-06-01", "date_to": "2099-06-01"})]}
@@ -215,23 +230,32 @@ ThreadingHTTPServer(("127.0.0.1", int(os.environ["STUB_PORT"])), Handler).serve_
     return stub_path
 
 
-async def run_turn(ws, label: str, message: str, answers: list[str]) -> list[str]:
+async def run_turn(ws, label: str, message: str, answers: list[str]) -> dict:
     log(f"TURN {label}")
     await ws.send(json.dumps({"message": message}, ensure_ascii=False))
     pending_answers = list(answers)
     sequence: list[str] = []
+    graph_nodes: list[str] = []
+    final_text: list[str] = []
     while True:
         event = json.loads(await asyncio.wait_for(ws.recv(), timeout=45))
         item = str(event.get("name") or event.get("type"))
         sequence.append(item)
         log(f"{label}:{item}")
+        result = event.get("result")
+        if isinstance(result, dict) and isinstance(result.get("graph_nodes"), list):
+            graph_nodes.extend(str(node) for node in result["graph_nodes"])
+        if event.get("type") in {"text", "result"} and event.get("content"):
+            final_text.append(str(event["content"]))
         if event.get("type") == "ask_user":
             answer = pending_answers.pop(0) if pending_answers else "ok"
             await ws.send(json.dumps({"answer": answer}, ensure_ascii=False))
         if event.get("type") == "error":
             raise AssertionError(json.dumps(event, ensure_ascii=True))
         if event.get("type") == "done":
-            return sequence
+            if "delegate_legacy_loop" in graph_nodes:
+                raise AssertionError(f"{label} graph_nodes used legacy delegate: {graph_nodes}")
+            return {"sequence": sequence, "graph_nodes": graph_nodes, "final_text": final_text}
 
 
 async def run_ws_smoke(token: str) -> dict[str, list[str]]:
@@ -271,6 +295,36 @@ async def run_ws_smoke(token: str) -> dict[str, list[str]]:
             request_json("POST", "/api/courses/", payload=payload, token=token)
 
         return {
+            "no_web": await run_turn(
+                ws,
+                "no_web",
+                "最新政策是什么",
+                [],
+            ),
+            "rag_hit": await run_turn(
+                ws,
+                "rag_hit",
+                "改革开放是什么时候开始的",
+                [],
+            ),
+            "rag_insufficient": await run_turn(
+                ws,
+                "rag_insufficient",
+                "量子计算的退相干错误怎么解释",
+                [],
+            ),
+            "plain_chat": await run_turn(
+                ws,
+                "plain_chat",
+                "PLAIN_CHAT_SMOKE hello",
+                [],
+            ),
+            "tool_failure": await run_turn(
+                ws,
+                "tool_failure",
+                "TOOL_FAILURE_SMOKE 创建一个 Recovered task 任务，时间是 2099-06-02 10:00-10:30",
+                ["确认"],
+            ),
             "task_create": await run_turn(
                 ws,
                 "task_create",
@@ -384,9 +438,34 @@ def assert_invariants(db_state: dict) -> None:
     assert "Course Beta" not in courses, json.dumps(db_state, ensure_ascii=True)
     assert courses.count("Course Gamma") == 1, json.dumps(db_state, ensure_ascii=True)
     assert any(
+        task["title"] == "Recovered task"
+        and task["date"] == "2099-06-02"
+        and task["start"] == "10:00"
+        and task["end"] == "10:30"
+        for task in tasks
+    ), json.dumps(db_state, ensure_ascii=True)
+    assert any(
         name in courses
         for name in ["高等数学", "线性代数", "大学英语", "大学物理", "概率论", "体育"]
     ), json.dumps(db_state, ensure_ascii=True)
+
+
+def assert_smoke_evidence(sequences: dict) -> None:
+    assert sequences["no_web"]["sequence"] == ["text", "done"], json.dumps(sequences, ensure_ascii=True)
+    assert "rag_qa" in sequences["rag_hit"]["graph_nodes"], json.dumps(sequences["rag_hit"], ensure_ascii=True)
+    assert "rag_insufficient" in sequences["rag_insufficient"]["graph_nodes"], json.dumps(
+        sequences["rag_insufficient"], ensure_ascii=True
+    )
+    assert sequences["plain_chat"]["sequence"][0] == "text_delta", json.dumps(
+        sequences["plain_chat"], ensure_ascii=True
+    )
+    assert "create_task" in sequences["tool_failure"]["sequence"], json.dumps(
+        sequences["tool_failure"], ensure_ascii=True
+    )
+    for label, evidence in sequences.items():
+        assert "delegate_legacy_loop" not in evidence["graph_nodes"], json.dumps(
+            {label: evidence}, ensure_ascii=True
+        )
 
 
 def main() -> int:
@@ -474,6 +553,7 @@ def main() -> int:
 
         sequences = asyncio.run(run_ws_smoke(token))
         db_state = query_db(env)
+        assert_smoke_evidence(sequences)
         assert_invariants(db_state)
         log("SMOKE_EVENTS=" + json.dumps(sequences, ensure_ascii=True))
         log("SMOKE_DB=" + json.dumps(db_state, ensure_ascii=True))

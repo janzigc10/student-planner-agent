@@ -3761,6 +3761,65 @@ async def run_agent_loop(
         pass
 
 
+async def run_agent_text_loop(
+    user_message: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    llm_client: AsyncOpenAI,
+    runtime_hints: list[str] | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Run a text-only answer stream without exposing agent tools."""
+
+    system_prompt = await build_system_prompt(user, db)
+    history_result = await db.execute(
+        select(ConversationMessage)
+        .where(ConversationMessage.session_id == session_id)
+        .order_by(ConversationMessage.timestamp)
+    )
+    history_messages = history_result.scalars().all()
+    messages = await _build_initial_messages(system_prompt, history_messages, llm_client)
+    for hint in runtime_hints or []:
+        if hint.strip():
+            messages.append({"role": "system", "content": hint})
+    messages.append({"role": "user", "content": user_message})
+    await _save_message(db, session_id, "user", user_message)
+
+    response: dict[str, Any] | None = None
+    response_message_id = str(uuid.uuid4())
+    streamed_deltas: list[str] = []
+    try:
+        async for stream_event in chat_completion_stream(llm_client, messages):
+            event_type = stream_event.get("type")
+            if event_type == "content_delta":
+                delta = str(stream_event.get("delta") or "")
+                if not delta:
+                    continue
+                streamed_deltas.append(delta)
+                yield {
+                    "type": "text_delta",
+                    "message_id": response_message_id,
+                    "delta": delta,
+                }
+                continue
+            if event_type == "response":
+                response = stream_event.get("response")
+    except Exception:
+        if streamed_deltas:
+            raise
+        response = await chat_completion(llm_client, messages)
+        response_message_id = str(uuid.uuid4())
+
+    if response is None:
+        raise RuntimeError("chat completion stream finished without a response payload")
+
+    text = response.get("content", "") or "".join(streamed_deltas)
+    if text:
+        yield {"type": "text", "message_id": response_message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+    yield {"type": "done"}
+
+
 async def _save_message(
     db: AsyncSession,
     session_id: str,

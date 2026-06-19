@@ -26,6 +26,7 @@ from app.agent.loop import (
     _to_persisted_tool_summary,
     run_agent_action_loop,
     run_agent_loop,
+    run_agent_text_loop,
 )
 from app.agent.rag import build_rag_context
 from app.agent.tool_executor import TOOL_HANDLERS, execute_tool
@@ -357,12 +358,25 @@ def _course_maintenance_node(state: PlannerGraphState) -> PlannerGraphState:
     return _action_route_node(AgentRoute.COURSE_MAINTENANCE.value, state)
 
 
+def _rag_qa_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_route_node(AgentRoute.RAG_QA.value, state)
+
+
+def _plain_chat_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_route_node(AgentRoute.PLAIN_CHAT.value, state)
+
+
 _ACTION_ROUTE_NODE_BY_ROUTE = {
     AgentRoute.TOOL_WORKFLOW.value: AgentRoute.TOOL_WORKFLOW.value,
     AgentRoute.SCHEDULE_IMPORT.value: AgentRoute.SCHEDULE_IMPORT.value,
     AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
     AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
 }
+_TEXT_ROUTE_NODE_BY_ROUTE = {
+    AgentRoute.RAG_QA.value: AgentRoute.RAG_QA.value,
+    AgentRoute.PLAIN_CHAT.value: AgentRoute.PLAIN_CHAT.value,
+}
+_NATIVE_ROUTE_NODE_BY_ROUTE = {**_ACTION_ROUTE_NODE_BY_ROUTE, **_TEXT_ROUTE_NODE_BY_ROUTE}
 
 
 def _route_from_route_node(state: PlannerGraphState) -> str:
@@ -370,7 +384,7 @@ def _route_from_route_node(state: PlannerGraphState) -> str:
         return "no_web"
     if state.get("should_retrieve"):
         return "retrieve_rag"
-    return _ACTION_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
+    return _NATIVE_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
 
 
 def _route_after_retrieve_node(state: PlannerGraphState) -> str:
@@ -381,7 +395,7 @@ def _route_after_retrieve_node(state: PlannerGraphState) -> str:
 
 
 def _route_after_compose_hints_node(state: PlannerGraphState) -> str:
-    return _ACTION_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
+    return _NATIVE_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
 
 
 def _build_graph():
@@ -397,6 +411,8 @@ def _build_graph():
     graph.add_node(AgentRoute.SCHEDULE_IMPORT.value, _schedule_import_node)
     graph.add_node(AgentRoute.STUDY_PLAN.value, _study_plan_node)
     graph.add_node(AgentRoute.COURSE_MAINTENANCE.value, _course_maintenance_node)
+    graph.add_node(AgentRoute.RAG_QA.value, _rag_qa_node)
+    graph.add_node(AgentRoute.PLAIN_CHAT.value, _plain_chat_node)
     graph.add_node("delegate_legacy_loop", _delegate_legacy_loop_node)
     graph.set_entry_point("route")
     graph.add_conditional_edges(
@@ -409,6 +425,7 @@ def _build_graph():
             AgentRoute.SCHEDULE_IMPORT.value: AgentRoute.SCHEDULE_IMPORT.value,
             AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
             AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
+            AgentRoute.PLAIN_CHAT.value: AgentRoute.PLAIN_CHAT.value,
             "delegate_legacy_loop": "delegate_legacy_loop",
         },
     )
@@ -428,6 +445,8 @@ def _build_graph():
             AgentRoute.SCHEDULE_IMPORT.value: AgentRoute.SCHEDULE_IMPORT.value,
             AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
             AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
+            AgentRoute.RAG_QA.value: AgentRoute.RAG_QA.value,
+            AgentRoute.PLAIN_CHAT.value: AgentRoute.PLAIN_CHAT.value,
             "delegate_legacy_loop": "delegate_legacy_loop",
         },
     )
@@ -437,6 +456,8 @@ def _build_graph():
     graph.add_edge(AgentRoute.SCHEDULE_IMPORT.value, END)
     graph.add_edge(AgentRoute.STUDY_PLAN.value, END)
     graph.add_edge(AgentRoute.COURSE_MAINTENANCE.value, END)
+    graph.add_edge(AgentRoute.RAG_QA.value, END)
+    graph.add_edge(AgentRoute.PLAIN_CHAT.value, END)
     graph.add_edge("delegate_legacy_loop", END)
     return graph.compile()
 
@@ -453,9 +474,11 @@ def get_langgraph_router_shell_mermaid() -> str:
             "  route --> schedule_import\n"
             "  route --> study_plan\n"
             "  route --> course_maintenance\n"
+            "  route --> plain_chat\n"
             "  route --> delegate_legacy_loop\n"
             "  retrieve_rag --> rag_insufficient\n"
             "  retrieve_rag --> compose_runtime_hints\n"
+            "  compose_runtime_hints --> rag_qa\n"
             "  compose_runtime_hints --> tool_workflow\n"
             "  compose_runtime_hints --> study_plan\n"
             "  compose_runtime_hints --> delegate_legacy_loop\n"
@@ -465,6 +488,8 @@ def get_langgraph_router_shell_mermaid() -> str:
             "  schedule_import --> __end__\n"
             "  study_plan --> __end__\n"
             "  course_maintenance --> __end__\n"
+            "  rag_qa --> __end__\n"
+            "  plain_chat --> __end__\n"
             "  delegate_legacy_loop --> __end__"
         )
     return compiled_graph.get_graph().draw_mermaid()
@@ -494,6 +519,8 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
         return _study_plan_node(state)
     if route_target == AgentRoute.COURSE_MAINTENANCE.value:
         return _course_maintenance_node(state)
+    if route_target == AgentRoute.PLAIN_CHAT.value:
+        return _plain_chat_node(state)
     if route_target == "delegate_legacy_loop":
         return _delegate_legacy_loop_node(state)
     state = _retrieve_rag_node(state)
@@ -509,6 +536,10 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
         return _study_plan_node(state)
     if route_target == AgentRoute.COURSE_MAINTENANCE.value:
         return _course_maintenance_node(state)
+    if route_target == AgentRoute.RAG_QA.value:
+        return _rag_qa_node(state)
+    if route_target == AgentRoute.PLAIN_CHAT.value:
+        return _plain_chat_node(state)
     return _delegate_legacy_loop_node(state)
 
 
@@ -603,6 +634,15 @@ async def run_langgraph_agent_loop(
     action_route = str(state.get("route") or "")
     if action_route in _ACTION_ROUTE_NODE_BY_ROUTE:
         inner_loop = run_agent_action_loop(
+            user_message,
+            user,
+            session_id,
+            db,
+            llm_client,
+            runtime_hints=state.get("runtime_hints", []),
+        )
+    elif action_route in _TEXT_ROUTE_NODE_BY_ROUTE:
+        inner_loop = run_agent_text_loop(
             user_message,
             user,
             session_id,
