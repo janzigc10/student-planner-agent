@@ -2114,13 +2114,17 @@ async def _run_schedule_import_shortcut(
         return
 
     pending_confirmation, db_write_plan = _build_schedule_import_write_state(courses)
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": pending_confirmation.ask_type,
-        "question": pending_confirmation.question,
-        "options": list(pending_confirmation.options),
-        "data": pending_confirmation.data,
-    }
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，这次我先不导入。你后面想继续的话，重新确认一次就行。"
@@ -2266,13 +2270,38 @@ async def _run_course_merge_shortcut(
         data=review_data,
         allowed_tool_names=allowed_tool_names,
     )
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": pending_confirmation.ask_type,
-        "question": pending_confirmation.question,
-        "options": list(pending_confirmation.options),
-        "data": pending_confirmation.data,
-    }
+    first_db_write_plan: DBWritePlan | None = None
+    for item in actions:
+        action = str(item.get("action") or "")
+        course = item.get("course") if isinstance(item.get("course"), dict) else {}
+        course_id = str(course.get("id") or "")
+        if action == "update" and course_id:
+            first_db_write_plan = _build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="update_course",
+                args={"course_id": course_id, **dict(item.get("updates") or {})},
+                description="Confirmed course update.",
+            )
+            break
+        if action == "delete" and course_id:
+            first_db_write_plan = _build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="delete_course",
+                args={"course_id": course_id},
+                description="Confirmed course delete.",
+            )
+            break
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=first_db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，我先不改。你后面想继续的话，直接告诉我保留哪个课程名就行。"
@@ -2413,13 +2442,23 @@ async def _run_missing_task_create_shortcut(
         },
         allowed_tool_names=("create_task",),
     )
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": pending_confirmation.ask_type,
-        "question": pending_confirmation.question,
-        "options": list(pending_confirmation.options),
-        "data": pending_confirmation.data,
-    }
+    db_write_plan = _build_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        tool_name="create_task",
+        args=create_args,
+        description="Confirmed missing-task create shortcut.",
+    )
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，我先不创建。你调整好时间后再告诉我。"
@@ -2431,12 +2470,7 @@ async def _run_missing_task_create_shortcut(
     yield {"type": "tool_call", "name": "create_task", "args": create_args}
     create_result = await _execute_confirmed_db_write_plan(
         pending_confirmation=pending_confirmation,
-        db_write_plan=_build_db_write_plan(
-            pending_confirmation=pending_confirmation,
-            tool_name="create_task",
-            args=create_args,
-            description="Confirmed missing-task create shortcut.",
-        ),
+        db_write_plan=db_write_plan,
         confirmation_answer=str(confirm_answer or ""),
         db=db,
         user_id=user.id,
@@ -2627,14 +2661,24 @@ async def _run_confirmed_plan_write(
         data=_study_plan_review_data(tasks),
         allowed_tool_names=("create_task",),
     )
+    first_db_write_plan = _build_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        tool_name="create_task",
+        args=tasks[0],
+        description=f"Write confirmed {task_label}.",
+    )
 
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": pending_confirmation.ask_type,
-        "question": pending_confirmation.question,
-        "options": list(pending_confirmation.options),
-        "data": pending_confirmation.data,
-    }
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=first_db_write_plan,
+    )
     if confirm_answer is None:
         yield {"type": "done"}
         return
@@ -3119,13 +3163,27 @@ async def _run_plan_adjustment_shortcut(
         data={"daily_limit_minutes": daily_limit, "tasks": updates, "count": len(updates)},
         allowed_tool_names=("update_task",),
     )
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": pending_confirmation.ask_type,
-        "question": pending_confirmation.question,
-        "options": list(pending_confirmation.options),
-        "data": pending_confirmation.data,
+    first_update_args = {
+        "task_id": updates[0]["task_id"],
+        "end_time": updates[0]["new_end_time"],
     }
+    first_db_write_plan = _build_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        tool_name="update_task",
+        args=first_update_args,
+        description="Confirmed plan adjustment task update.",
+    )
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=first_db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，我先不调整这些任务。"
@@ -3172,6 +3230,102 @@ async def _run_plan_adjustment_shortcut(
     yield {"type": "text", "message_id": message_id, "content": text}
     await _save_message(db, session_id, "assistant", text)
     yield {"type": "done"}
+
+
+_LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY = "_langgraph_pending_confirmation"
+_LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY = "_langgraph_db_write_plan"
+
+
+def _ask_user_event_tool_args(event: dict[str, Any]) -> dict[str, Any]:
+    args: dict[str, Any] = {
+        "question": str(event.get("question") or ""),
+        "type": str(event.get("ask_type") or "review"),
+    }
+    if event.get("options") is not None:
+        args["options"] = list(event.get("options") or [])
+    if event.get("data") is not None:
+        args["data"] = event.get("data")
+    return args
+
+
+def _strip_internal_shortcut_event_fields(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in event.items()
+        if key not in {_LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY, _LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY}
+    }
+
+
+def _with_shortcut_confirmation_state(
+    event: dict[str, Any],
+    *,
+    pending_confirmation: PendingConfirmation,
+    db_write_plan: DBWritePlan | None = None,
+) -> dict[str, Any]:
+    return {
+        **event,
+        _LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY: pending_confirmation,
+        _LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY: db_write_plan,
+    }
+
+
+async def _run_shortcut_with_langgraph_ask_state(
+    shortcut: AsyncGenerator[dict[str, Any], str | None],
+    *,
+    graph_state: dict[str, Any] | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    from app.agent import langgraph_loop as langgraph_runtime
+
+    active_state: dict[str, Any] = {
+        "messages": [],
+        "tool_history": [],
+        "preflight_reference_texts": [],
+        "preflight_user_texts": [],
+        "error_count": {},
+        "events": [],
+        "step": 0,
+        **dict(graph_state or {}),
+    }
+    try:
+        event = await shortcut.__anext__()
+        while True:
+            if event["type"] == "ask_user":
+                pending_confirmation = event.get(_LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY)
+                pending_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
+                )
+                db_write_plan = event.get(_LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY)
+                db_write_plan = db_write_plan if isinstance(db_write_plan, DBWritePlan) else None
+                public_event = _strip_internal_shortcut_event_fields(event)
+                active_state = dict(
+                    langgraph_runtime.record_langgraph_ask_user_pause_state(
+                        active_state,
+                        tool_args=_ask_user_event_tool_args(public_event),
+                        ask_result=public_event,
+                        pending_confirmation=pending_confirmation,
+                        db_write_plan=db_write_plan,
+                    )
+                )
+                user_response = yield public_event
+                active_state = dict(
+                    langgraph_runtime.resume_langgraph_ask_user_state(
+                        active_state,
+                        user_response=str(user_response or "确认"),
+                    )
+                )
+                if pending_confirmation is not None:
+                    active_state["pending_confirmation"] = pending_confirmation
+                    active_state["pending_confirmation_answer"] = str(user_response or "")
+                if db_write_plan is not None:
+                    active_state["db_write_plan"] = db_write_plan
+                event = await shortcut.asend(user_response)
+            else:
+                yield _strip_internal_shortcut_event_fields(event)
+                event = await shortcut.__anext__()
+    except StopAsyncIteration:
+        return
 
 
 async def run_agent_action_loop(
@@ -3248,7 +3402,9 @@ async def run_agent_action_loop(
         )
 
     if _should_handle_schedule_import_locally(user_message):
-        shortcut = _run_schedule_import_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_schedule_import_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -3263,7 +3419,9 @@ async def run_agent_action_loop(
         return
 
     if _should_handle_tonight_review_locally(user_message):
-        shortcut = _run_tonight_review_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_tonight_review_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -3278,7 +3436,9 @@ async def run_agent_action_loop(
         return
 
     if _should_handle_work_plan_locally(user_message):
-        shortcut = _run_work_plan_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_work_plan_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -3293,7 +3453,9 @@ async def run_agent_action_loop(
         return
 
     if _should_handle_plan_adjustment_locally(user_message):
-        shortcut = _run_plan_adjustment_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_plan_adjustment_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -3308,7 +3470,9 @@ async def run_agent_action_loop(
         return
 
     if _should_handle_missing_task_create_locally(user_message):
-        shortcut = _run_missing_task_create_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_missing_task_create_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -3323,7 +3487,9 @@ async def run_agent_action_loop(
         return
 
     if _should_handle_course_merge_locally(user_message, history_messages):
-        shortcut = _run_course_merge_shortcut(user_message, user, session_id, db, history_messages)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_course_merge_shortcut(user_message, user, session_id, db, history_messages)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -3433,33 +3599,58 @@ async def run_agent_action_loop(
                         ],
                     }
                 )
-                yield {"type": "tool_call", "name": "ask_user", "args": tool_args}
-                result = await execute_tool("ask_user", tool_args, db, user.id)
-                ask_type = _normalize_ask_type(result)
-                user_response = yield {**result, "type": "ask_user", "ask_type": ask_type}
+                from app.agent import langgraph_loop as langgraph_runtime
+
+                node_state = await langgraph_runtime.run_langgraph_tool_node(
+                    {
+                        **graph_state,
+                        "messages": messages,
+                        "pending_tool_call": {
+                            "id": tool_call_id,
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": json.dumps(tool_args, ensure_ascii=False),
+                            },
+                        },
+                    },
+                    langgraph_runtime.GraphToolNodeRuntime(
+                        db=db,
+                        user_id=user.id,
+                        session_id=session_id,
+                    ),
+                )
+                user_response: str | None = None
+                for node_event in node_state.get("events", []):
+                    if node_event.get("type") == "ask_user":
+                        user_response = yield node_event
+                    else:
+                        yield node_event
                 if user_response is None:
                     user_response = "确认"
-                question = str(result.get("question") or "")
-                if question and should_include_confirmed_question(user_response):
-                    preflight_reference_texts.append(question)
-                preflight_reference_texts.append(str(user_response))
-                preflight_user_texts.append(str(user_response))
-                pending_write_confirmation = _build_confirmed_write_state_from_ask(
-                    tool_args=tool_args,
-                    ask_result=result,
-                    confirmation_answer=str(user_response),
+                result = node_state["last_tool_result"]
+                graph_state = dict(
+                    langgraph_runtime.resume_langgraph_ask_user_state(
+                        node_state,
+                        user_response=str(user_response),
+                    )
                 )
-                pending_write_confirmation_answer = str(user_response) if pending_write_confirmation else None
-                tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": tool_result_content,
-                    }
+                messages = list(graph_state.get("messages", messages))
+                preflight_reference_texts = list(graph_state.get("preflight_reference_texts", preflight_reference_texts))
+                preflight_user_texts = list(graph_state.get("preflight_user_texts", preflight_user_texts))
+                tool_history = list(graph_state.get("tool_history", tool_history))
+                pending_confirmation = graph_state.get("pending_confirmation")
+                pending_write_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
+                )
+                pending_write_confirmation_answer = (
+                    str(graph_state.get("pending_confirmation_answer") or "")
+                    if pending_write_confirmation is not None
+                    else None
                 )
                 step += 1
-                tool_history.append("ask_user")
                 await _log_step(db, user.id, session_id, step, "ask_user", tool_args, result)
                 continue
 
@@ -3700,12 +3891,15 @@ async def run_agent_action_loop(
             graph_state = dict(node_state)
 
             if tool_name == "create_study_plan" and "error" not in result:
-                shortcut = _run_confirmed_study_plan_write(
-                    result.get("tasks"),
-                    user,
-                    session_id,
-                    db,
-                    step,
+                shortcut = _run_shortcut_with_langgraph_ask_state(
+                    _run_confirmed_study_plan_write(
+                        result.get("tasks"),
+                        user,
+                        session_id,
+                        db,
+                        step,
+                    ),
+                    graph_state=graph_state,
                 )
                 try:
                     event = await shortcut.__anext__()
@@ -3721,12 +3915,15 @@ async def run_agent_action_loop(
                 return
 
             if tool_name == "create_work_plan" and "error" not in result:
-                shortcut = _run_confirmed_work_plan_write(
-                    result.get("tasks"),
-                    user,
-                    session_id,
-                    db,
-                    step,
+                shortcut = _run_shortcut_with_langgraph_ask_state(
+                    _run_confirmed_work_plan_write(
+                        result.get("tasks"),
+                        user,
+                        session_id,
+                        db,
+                        step,
+                    ),
+                    graph_state=graph_state,
                 )
                 try:
                     event = await shortcut.__anext__()

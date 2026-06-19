@@ -159,6 +159,69 @@ def _build_pending_ask_state(
     }
 
 
+def record_langgraph_ask_user_pause_state(
+    state: PlannerGraphState,
+    *,
+    tool_args: dict[str, Any],
+    ask_result: dict[str, Any] | None = None,
+    tool_call_id: str | None = None,
+    pending_confirmation: PendingConfirmation | None = None,
+    db_write_plan: DBWritePlan | None = None,
+) -> PlannerGraphState:
+    """Mirror a local `ask_user` pause into LangGraph state.
+
+    Local action shortcuts still own some deterministic orchestration, but their
+    pauses should expose the same graph-state shape as tool-node `ask_user`.
+    """
+
+    call_id = tool_call_id or f"call_ask_{uuid.uuid4().hex[:24]}"
+    args = dict(tool_args)
+    raw_result = dict(ask_result or {})
+    ask_type = str(raw_result.get("ask_type") or raw_result.get("type") or args.get("type") or "review")
+    result = {
+        **args,
+        **raw_result,
+        "type": ask_type,
+        "question": str(raw_result.get("question") or args.get("question") or ""),
+        "options": list(raw_result.get("options") or args.get("options") or []),
+        "data": raw_result.get("data") if raw_result.get("data") is not None else args.get("data"),
+    }
+    ask_type = _normalize_ask_type(result)
+    result["type"] = ask_type
+    pending_tool_call = {
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "arguments": json.dumps(args, ensure_ascii=False),
+        },
+    }
+    pending_ask = _build_pending_ask_state(
+        tool_name="ask_user",
+        tool_args=args,
+        tool_call_id=call_id,
+        ask_result=result,
+        ask_type=ask_type,
+    )
+    next_state: PlannerGraphState = {
+        **state,
+        "pending_tool_call": pending_tool_call,
+        "pending_ask": pending_ask,
+        "resume_state": {
+            "status": "awaiting_answer",
+            "tool_name": "ask_user",
+            "tool_call_id": call_id,
+        },
+        "last_tool_result": result,
+        "tool_history": [*state.get("tool_history", []), "ask_user"],
+    }
+    if pending_confirmation is not None:
+        next_state["pending_confirmation"] = pending_confirmation
+    if db_write_plan is not None:
+        next_state["db_write_plan"] = db_write_plan
+    return next_state
+
+
 def resume_langgraph_ask_user_state(
     state: PlannerGraphState,
     *,
