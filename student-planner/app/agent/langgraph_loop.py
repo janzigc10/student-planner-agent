@@ -11,7 +11,13 @@ from typing import Any, AsyncGenerator, TypedDict
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.contracts import AgentRoute, CONFIRMATION_REQUIRED_TOOLS, decide_agent_route
+from app.agent.contracts import (
+    AgentRoute,
+    CONFIRMATION_REQUIRED_TOOLS,
+    DBWritePlan,
+    PendingConfirmation,
+    decide_agent_route,
+)
 from app.agent.guardrails import (
     GuardrailViolation,
     check_consecutive_ask_user,
@@ -21,6 +27,8 @@ from app.agent.guardrails import (
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
 from app.agent.loop import (
     _current_public_info_unavailable_text,
+    _build_confirmed_write_state_from_ask,
+    _build_db_write_plan,
     _log_step,
     _normalize_ask_type,
     _save_message,
@@ -33,6 +41,7 @@ from app.agent.rag import build_rag_context
 from app.agent.tool_executor import TOOL_HANDLERS, execute_tool
 from app.agent.tool_preflight import (
     apply_tool_preflight,
+    should_include_confirmed_question,
     task_tool_preflight_error,
     tool_schema_preflight_error,
 )
@@ -64,6 +73,12 @@ class PlannerGraphState(TypedDict, total=False):
     terminal_response: str
     messages: list[dict[str, Any]]
     pending_tool_call: dict[str, Any]
+    pending_ask: dict[str, Any]
+    submitted_answer: str
+    pending_confirmation: PendingConfirmation
+    pending_confirmation_answer: str
+    db_write_plan: DBWritePlan
+    resume_state: dict[str, Any]
     tool_history: list[str]
     preflight_reference_texts: list[str]
     preflight_user_texts: list[str]
@@ -122,6 +137,86 @@ def _append_tool_node_message(
 ) -> None:
     content = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
     messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
+
+
+def _build_pending_ask_state(
+    *,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    tool_call_id: str,
+    ask_result: dict[str, Any],
+    ask_type: str,
+) -> dict[str, Any]:
+    return {
+        "status": "awaiting_answer",
+        "tool_name": tool_name,
+        "tool_call_id": tool_call_id,
+        "tool_args": dict(tool_args),
+        "question": str(ask_result.get("question") or tool_args.get("question") or ""),
+        "ask_type": ask_type,
+        "options": list(ask_result.get("options") or tool_args.get("options") or []),
+        "data": ask_result.get("data") if ask_result.get("data") is not None else tool_args.get("data"),
+    }
+
+
+def resume_langgraph_ask_user_state(
+    state: PlannerGraphState,
+    *,
+    user_response: str,
+) -> PlannerGraphState:
+    """Record an `ask_user` answer and derived confirmation state in graph state."""
+
+    pending_tool_call = state.get("pending_tool_call") or {}
+    tool_name, tool_args, tool_call_id = _parse_pending_tool_call(pending_tool_call)
+    result = dict(state.get("last_tool_result") or {})
+    answer = str(user_response or "确认")
+    messages = list(state.get("messages", []))
+    preflight_reference_texts = list(state.get("preflight_reference_texts", []))
+    preflight_user_texts = list(state.get("preflight_user_texts", []))
+
+    question = str(result.get("question") or tool_args.get("question") or "")
+    if question and should_include_confirmed_question(answer):
+        preflight_reference_texts.append(question)
+    preflight_reference_texts.append(answer)
+    preflight_user_texts.append(answer)
+
+    pending_confirmation = _build_confirmed_write_state_from_ask(
+        tool_args=tool_args,
+        ask_result=result,
+        confirmation_answer=answer,
+    )
+    tool_result_content = json.dumps({"user_response": answer}, ensure_ascii=False)
+    _append_tool_node_message(messages, tool_call_id, tool_result_content)
+
+    pending_ask = {
+        **dict(state.get("pending_ask") or {}),
+        "status": "answered",
+        "answer": answer,
+    }
+    resume_state = {
+        "status": "answered",
+        "tool_name": tool_name,
+        "tool_call_id": tool_call_id,
+        "submitted_answer": answer,
+        "has_pending_confirmation": pending_confirmation is not None,
+    }
+
+    next_state: PlannerGraphState = {
+        **state,
+        "messages": messages,
+        "preflight_reference_texts": preflight_reference_texts,
+        "preflight_user_texts": preflight_user_texts,
+        "pending_ask": pending_ask,
+        "submitted_answer": answer,
+        "pending_confirmation_answer": answer if pending_confirmation is not None else "",
+        "resume_state": resume_state,
+    }
+    if pending_confirmation is not None:
+        next_state["pending_confirmation"] = pending_confirmation
+    else:
+        next_state.pop("pending_confirmation", None)
+    next_state.pop("db_write_plan", None)
+    return next_state
 
 
 async def _execute_tool_from_graph_node(
@@ -217,11 +312,33 @@ async def run_langgraph_tool_node(
         result = await _execute_tool_from_graph_node(tool_name, tool_args, runtime)
         ask_type = _normalize_ask_type(result)
         events.append({**result, "type": "ask_user", "ask_type": ask_type})
+        pending_ask = _build_pending_ask_state(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            tool_call_id=tool_call_id,
+            ask_result=result,
+            ask_type=ask_type,
+        )
         return {
             **next_state,
+            "pending_ask": pending_ask,
+            "resume_state": {
+                "status": "awaiting_answer",
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+            },
             "tool_history": [*tool_history, tool_name],
             "last_tool_result": result,
         }
+
+    pending_confirmation = state.get("pending_confirmation")
+    if tool_name in CONFIRMATION_REQUIRED_TOOLS and isinstance(pending_confirmation, PendingConfirmation):
+        next_state["db_write_plan"] = _build_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            tool_name=tool_name,
+            args=tool_args,
+            description=f"Confirmed generic {tool_name} write.",
+        )
 
     result = await _execute_tool_from_graph_node(tool_name, tool_args, runtime)
     tool_result_content = compress_tool_result(tool_name, result)

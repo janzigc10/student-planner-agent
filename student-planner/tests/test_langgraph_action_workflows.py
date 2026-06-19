@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
+from app.agent.contracts import DBWritePlan, PendingConfirmation
 from app.agent.langgraph_loop import prepare_langgraph_state, run_langgraph_agent_loop, run_langgraph_tool_node
 from app.models.course import Course
 from app.models.reminder import Reminder
@@ -49,6 +50,8 @@ def assert_native_action_graph(state: dict, route: str) -> None:
 async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(setup_db):
     mock_client = AsyncMock()
     llm_call_count = 0
+    tool_node_inputs: list[dict] = []
+    tool_node_outputs: list[dict] = []
 
     def mock_chat_completion_stream(client, messages, tools=None, tool_choice=None):
         nonlocal llm_call_count
@@ -141,9 +144,15 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
     state = await prepare_langgraph_state(prompt)
     assert_native_action_graph(state, "tool_workflow")
 
+    async def spy_run_langgraph_tool_node(state, runtime):
+        tool_node_inputs.append(dict(state))
+        next_state = await run_langgraph_tool_node(state, runtime)
+        tool_node_outputs.append(dict(next_state))
+        return next_state
+
     with (
         patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
-        patch("app.agent.langgraph_loop.run_langgraph_tool_node", wraps=run_langgraph_tool_node) as tool_node_spy,
+        patch("app.agent.langgraph_loop.run_langgraph_tool_node", side_effect=spy_run_langgraph_tool_node) as tool_node_spy,
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Task/reminder action route should not delegate to run_agent_loop"),
@@ -180,6 +189,29 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
         "set_reminder",
     ]
     assert tool_node_spy.await_count == 3
+    assert tool_node_outputs[0]["pending_ask"]["status"] == "awaiting_answer"
+    assert tool_node_outputs[0]["resume_state"]["status"] == "awaiting_answer"
+    assert tool_node_inputs[1]["submitted_answer"] == "可以"
+    assert tool_node_inputs[1]["pending_ask"]["status"] == "answered"
+    assert isinstance(tool_node_inputs[1]["pending_confirmation"], PendingConfirmation)
+    assert set(tool_node_inputs[1]["pending_confirmation"].allowed_tool_names) == {
+        "create_task",
+        "set_reminder",
+    }
+    assert tool_node_inputs[1]["pending_confirmation_answer"] == "可以"
+    assert tool_node_inputs[1]["tool_history"] == ["ask_user"]
+    assert isinstance(tool_node_outputs[1]["db_write_plan"], DBWritePlan)
+    assert tool_node_outputs[1]["db_write_plan"].tool_name == "create_task"
+    assert (
+        tool_node_outputs[1]["db_write_plan"].confirmation_id
+        == tool_node_outputs[1]["pending_confirmation"].confirmation_id
+    )
+    assert isinstance(tool_node_outputs[2]["db_write_plan"], DBWritePlan)
+    assert tool_node_outputs[2]["db_write_plan"].tool_name == "set_reminder"
+    assert (
+        tool_node_outputs[2]["db_write_plan"].confirmation_id
+        == tool_node_outputs[2]["pending_confirmation"].confirmation_id
+    )
     assert len(tasks) == 1
     assert tasks[0].title == "做饭"
     assert len(reminders) == 1

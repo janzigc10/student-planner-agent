@@ -3348,6 +3348,15 @@ async def run_agent_action_loop(
     pending_write_confirmation: PendingConfirmation | None = None
     pending_write_confirmation_answer: str | None = None
     step = 0
+    graph_state: dict[str, Any] = {
+        "messages": messages,
+        "tool_history": tool_history,
+        "preflight_reference_texts": preflight_reference_texts,
+        "preflight_user_texts": preflight_user_texts,
+        "error_count": error_count,
+        "events": [],
+        "step": step,
+    }
 
     for iteration in range(MAX_ITERATIONS):
         check_max_loop_iterations(iteration, MAX_ITERATIONS)
@@ -3554,20 +3563,50 @@ async def run_agent_action_loop(
                     preflight_reference_texts.append(context_text)
                     preflight_user_texts.append(context_text)
 
+            active_tool_state: dict[str, Any] = {
+                **graph_state,
+                "messages": messages,
+                "pending_tool_call": tool_call,
+                "tool_history": tool_history,
+                "preflight_reference_texts": preflight_reference_texts,
+                "preflight_user_texts": preflight_user_texts,
+                "error_count": error_count,
+                "events": [],
+                "step": step,
+                **(
+                    {"last_free_slots_result": last_free_slots_result}
+                    if last_free_slots_result is not None
+                    else {}
+                ),
+            }
+            if pending_write_confirmation is not None:
+                active_tool_state["pending_confirmation"] = pending_write_confirmation
+            if pending_write_confirmation_answer is not None:
+                active_tool_state["pending_confirmation_answer"] = pending_write_confirmation_answer
+
             async def confirmed_write_executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
+                pending_confirmation = active_tool_state.get("pending_confirmation")
+                pending_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
+                )
+                db_write_plan = (
+                    _build_db_write_plan(
+                        pending_confirmation=pending_confirmation,
+                        tool_name=name,
+                        args=args,
+                        description=f"Confirmed generic {name} write.",
+                    )
+                    if pending_confirmation is not None
+                    else None
+                )
+                if db_write_plan is not None:
+                    active_tool_state["db_write_plan"] = db_write_plan
                 return await _execute_confirmed_db_write_plan(
-                    pending_confirmation=pending_write_confirmation,
-                    db_write_plan=(
-                        _build_db_write_plan(
-                            pending_confirmation=pending_write_confirmation,
-                            tool_name=name,
-                            args=args,
-                            description=f"Confirmed generic {name} write.",
-                        )
-                        if pending_write_confirmation is not None
-                        else None
-                    ),
-                    confirmation_answer=pending_write_confirmation_answer or "",
+                    pending_confirmation=pending_confirmation,
+                    db_write_plan=db_write_plan,
+                    confirmation_answer=str(active_tool_state.get("pending_confirmation_answer") or ""),
                     db=db,
                     user_id=user.id,
                 )
@@ -3575,21 +3614,7 @@ async def run_agent_action_loop(
             from app.agent import langgraph_loop as langgraph_runtime
 
             node_state = await langgraph_runtime.run_langgraph_tool_node(
-                {
-                    "messages": messages,
-                    "pending_tool_call": tool_call,
-                    "tool_history": tool_history,
-                    "preflight_reference_texts": preflight_reference_texts,
-                    "preflight_user_texts": preflight_user_texts,
-                    "error_count": error_count,
-                    "events": [],
-                    "step": step,
-                    **(
-                        {"last_free_slots_result": last_free_slots_result}
-                        if last_free_slots_result is not None
-                        else {}
-                    ),
-                },
+                active_tool_state,
                 langgraph_runtime.GraphToolNodeRuntime(
                     db=db,
                     user_id=user.id,
@@ -3599,6 +3624,12 @@ async def run_agent_action_loop(
                     tool_definitions=TOOL_DEFINITIONS,
                 ),
             )
+            if "db_write_plan" in active_tool_state:
+                node_state["db_write_plan"] = active_tool_state["db_write_plan"]
+            if "pending_confirmation" in active_tool_state:
+                node_state["pending_confirmation"] = active_tool_state["pending_confirmation"]
+            if "pending_confirmation_answer" in active_tool_state:
+                node_state["pending_confirmation_answer"] = active_tool_state["pending_confirmation_answer"]
 
             messages = list(node_state.get("messages", messages))
             tool_history = list(node_state.get("tool_history", tool_history))
@@ -3636,28 +3667,37 @@ async def run_agent_action_loop(
             if tool_name == "ask_user" or saw_ask_user:
                 if user_response is None:
                     user_response = "确认"
-                question = str(result.get("question") or "")
-                if question and should_include_confirmed_question(user_response):
-                    preflight_reference_texts.append(question)
-                preflight_reference_texts.append(str(user_response))
-                preflight_user_texts.append(str(user_response))
-                pending_write_confirmation = _build_confirmed_write_state_from_ask(
-                    tool_args=tool_args,
-                    ask_result=result,
-                    confirmation_answer=str(user_response),
+                graph_state = dict(
+                    langgraph_runtime.resume_langgraph_ask_user_state(
+                        node_state,
+                        user_response=str(user_response),
+                    )
                 )
-                pending_write_confirmation_answer = str(user_response) if pending_write_confirmation else None
-                tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": tool_result_content,
-                    }
+                messages = list(graph_state.get("messages", messages))
+                preflight_reference_texts = list(
+                    graph_state.get("preflight_reference_texts", preflight_reference_texts)
+                )
+                preflight_user_texts = list(graph_state.get("preflight_user_texts", preflight_user_texts))
+                pending_confirmation = graph_state.get("pending_confirmation")
+                pending_write_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
+                )
+                pending_write_confirmation_answer = (
+                    str(graph_state.get("pending_confirmation_answer") or "")
+                    if pending_write_confirmation is not None
+                    else None
                 )
                 step += 1
+                graph_state["step"] = step
+                resume_state = dict(graph_state.get("resume_state") or {})
+                resume_state["step"] = step
+                graph_state["resume_state"] = resume_state
                 await _log_step(db, user.id, session_id, step, tool_name, tool_args, result)
                 continue
+
+            graph_state = dict(node_state)
 
             if tool_name == "create_study_plan" and "error" not in result:
                 shortcut = _run_confirmed_study_plan_write(

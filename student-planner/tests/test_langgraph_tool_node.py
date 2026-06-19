@@ -3,7 +3,12 @@ import json
 import pytest
 from sqlalchemy import select
 
-from app.agent.langgraph_loop import GraphToolNodeRuntime, run_langgraph_tool_node
+from app.agent.contracts import PendingConfirmation
+from app.agent.langgraph_loop import (
+    GraphToolNodeRuntime,
+    resume_langgraph_ask_user_state,
+    run_langgraph_tool_node,
+)
 from app.models.agent_log import AgentLog
 from app.models.course import Course
 from app.models.user import User
@@ -71,6 +76,62 @@ async def test_langgraph_tool_node_blocks_consecutive_ask_user_without_user_visi
     assert state["events"] == []
     assert state["tool_history"] == ["ask_user"]
     assert "ask_user" in state["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_langgraph_tool_node_records_pending_ask_and_resume_confirmation_state(setup_db):
+    async with TestSession() as db:
+        user = User(id="tool-node-ask-state", username="tool-node-ask-state", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        state = await run_langgraph_tool_node(
+            _base_state(
+                "ask_user",
+                {
+                    "question": "Confirm creating Smoke task with a reminder?",
+                    "type": "confirm",
+                    "data": {
+                        "tasks": [
+                            {
+                                "title": "Smoke task",
+                                "scheduled_date": "2099-06-01",
+                                "start_time": "15:00",
+                                "end_time": "16:00",
+                            }
+                        ]
+                    },
+                },
+            ),
+            GraphToolNodeRuntime(db=db, user_id=user.id, session_id="session-tool-node-ask-state"),
+        )
+
+    assert state["pending_ask"]["status"] == "awaiting_answer"
+    assert state["pending_ask"]["tool_name"] == "ask_user"
+    assert state["pending_ask"]["tool_call_id"] == "call-1"
+    assert state["resume_state"] == {
+        "status": "awaiting_answer",
+        "tool_name": "ask_user",
+        "tool_call_id": "call-1",
+    }
+    assert state["tool_history"] == ["ask_user"]
+
+    resumed = resume_langgraph_ask_user_state(state, user_response="确认")
+
+    assert resumed["submitted_answer"] == "确认"
+    assert resumed["pending_ask"]["status"] == "answered"
+    assert resumed["pending_ask"]["answer"] == "确认"
+    assert isinstance(resumed["pending_confirmation"], PendingConfirmation)
+    assert resumed["pending_confirmation"].allowed_tool_names == ("create_task",)
+    assert resumed["pending_confirmation_answer"] == "确认"
+    assert resumed["resume_state"]["status"] == "answered"
+    assert resumed["resume_state"]["submitted_answer"] == "确认"
+    assert resumed["tool_history"] == ["ask_user"]
+    assert resumed["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-1",
+        "content": json.dumps({"user_response": "确认"}, ensure_ascii=False),
+    }
 
 
 @pytest.mark.asyncio

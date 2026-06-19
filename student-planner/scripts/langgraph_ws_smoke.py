@@ -185,6 +185,13 @@ def choose_message(payload):
             return {"role": "assistant", "content": "tool failure recovered"}
         return {"role": "assistant", "content": None, "tool_calls": [tool_call("create_task", {"title": "Recovered task", "scheduled_date": "2099-06-02", "start_time": "10:00", "end_time": "10:30"})]}
 
+    if "TASK_CANCEL_SMOKE" in user:
+        if "ask_user" not in calls:
+            return {"role": "assistant", "content": None, "tool_calls": [tool_call("ask_user", {"question": "Confirm creating Cancelled task?", "type": "review", "data": {"tasks": [{"title": "Cancelled task", "scheduled_date": "2099-06-03", "start_time": "10:00", "end_time": "10:30"}]}})]}
+        if "create_task" not in calls:
+            return {"role": "assistant", "content": None, "tool_calls": [tool_call("create_task", {"title": "Cancelled task", "scheduled_date": "2099-06-03", "start_time": "10:00", "end_time": "10:30"})]}
+        return {"role": "assistant", "content": "task cancel done"}
+
     if "TASK_UPDATE_SMOKE" in user:
         if "list_tasks" not in calls:
             return {"role": "assistant", "content": None, "tool_calls": [tool_call("list_tasks", {"date_from": "2099-06-01", "date_to": "2099-06-01"})]}
@@ -327,6 +334,12 @@ async def run_ws_smoke(token: str) -> dict[str, list[str]]:
                 "TOOL_FAILURE_SMOKE 创建一个 Recovered task 任务，时间是 2099-06-02 10:00-10:30",
                 ["确认"],
             ),
+            "task_cancel": await run_turn(
+                ws,
+                "task_cancel",
+                "TASK_CANCEL_SMOKE 创建一个 Cancelled task 任务，时间是 2099-06-03 10:00-10:30",
+                ["no"],
+            ),
             "task_create": await run_turn(
                 ws,
                 "task_create",
@@ -446,6 +459,10 @@ def assert_invariants(db_state: dict) -> None:
         and task["end"] == "10:30"
         for task in tasks
     ), json.dumps(db_state, ensure_ascii=True)
+    assert not any(task["title"] == "Cancelled task" for task in tasks), json.dumps(
+        db_state,
+        ensure_ascii=True,
+    )
     assert any(
         name in courses
         for name in ["高等数学", "线性代数", "大学英语", "大学物理", "概率论", "体育"]
@@ -463,6 +480,12 @@ def assert_smoke_evidence(sequences: dict) -> None:
     )
     assert "create_task" in sequences["tool_failure"]["sequence"], json.dumps(
         sequences["tool_failure"], ensure_ascii=True
+    )
+    assert "ask_user" in sequences["task_cancel"]["sequence"], json.dumps(
+        sequences["task_cancel"], ensure_ascii=True
+    )
+    assert "create_task" in sequences["task_cancel"]["sequence"], json.dumps(
+        sequences["task_cancel"], ensure_ascii=True
     )
     for label, evidence in sequences.items():
         assert "delegate_legacy_loop" not in evidence["graph_nodes"], json.dumps(

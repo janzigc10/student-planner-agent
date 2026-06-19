@@ -75,7 +75,10 @@ A LangGraph-native state must include at least:
 - `messages`: LLM-visible conversation and tool messages.
 - `runtime_hints`: system hints such as RAG context.
 - `rag_result`: retrieval result and evidence metadata.
-- `pending_confirmation`: active `ask_user` request and data required to resume.
+- `pending_ask`: active `ask_user` pause state, including tool name, tool call id, normalized ask type, question, options/data, status, and the submitted answer once resumed.
+- `submitted_answer`: the user answer received through WebSocket `asend` for the active ask-user pause.
+- `pending_confirmation`: active write confirmation derived from a confirmed `ask_user` reply, including confirmation id, route, allowed tool scope, and review data required to resume safely.
+- `pending_confirmation_answer`: the submitted confirmation answer paired with `pending_confirmation`.
 - `tool_history`: ordered tool names used for loop guardrails and stream mode decisions.
 - `preflight_reference_texts`: user and confirmed question text used for reminder/context argument repair.
 - `preflight_user_texts`: user-provided text used for tool intent and task preflight decisions.
@@ -83,7 +86,8 @@ A LangGraph-native state must include at least:
 - `last_tool_result`: last raw result from `execute_tool`.
 - `last_free_slots_result`: free-slot result reused by study/work plan generation.
 - `review_data`: candidate plan, parsed schedule, or course disambiguation payload shown to the user.
-- `db_write_plan`: intended write operation awaiting confirmation.
+- `db_write_plan`: intended write operation awaiting confirmation, built from the current pending confirmation and cleared on ask-user resume before the next confirmed write tool rebuilds it.
+- `resume_state`: explicit pause/resume trace for generator resumes, including awaiting/answered status, tool name, tool call id, submitted answer, step, and whether a write confirmation was created.
 - `stream_state`: message id, buffered deltas, and whether text deltas were emitted.
 - `step`: persisted agent-log step counter.
 - `pending_tool_call`: the current OpenAI-style tool call being executed by the graph-native tool node.
@@ -127,7 +131,9 @@ Plan generators `create_study_plan` and `create_work_plan` create candidate task
 
 Confirmation State V1 now has a shared agent-loop DB write gate. Schedule import builds a `PendingConfirmation` and `DBWritePlan` before showing the final parsed-course review card, and `bulk_import_courses` is called only through `_execute_confirmed_db_write_plan()` after the submitted answer confirms the same confirmation id, route, and tool scope. The same helper now gates confirmed task writes (`create_task`, `update_task`, `set_reminder` through the generic tool loop and local task shortcuts), course maintenance writes (`update_course`, `delete_course`), and study/work-plan task writes. Cancel and negative answers return `text -> done` without executing the write plan.
 
-Current remaining legacy caveat: `execute_tool` is still a direct dispatcher for non-agent callers and direct tool tests. The gate is enforced in the agent loop before write tools execute, not in HTTP routers or the low-level dispatcher. A later LangGraph-native tool node must preserve this `pending_confirmation/db_write_plan` state and should keep `save_period_times` semantics explicit if schedule metadata collection is moved out of the legacy shortcut.
+Current LangGraph-native action state: generic `ask_user` pauses now write `pending_ask` and `resume_state` from `run_langgraph_tool_node()`. When the WebSocket layer submits an answer through the generator, `resume_langgraph_ask_user_state()` records `submitted_answer`, marks the pending ask as answered, appends the tool message, and constructs `pending_confirmation` / `pending_confirmation_answer` when the answer confirms a review payload. Confirmed write tools then rebuild `db_write_plan` from that graph state immediately before execution, so the task/reminder, study/work plan, schedule import, and course-maintenance golden paths can assert confirmation id and tool-scope matching without relying only on inner generator local variables.
+
+Current remaining legacy caveat: `execute_tool` is still a direct dispatcher for non-agent callers and direct tool tests. The gate is enforced in the agent loop before write tools execute, not in HTTP routers or the low-level dispatcher. The outer generator still owns the actual WebSocket `asend` suspension/resume point, and no persistent DB-backed session table has been introduced. Local product shortcuts and compatibility fallback paths remain legacy-compatible, but golden tests and smoke must prove that the core LangGraph runtime paths preserve `pending_ask/submitted_answer/pending_confirmation/db_write_plan/resume_state` and do not depend on `delegate_legacy_loop`.
 
 ## Tool Boundary
 
@@ -147,7 +153,7 @@ The graph-native tool node must preserve the current boundary:
 12. Append tool message for the model.
 13. Update `tool_history` and `error_count`.
 
-Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call and is now used by the production generic action loop under `SP_AGENT_RUNTIME=langgraph`. It owns guardrails, task/schema preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, `last_tool_result`, and `last_free_slots_result` updates through graph state. The outer action loop still owns multi-turn orchestration concerns that require WebSocket `asend`, including user replies to `ask_user`, confirmed-write state construction from those replies, and study/work context collection before the pending tool call enters the node. Full streaming action-route orchestration now enters LangGraph action nodes and calls `run_agent_action_loop()` without `delegate_legacy_loop`; RAG-hit and plain-chat golden paths enter `rag_qa` / `plain_chat` and call `run_agent_text_loop()` instead of the compatibility fallback. `delegate_legacy_loop` remains only for explicitly compatible non-golden routes, and golden tests/smoke must prove their `graph_nodes` do not include it.
+Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call and is now used by the production generic action loop under `SP_AGENT_RUNTIME=langgraph`. It owns guardrails, task/schema preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, `last_tool_result`, `last_free_slots_result`, `pending_ask`, `submitted_answer`, `pending_confirmation`, `pending_confirmation_answer`, `db_write_plan`, and `resume_state` updates through graph state. The outer action loop still owns multi-turn orchestration concerns that require WebSocket `asend` and study/work context collection before the pending tool call enters the node, but generic ask-user resume now calls `resume_langgraph_ask_user_state()` so the resumed answer and confirmation state are mirrored in `PlannerGraphState`. Full streaming action-route orchestration now enters LangGraph action nodes and calls `run_agent_action_loop()` without `delegate_legacy_loop`; RAG-hit and plain-chat golden paths enter `rag_qa` / `plain_chat` and call `run_agent_text_loop()` instead of the compatibility fallback. `delegate_legacy_loop` remains only for explicitly compatible non-golden routes, and golden tests/smoke must prove their `graph_nodes` do not include it.
 
 ## Streaming Strategy
 
