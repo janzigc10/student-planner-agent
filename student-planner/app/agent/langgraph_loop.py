@@ -24,6 +24,7 @@ from app.agent.loop import (
     _log_step,
     _save_message,
     _to_persisted_tool_summary,
+    run_agent_action_loop,
     run_agent_loop,
 )
 from app.agent.rag import build_rag_context
@@ -332,12 +333,44 @@ def _delegate_legacy_loop_node(state: PlannerGraphState) -> PlannerGraphState:
     }
 
 
+def _action_route_node(node_name: str, state: PlannerGraphState) -> PlannerGraphState:
+    return {
+        **state,
+        "should_delegate_legacy_loop": False,
+        "graph_nodes": [*state.get("graph_nodes", []), node_name],
+    }
+
+
+def _tool_workflow_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_route_node(AgentRoute.TOOL_WORKFLOW.value, state)
+
+
+def _schedule_import_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_route_node(AgentRoute.SCHEDULE_IMPORT.value, state)
+
+
+def _study_plan_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_route_node(AgentRoute.STUDY_PLAN.value, state)
+
+
+def _course_maintenance_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_route_node(AgentRoute.COURSE_MAINTENANCE.value, state)
+
+
+_ACTION_ROUTE_NODE_BY_ROUTE = {
+    AgentRoute.TOOL_WORKFLOW.value: AgentRoute.TOOL_WORKFLOW.value,
+    AgentRoute.SCHEDULE_IMPORT.value: AgentRoute.SCHEDULE_IMPORT.value,
+    AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
+    AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
+}
+
+
 def _route_from_route_node(state: PlannerGraphState) -> str:
     if state.get("route") == AgentRoute.NO_WEB.value:
         return "no_web"
     if state.get("should_retrieve"):
         return "retrieve_rag"
-    return "delegate_legacy_loop"
+    return _ACTION_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
 
 
 def _route_after_retrieve_node(state: PlannerGraphState) -> str:
@@ -345,6 +378,10 @@ def _route_after_retrieve_node(state: PlannerGraphState) -> str:
     if state.get("should_gate_rag_answer") and not bool(rag_result.get("evidence_sufficient")):
         return "rag_insufficient"
     return "compose_runtime_hints"
+
+
+def _route_after_compose_hints_node(state: PlannerGraphState) -> str:
+    return _ACTION_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
 
 
 def _build_graph():
@@ -356,6 +393,10 @@ def _build_graph():
     graph.add_node("retrieve_rag", _retrieve_rag_node)
     graph.add_node("compose_runtime_hints", _compose_hints_node)
     graph.add_node("rag_insufficient", _rag_insufficient_node)
+    graph.add_node(AgentRoute.TOOL_WORKFLOW.value, _tool_workflow_node)
+    graph.add_node(AgentRoute.SCHEDULE_IMPORT.value, _schedule_import_node)
+    graph.add_node(AgentRoute.STUDY_PLAN.value, _study_plan_node)
+    graph.add_node(AgentRoute.COURSE_MAINTENANCE.value, _course_maintenance_node)
     graph.add_node("delegate_legacy_loop", _delegate_legacy_loop_node)
     graph.set_entry_point("route")
     graph.add_conditional_edges(
@@ -364,6 +405,10 @@ def _build_graph():
         {
             "no_web": "no_web",
             "retrieve_rag": "retrieve_rag",
+            AgentRoute.TOOL_WORKFLOW.value: AgentRoute.TOOL_WORKFLOW.value,
+            AgentRoute.SCHEDULE_IMPORT.value: AgentRoute.SCHEDULE_IMPORT.value,
+            AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
+            AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
             "delegate_legacy_loop": "delegate_legacy_loop",
         },
     )
@@ -375,9 +420,23 @@ def _build_graph():
             "compose_runtime_hints": "compose_runtime_hints",
         },
     )
-    graph.add_edge("compose_runtime_hints", "delegate_legacy_loop")
+    graph.add_conditional_edges(
+        "compose_runtime_hints",
+        _route_after_compose_hints_node,
+        {
+            AgentRoute.TOOL_WORKFLOW.value: AgentRoute.TOOL_WORKFLOW.value,
+            AgentRoute.SCHEDULE_IMPORT.value: AgentRoute.SCHEDULE_IMPORT.value,
+            AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
+            AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
+            "delegate_legacy_loop": "delegate_legacy_loop",
+        },
+    )
     graph.add_edge("no_web", END)
     graph.add_edge("rag_insufficient", END)
+    graph.add_edge(AgentRoute.TOOL_WORKFLOW.value, END)
+    graph.add_edge(AgentRoute.SCHEDULE_IMPORT.value, END)
+    graph.add_edge(AgentRoute.STUDY_PLAN.value, END)
+    graph.add_edge(AgentRoute.COURSE_MAINTENANCE.value, END)
     graph.add_edge("delegate_legacy_loop", END)
     return graph.compile()
 
@@ -390,12 +449,22 @@ def get_langgraph_router_shell_mermaid() -> str:
             "  __start__ --> route\n"
             "  route --> no_web\n"
             "  route --> retrieve_rag\n"
+            "  route --> tool_workflow\n"
+            "  route --> schedule_import\n"
+            "  route --> study_plan\n"
+            "  route --> course_maintenance\n"
             "  route --> delegate_legacy_loop\n"
             "  retrieve_rag --> rag_insufficient\n"
             "  retrieve_rag --> compose_runtime_hints\n"
+            "  compose_runtime_hints --> tool_workflow\n"
+            "  compose_runtime_hints --> study_plan\n"
             "  compose_runtime_hints --> delegate_legacy_loop\n"
             "  no_web --> __end__\n"
             "  rag_insufficient --> __end__\n"
+            "  tool_workflow --> __end__\n"
+            "  schedule_import --> __end__\n"
+            "  study_plan --> __end__\n"
+            "  course_maintenance --> __end__\n"
             "  delegate_legacy_loop --> __end__"
         )
     return compiled_graph.get_graph().draw_mermaid()
@@ -417,12 +486,29 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
     route_target = _route_from_route_node(state)
     if route_target == "no_web":
         return _no_web_node(state)
+    if route_target == AgentRoute.TOOL_WORKFLOW.value:
+        return _tool_workflow_node(state)
+    if route_target == AgentRoute.SCHEDULE_IMPORT.value:
+        return _schedule_import_node(state)
+    if route_target == AgentRoute.STUDY_PLAN.value:
+        return _study_plan_node(state)
+    if route_target == AgentRoute.COURSE_MAINTENANCE.value:
+        return _course_maintenance_node(state)
     if route_target == "delegate_legacy_loop":
         return _delegate_legacy_loop_node(state)
     state = _retrieve_rag_node(state)
     if _route_after_retrieve_node(state) == "rag_insufficient":
         return _rag_insufficient_node(state)
     state = _compose_hints_node(state)
+    route_target = _route_after_compose_hints_node(state)
+    if route_target == AgentRoute.TOOL_WORKFLOW.value:
+        return _tool_workflow_node(state)
+    if route_target == AgentRoute.SCHEDULE_IMPORT.value:
+        return _schedule_import_node(state)
+    if route_target == AgentRoute.STUDY_PLAN.value:
+        return _study_plan_node(state)
+    if route_target == AgentRoute.COURSE_MAINTENANCE.value:
+        return _course_maintenance_node(state)
     return _delegate_legacy_loop_node(state)
 
 
@@ -433,7 +519,7 @@ async def run_langgraph_agent_loop(
     db: AsyncSession,
     llm_client: AsyncOpenAI,
 ) -> AsyncGenerator[dict[str, Any], str | None]:
-    """Run LangGraph/RAG pre-orchestration, then delegate to the proven loop."""
+    """Run LangGraph/RAG pre-orchestration and native action-route nodes."""
 
     state = await prepare_langgraph_state(user_message)
     rag_result = state.get("rag_result") or {}
@@ -514,14 +600,25 @@ async def run_langgraph_agent_loop(
             yield {"type": "done"}
             return
 
-    inner_loop = run_agent_loop(
-        user_message,
-        user,
-        session_id,
-        db,
-        llm_client,
-        runtime_hints=state.get("runtime_hints", []),
-    )
+    action_route = str(state.get("route") or "")
+    if action_route in _ACTION_ROUTE_NODE_BY_ROUTE:
+        inner_loop = run_agent_action_loop(
+            user_message,
+            user,
+            session_id,
+            db,
+            llm_client,
+            runtime_hints=state.get("runtime_hints", []),
+        )
+    else:
+        inner_loop = run_agent_loop(
+            user_message,
+            user,
+            session_id,
+            db,
+            llm_client,
+            runtime_hints=state.get("runtime_hints", []),
+        )
     try:
         event = await inner_loop.__anext__()
         while True:

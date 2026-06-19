@@ -6,14 +6,15 @@ This is the pre-migration contract for replacing the legacy `run_agent_loop()` w
 
 LangGraph should own orchestration: route selection, state transitions, loop limits, confirmation pauses, tool execution ordering, and event emission order. LangChain chains or Runnables are still useful inside graph nodes for local LLM work, prompt formatting, parsing, retrieval, and tool-bound model calls. The graph is the control plane; chains are node implementation details.
 
-The current runtime is only partially LangGraph-based:
+The current runtime is still partial, but the action golden paths now enter explicit
+LangGraph action-route terminals instead of the generic legacy-delegate node:
 
 1. `chat.py` chooses `run_langgraph_agent_loop` when `SP_AGENT_RUNTIME=langgraph`.
-2. `langgraph_loop.py` now exposes a Router Shell V1 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, and `delegate_legacy_loop` nodes.
-3. `route` conditionally sends no-web requests directly to the no-web terminal response, sends RAG/context candidates through retrieval, and sends non-RAG requests to legacy delegation.
-4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; all non-gated paths continue through hints and `delegate_legacy_loop`.
-5. Tool workflows, course maintenance, study/work plans, most `ask_user` pause/resume, preflight, and most writes still live in the proven legacy `run_agent_loop()`.
-6. Confirmation State V1 now has one pilot inside the legacy-delegated schedule import shortcut: the final `bulk_import_courses` write is executed only through a matching `pending_confirmation` plus `db_write_plan`.
+2. `langgraph_loop.py` exposes a Router Shell V2 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, `tool_workflow`, `schedule_import`, `study_plan`, `course_maintenance`, and `delegate_legacy_loop` nodes.
+3. `route` conditionally sends no-web requests directly to the no-web terminal response, sends RAG/context candidates through retrieval, and sends native action routes to their corresponding action nodes.
+4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; non-gated RAG side-channel paths continue through hints and then to the selected action node or legacy fallback.
+5. `run_langgraph_agent_loop()` dispatches `tool_workflow`, `schedule_import`, `study_plan`, and `course_maintenance` through `run_agent_action_loop()`, preserving the existing WebSocket event protocol, `ask_user` pause/resume, preflight, and confirmation write gate without appending `delegate_legacy_loop` to `graph_nodes`.
+6. `delegate_legacy_loop` remains for non-action fallback paths such as plain chat, but golden action workflows must not trace through it.
 
 ## Router Contract
 
@@ -30,19 +31,31 @@ Priority is part of the contract. Later graph edges must keep this order. RAG re
 
 `decide_agent_route()` in `contracts.py` is the executable anchor for this priority. It is intentionally conservative and does not execute tools or call a model.
 
-Router Shell V1 graph shape:
+Router Shell V2 graph shape:
 
 ```mermaid
 graph TD
   __start__ --> route
   route -.-> no_web
   route -.-> retrieve_rag
+  route -.-> tool_workflow
+  route -.-> schedule_import
+  route -.-> study_plan
+  route -.-> course_maintenance
   route -.-> delegate_legacy_loop
   retrieve_rag -.-> rag_insufficient
   retrieve_rag -.-> compose_runtime_hints
-  compose_runtime_hints --> delegate_legacy_loop
+  compose_runtime_hints -.-> tool_workflow
+  compose_runtime_hints -.-> schedule_import
+  compose_runtime_hints -.-> study_plan
+  compose_runtime_hints -.-> course_maintenance
+  compose_runtime_hints -.-> delegate_legacy_loop
   no_web --> __end__
   rag_insufficient --> __end__
+  tool_workflow --> __end__
+  schedule_import --> __end__
+  study_plan --> __end__
+  course_maintenance --> __end__
   delegate_legacy_loop --> __end__
 ```
 
@@ -129,7 +142,7 @@ The graph-native tool node must preserve the current boundary:
 12. Append tool message for the model.
 13. Update `tool_history` and `error_count`.
 
-Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call. It owns guardrails, schema/task preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, and `last_tool_result` updates through graph state. Full streaming action-loop orchestration still delegates to the legacy loop; future graph-native loop work should reuse this node instead of calling `execute_tool()` directly for agent tool execution.
+Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call. It owns guardrails, schema/task preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, and `last_tool_result` updates through graph state. Full streaming action-route orchestration now enters LangGraph action nodes and calls the shared guarded `run_agent_action_loop()` helper instead of `delegate_legacy_loop`; future graph-native loop work can decompose that helper into finer graph nodes and should reuse `run_langgraph_tool_node()` instead of calling `execute_tool()` directly for agent tool execution.
 
 ## Streaming Strategy
 

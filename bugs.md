@@ -1,5 +1,10 @@
 # Student Planner 已知问题与环境坑
 
+## 2026-06-19 LangGraph WS smoke harness 坑
+- PowerShell inline Python / WebSocket smoke 中，中文 prompt 和确认答案容易因为 shell/console 编码或测试桩字符串匹配出现误判；做 LangGraph action live smoke 时，优先使用文件化 Python/Node/Playwright harness，或在 prompt 中加入 ASCII anchor，同时确认最终发送给 `/ws/chat` 的 JSON 是 UTF-8。
+- `websockets.connect()` 默认 `max_size=1048576`，遇到课表/计划 review card 这种较大 payload 时可能以 `1009 message too big` 关闭连接；真实 backend smoke 建议显式传 `max_size=None`。
+- 本轮临时 OpenAI-compatible stub 对 `ask_user` 恢复后的 messages 重建不够稳，可能重复发 `ask_user` 或工具调用，导致 `Agent loop reached the maximum number of iterations.`；这类失败先归因到 harness，需用事件流、DB invariant 和代码级 action graph tests 交叉判断，不要直接当成产品链路失败。
+
 ## 长期环境约束
 - 当前 PATH 上的默认 `python` 不是项目测试使用的版本；后端测试统一使用 `py -3.12 -m pytest`。
 - `py -3.12 -m pip install -e ".[dev]"` 仍会因为 setuptools 顶层包识别冲突失败；当前做法是安装 `pyproject.toml` 中的直接依赖与测试依赖继续验证。

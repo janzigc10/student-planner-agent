@@ -3184,7 +3184,7 @@ async def _run_plan_adjustment_shortcut(
     yield {"type": "done"}
 
 
-async def run_agent_loop(
+async def run_agent_action_loop(
     user_message: str,
     user: User,
     session_id: str,
@@ -3192,7 +3192,7 @@ async def run_agent_loop(
     llm_client: AsyncOpenAI,
     runtime_hints: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], str | None]:
-    """Run the agent loop and yield frontend events."""
+    """Run the guarded action workflow loop and yield frontend events."""
     system_prompt = await build_system_prompt(user, db)
 
     history_result = await db.execute(
@@ -3728,6 +3728,37 @@ async def run_agent_loop(
 
     yield {"type": "error", "message": "Agent loop reached the maximum number of iterations."}
     yield {"type": "done"}
+
+
+async def run_agent_loop(
+    user_message: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    llm_client: AsyncOpenAI,
+    runtime_hints: list[str] | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Legacy-compatible entrypoint for the guarded action workflow loop."""
+
+    inner_loop = run_agent_action_loop(
+        user_message,
+        user,
+        session_id,
+        db,
+        llm_client,
+        runtime_hints=runtime_hints,
+    )
+    try:
+        event = await inner_loop.__anext__()
+        while True:
+            if event.get("type") == "ask_user":
+                user_response = yield event
+                event = await inner_loop.asend(user_response)
+            else:
+                yield event
+                event = await inner_loop.__anext__()
+    except StopAsyncIteration:
+        pass
 
 
 async def _save_message(

@@ -498,6 +498,10 @@ def test_langgraph_router_shell_mermaid_exposes_route_nodes():
         "retrieve_rag",
         "compose_runtime_hints",
         "rag_insufficient",
+        "tool_workflow",
+        "study_plan",
+        "schedule_import",
+        "course_maintenance",
         "delegate_legacy_loop",
     ):
         assert node_name in mermaid
@@ -558,7 +562,7 @@ async def test_prepare_langgraph_state_routes_rag_insufficient_inside_graph(monk
 
 
 @pytest.mark.asyncio
-async def test_prepare_langgraph_state_keeps_study_plan_retrieval_non_gating_delegate(monkeypatch):
+async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(monkeypatch):
     monkeypatch.setattr(
         "app.agent.langgraph_loop.build_rag_context",
         lambda _: {
@@ -575,18 +579,19 @@ async def test_prepare_langgraph_state_keeps_study_plan_retrieval_non_gating_del
     assert state["route"] == "study_plan"
     assert state["should_retrieve"] is True
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is True
+    assert state["should_delegate_legacy_loop"] is False
     assert state["runtime_hints"] == []
     assert state["graph_nodes"] == [
         "route",
         "retrieve_rag",
         "compose_runtime_hints",
-        "delegate_legacy_loop",
+        "study_plan",
     ]
+    assert "delegate_legacy_loop" not in state["graph_nodes"]
 
 
 @pytest.mark.asyncio
-async def test_prepare_langgraph_state_keeps_schedule_import_route_on_legacy_delegate(monkeypatch):
+async def test_prepare_langgraph_state_routes_schedule_import_to_native_action_node(monkeypatch):
     monkeypatch.setattr(
         "app.agent.langgraph_loop.build_rag_context",
         lambda _: (_ for _ in ()).throw(AssertionError("schedule import should not retrieve RAG")),
@@ -597,8 +602,9 @@ async def test_prepare_langgraph_state_keeps_schedule_import_route_on_legacy_del
     assert state["route"] == "schedule_import"
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is True
-    assert state["graph_nodes"] == ["route", "delegate_legacy_loop"]
+    assert state["should_delegate_legacy_loop"] is False
+    assert state["graph_nodes"] == ["route", "schedule_import"]
+    assert "delegate_legacy_loop" not in state["graph_nodes"]
 
 
 @pytest.mark.asyncio
@@ -619,17 +625,35 @@ async def test_prepare_langgraph_state_keeps_reminder_route_non_gating_with_rag_
     assert state["route"] == "tool_workflow"
     assert state["should_retrieve"] is True
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is True
+    assert state["should_delegate_legacy_loop"] is False
     assert state["graph_nodes"] == [
         "route",
         "retrieve_rag",
         "compose_runtime_hints",
-        "delegate_legacy_loop",
+        "tool_workflow",
     ]
+    assert "delegate_legacy_loop" not in state["graph_nodes"]
 
 
 @pytest.mark.asyncio
-async def test_prepare_langgraph_state_keeps_course_maintenance_route_on_legacy_delegate(monkeypatch):
+async def test_prepare_langgraph_state_routes_task_update_reminder_to_native_action_node(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: (_ for _ in ()).throw(AssertionError("task update should not retrieve RAG")),
+    )
+
+    state = await prepare_langgraph_state("把刚才的任务改到2099-06-01 16:00-17:00，提前15分钟提醒")
+
+    assert state["route"] == "tool_workflow"
+    assert state["should_retrieve"] is False
+    assert state["should_gate_rag_answer"] is False
+    assert state["should_delegate_legacy_loop"] is False
+    assert state["graph_nodes"] == ["route", "tool_workflow"]
+    assert "delegate_legacy_loop" not in state["graph_nodes"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_routes_course_maintenance_to_native_action_node(monkeypatch):
     monkeypatch.setattr(
         "app.agent.langgraph_loop.build_rag_context",
         lambda _: (_ for _ in ()).throw(AssertionError("course maintenance should not retrieve RAG")),
@@ -640,8 +664,9 @@ async def test_prepare_langgraph_state_keeps_course_maintenance_route_on_legacy_
     assert state["route"] == "course_maintenance"
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is True
-    assert state["graph_nodes"] == ["route", "delegate_legacy_loop"]
+    assert state["should_delegate_legacy_loop"] is False
+    assert state["graph_nodes"] == ["route", "course_maintenance"]
+    assert "delegate_legacy_loop" not in state["graph_nodes"]
 
 
 @pytest.mark.asyncio
@@ -874,13 +899,17 @@ async def test_langgraph_agent_loop_keeps_task_planning_path_when_rag_evidence_i
         "evidence_reason": "no_relevant_local_evidence",
     }
 
-    async def fake_run_agent_loop(*args, **kwargs):
+    async def fake_run_agent_action_loop(*args, **kwargs):
         captured["runtime_hints"] = kwargs.get("runtime_hints")
         yield {"type": "done"}
 
     with (
         patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
-        patch("app.agent.langgraph_loop.run_agent_loop", side_effect=fake_run_agent_loop),
+        patch("app.agent.langgraph_loop.run_agent_action_loop", side_effect=fake_run_agent_action_loop),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Action routes should not delegate to run_agent_loop"),
+        ),
     ):
         async with TestSession() as db:
             user = User(id="user-rag-gate-plan", username="rag-gate-plan", hashed_password="x")
@@ -914,13 +943,17 @@ async def test_langgraph_agent_loop_keeps_arrangement_workflow_when_rag_evidence
         "evidence_reason": "no_relevant_local_evidence",
     }
 
-    async def fake_run_agent_loop(*args, **kwargs):
+    async def fake_run_agent_action_loop(*args, **kwargs):
         captured["runtime_hints"] = kwargs.get("runtime_hints")
         yield {"type": "done"}
 
     with (
         patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
-        patch("app.agent.langgraph_loop.run_agent_loop", side_effect=fake_run_agent_loop),
+        patch("app.agent.langgraph_loop.run_agent_action_loop", side_effect=fake_run_agent_action_loop),
+        patch(
+            "app.agent.langgraph_loop.run_agent_loop",
+            side_effect=AssertionError("Action routes should not delegate to run_agent_loop"),
+        ),
     ):
         async with TestSession() as db:
             user = User(id="user-rag-gate-arrange-workflow", username="rag-gate-arrange-workflow", hashed_password="x")
