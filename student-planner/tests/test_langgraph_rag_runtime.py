@@ -783,6 +783,8 @@ async def test_langgraph_agent_loop_emits_rag_events_and_answers_without_legacy_
     assert "delegate_legacy_loop" not in events[1]["result"]["graph_nodes"]
     assert "rag_qa" in events[1]["result"]["graph_nodes"]
     assert events[2]["type"] == "text"
+    assert "rag_qa" in events[2]["graph_nodes"]
+    assert "delegate_legacy_loop" not in events[2]["graph_nodes"]
     assert events[2]["content"] == "改革开放始于 1978 年。"
     assert events[-1]["type"] == "done"
 
@@ -818,6 +820,9 @@ async def test_langgraph_agent_loop_streams_plain_chat_without_legacy_delegate(s
     assert [event["type"] for event in events] == ["text_delta", "text_delta", "text", "done"]
     assert events[0]["message_id"] == events[2]["message_id"]
     assert events[2]["content"] == "Hello there."
+    assert "plain_chat" in events[0]["graph_nodes"]
+    assert "plain_chat" in events[2]["graph_nodes"]
+    assert "delegate_legacy_loop" not in events[2]["graph_nodes"]
 
 
 @pytest.mark.asyncio
@@ -855,6 +860,9 @@ async def test_langgraph_agent_loop_blocks_rag_qa_when_evidence_is_insufficient(
 
     assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
     assert events[1]["result"]["evidence_sufficient"] is False
+    assert "rag_insufficient" in events[1]["result"]["graph_nodes"]
+    assert "rag_insufficient" in events[2]["graph_nodes"]
+    assert "delegate_legacy_loop" not in events[2]["graph_nodes"]
     assert events[2]["content"] == "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
 
 
@@ -1096,6 +1104,7 @@ async def test_langgraph_agent_loop_preserves_no_web_guard_for_current_public_ev
 
     assert [event["type"] for event in events] == ["text", "done"]
     assert "没有联网检索" in events[0]["content"]
+    assert events[0]["graph_nodes"] == ["route", "no_web"]
 
 
 @pytest.mark.asyncio

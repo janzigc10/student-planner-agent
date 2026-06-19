@@ -560,16 +560,21 @@ def _apply_action_trace_steps(state: PlannerGraphState) -> PlannerGraphState:
     return next_state
 
 
-def _with_action_graph_trace(event: dict[str, Any], graph_nodes: list[str]) -> dict[str, Any]:
-    if event.get("type") != "tool_result" or not isinstance(event.get("result"), dict):
+def _with_graph_trace(event: dict[str, Any], graph_nodes: list[str]) -> dict[str, Any]:
+    trace = list(graph_nodes)
+    if not trace:
         return event
-    return {
-        **event,
-        "result": {
-            **event["result"],
-            "graph_nodes": list(graph_nodes),
-        },
-    }
+    if event.get("type") == "tool_result" and isinstance(event.get("result"), dict):
+        return {
+            **event,
+            "result": {
+                **event["result"],
+                "graph_nodes": trace,
+            },
+        }
+    if event.get("type") in {"text_delta", "text", "result"}:
+        return {**event, "graph_nodes": trace}
+    return event
 
 
 def _build_graph():
@@ -750,7 +755,10 @@ async def run_langgraph_agent_loop(
         message_id = str(uuid.uuid4())
         text = _current_public_info_unavailable_text()
         await _save_message(db, session_id, "user", user_message)
-        yield {"type": "text", "message_id": message_id, "content": text}
+        yield _with_graph_trace(
+            {"type": "text", "message_id": message_id, "content": text},
+            list(state.get("graph_nodes", [])),
+        )
         await _save_message(db, session_id, "assistant", text)
         yield {"type": "done"}
         return
@@ -814,11 +822,14 @@ async def run_langgraph_agent_loop(
         if state.get("terminal_response") == "rag_insufficient":
             message_id = str(uuid.uuid4())
             await _save_message(db, session_id, "user", user_message)
-            yield {
-                "type": "text",
-                "message_id": message_id,
-                "content": RAG_INSUFFICIENT_EVIDENCE_TEXT,
-            }
+            yield _with_graph_trace(
+                {
+                    "type": "text",
+                    "message_id": message_id,
+                    "content": RAG_INSUFFICIENT_EVIDENCE_TEXT,
+                },
+                list(state.get("graph_nodes", [])),
+            )
             await _save_message(db, session_id, "assistant", RAG_INSUFFICIENT_EVIDENCE_TEXT)
             yield {"type": "done"}
             return
@@ -854,8 +865,8 @@ async def run_langgraph_agent_loop(
     try:
         event = await inner_loop.__anext__()
         while True:
-            if action_route in _ACTION_ROUTE_NODE_BY_ROUTE:
-                event = _with_action_graph_trace(event, list(state.get("graph_nodes", [])))
+            if action_route in _NATIVE_ROUTE_NODE_BY_ROUTE:
+                event = _with_graph_trace(event, list(state.get("graph_nodes", [])))
             if event.get("type") == "ask_user":
                 user_response = yield event
                 event = await inner_loop.asend(user_response)

@@ -6,8 +6,10 @@ This is the pre-migration contract for replacing the legacy `run_agent_loop()` w
 
 LangGraph should own orchestration: route selection, state transitions, loop limits, confirmation pauses, tool execution ordering, and event emission order. LangChain chains or Runnables are still useful inside graph nodes for local LLM work, prompt formatting, parsing, retrieval, and tool-bound model calls. The graph is the control plane; chains are node implementation details.
 
-The current runtime is still partial, but the golden paths now enter explicit
-LangGraph route-specific trace nodes instead of stopping at one generic
+The current runtime is still partial. It is a LangGraph route shell with
+route-specific trace nodes and delegated helper execution, not a full
+graph-owned state machine for every loop step yet. The golden paths now enter
+explicit LangGraph route-specific trace nodes instead of stopping at one generic
 legacy-delegate or terminal action node:
 
 1. `chat.py` chooses `run_langgraph_agent_loop` when `SP_AGENT_RUNTIME=langgraph`.
@@ -16,7 +18,7 @@ legacy-delegate or terminal action node:
 4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; sufficient RAG QA goes through `compose_runtime_hints` and then `rag_qa`, while non-gated RAG side-channel paths continue through hints and then to the selected action node or compatibility fallback.
 5. `tool_workflow` now traces through `task_tool_node -> ask_user_pause -> confirmed_write`; `schedule_import` traces through `schedule_parse -> ask_user_pause -> confirmed_write`; `study_plan` and work-plan requests trace through `plan_review_write -> confirmed_write`; `course_maintenance` traces through `course_disambiguate -> ask_user_pause -> confirmed_write`.
 6. `run_langgraph_agent_loop()` still dispatches the action work through `run_agent_action_loop()`, preserving the existing WebSocket event protocol, `ask_user` pause/resume, preflight, and confirmation write gate without appending `delegate_legacy_loop` to `graph_nodes`. Action `tool_result.result.graph_nodes` carries the route-specific trace for regression and smoke evidence.
-7. `run_langgraph_agent_loop()` dispatches `rag_qa` and `plain_chat` through `run_agent_text_loop()`, preserving text streaming without exposing tool calls or appending `delegate_legacy_loop` to `graph_nodes`.
+7. `run_langgraph_agent_loop()` dispatches `rag_qa` and `plain_chat` through `run_agent_text_loop()`, preserving text streaming without exposing tool calls or appending `delegate_legacy_loop` to `graph_nodes`. Text-only trace evidence is attached as an optional top-level `graph_nodes` field on existing `text_delta`, `text`, or `result` events.
 8. `delegate_legacy_loop` remains only as an explicitly marked compatibility fallback for routes not covered by the golden matrix; golden paths must not trace through it.
 
 ## Router Contract
@@ -108,14 +110,20 @@ Runtime dependencies such as `user`, `session_id`, `db`, and `llm_client` may li
 
 Agent events are JSON objects sent through the WebSocket after the `connected` handshake.
 
-- `text_delta`: `{type, message_id, delta}`. Only emitted for text-only streaming or replayed buffered deltas after a non-tool final response.
-- `text`: `{type, message_id, content}`. Final assistant text for a turn or direct guard/gate response.
+- `text_delta`: `{type, message_id, delta, graph_nodes?}`. Only emitted for text-only streaming or replayed buffered deltas after a non-tool final response.
+- `text`: `{type, message_id, content, graph_nodes?}`. Final assistant text for a turn or direct guard/gate response.
 - `tool_call`: `{type, name, args}`. Must precede the matching `tool_result`, except `ask_user` emits a pause event instead of a normal tool result.
-- `tool_result`: `{type, name, result}`. Emitted after non-`ask_user` tool execution.
+- `tool_result`: `{type, name, result}`. Emitted after non-`ask_user` tool execution. LangGraph trace evidence for RAG and action-tool paths is carried in `result.graph_nodes`.
 - `ask_user`: `{type, question, ask_type, options?, data?}`. Pauses the generator and resumes with the submitted answer.
-- `result`: `{type, message_id, content, tone?, eyebrow?, title?, chips?, data?}`. Structured assistant result used by review override and rich result surfaces.
+- `result`: `{type, message_id, content, graph_nodes?, tone?, eyebrow?, title?, chips?, data?}`. Structured assistant result used by review override and rich result surfaces.
 - `done`: `{type}`. Exactly one terminal success event after text/tool workflow completion.
 - `error`: `{type, message}`. User-visible runtime or guardrail error. Agent-generator terminal errors should be followed by `done`; WebSocket-wrapper exceptions are currently standalone `error` events.
+
+Trace placement is intentionally additive and compatibility-oriented: tool
+paths expose `graph_nodes` inside `tool_result.result`, while text-only paths
+such as no-web and plain chat expose the same trace as an optional top-level
+field on existing text events. `done` remains a terminal marker and does not
+carry graph trace.
 
 Allowed direct guard/gate sequences:
 
@@ -161,7 +169,7 @@ The graph-native tool node must preserve the current boundary:
 12. Append tool message for the model.
 13. Update `tool_history` and `error_count`.
 
-Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call and is now used by the production generic action loop under `SP_AGENT_RUNTIME=langgraph`. It owns guardrails, task/schema preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, `last_tool_result`, `last_free_slots_result`, `pending_ask`, `submitted_answer`, `pending_confirmation`, `pending_confirmation_answer`, `db_write_plan`, and `resume_state` updates through graph state. The outer action loop still owns multi-turn orchestration concerns that require WebSocket `asend` and study/work context collection before the pending tool call enters the node, but generic ask-user resume now calls `resume_langgraph_ask_user_state()` so the resumed answer and confirmation state are mirrored in `PlannerGraphState`. Full streaming action-route orchestration now enters LangGraph action route-specific trace nodes and calls `run_agent_action_loop()` without `delegate_legacy_loop`; RAG-hit and plain-chat golden paths enter `rag_qa` / `plain_chat` and call `run_agent_text_loop()` instead of the compatibility fallback. `delegate_legacy_loop` remains only for explicitly compatible non-golden routes, and golden tests/smoke must prove their `graph_nodes` do not include it while action paths expose `task_tool_node`, `ask_user_pause`, `confirmed_write`, `schedule_parse`, `course_disambiguate`, or `plan_review_write` as applicable.
+Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call and is now used by the production generic action loop under `SP_AGENT_RUNTIME=langgraph`. It owns guardrails, task/schema preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, `last_tool_result`, `last_free_slots_result`, `pending_ask`, `submitted_answer`, `pending_confirmation`, `pending_confirmation_answer`, `db_write_plan`, and `resume_state` updates through graph state. The outer action loop still owns multi-turn orchestration concerns that require WebSocket `asend` and study/work context collection before the pending tool call enters the node, but generic ask-user resume now calls `resume_langgraph_ask_user_state()` so the resumed answer and confirmation state are mirrored in `PlannerGraphState`. Streaming action-route orchestration now enters LangGraph action route-specific trace nodes and calls `run_agent_action_loop()` without `delegate_legacy_loop`; RAG-hit and plain-chat golden paths enter `rag_qa` / `plain_chat` and call `run_agent_text_loop()` instead of the compatibility fallback. This remains delegated helper execution behind graph trace nodes, not a complete replacement of every legacy helper with graph-native nodes. `delegate_legacy_loop` remains only for explicitly compatible non-golden routes, and golden tests/smoke must prove their `graph_nodes` do not include it while text paths expose `no_web`, `rag_qa`, `rag_insufficient`, or `plain_chat`, and action paths expose `task_tool_node`, `ask_user_pause`, `confirmed_write`, `schedule_parse`, `course_disambiguate`, or `plan_review_write` as applicable.
 
 ## Streaming Strategy
 

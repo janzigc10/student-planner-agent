@@ -250,6 +250,8 @@ async def run_turn(ws, label: str, message: str, answers: list[str]) -> dict:
         item = str(event.get("name") or event.get("type"))
         sequence.append(item)
         log(f"{label}:{item}")
+        if isinstance(event.get("graph_nodes"), list):
+            graph_nodes.extend(str(node) for node in event["graph_nodes"])
         result = event.get("result")
         if isinstance(result, dict) and isinstance(result.get("graph_nodes"), list):
             graph_nodes.extend(str(node) for node in result["graph_nodes"])
@@ -471,11 +473,17 @@ def assert_invariants(db_state: dict) -> None:
 
 def assert_smoke_evidence(sequences: dict) -> None:
     assert sequences["no_web"]["sequence"] == ["text", "done"], json.dumps(sequences, ensure_ascii=True)
+    assert "no_web" in sequences["no_web"]["graph_nodes"], json.dumps(
+        sequences["no_web"], ensure_ascii=True
+    )
     assert "rag_qa" in sequences["rag_hit"]["graph_nodes"], json.dumps(sequences["rag_hit"], ensure_ascii=True)
     assert "rag_insufficient" in sequences["rag_insufficient"]["graph_nodes"], json.dumps(
         sequences["rag_insufficient"], ensure_ascii=True
     )
     assert sequences["plain_chat"]["sequence"][0] == "text_delta", json.dumps(
+        sequences["plain_chat"], ensure_ascii=True
+    )
+    assert "plain_chat" in sequences["plain_chat"]["graph_nodes"], json.dumps(
         sequences["plain_chat"], ensure_ascii=True
     )
     assert "create_task" in sequences["tool_failure"]["sequence"], json.dumps(
