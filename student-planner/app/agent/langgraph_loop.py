@@ -460,6 +460,13 @@ def _action_route_node(node_name: str, state: PlannerGraphState) -> PlannerGraph
     }
 
 
+def _action_trace_node(node_name: str, state: PlannerGraphState) -> PlannerGraphState:
+    return {
+        **state,
+        "graph_nodes": [*state.get("graph_nodes", []), node_name],
+    }
+
+
 def _tool_workflow_node(state: PlannerGraphState) -> PlannerGraphState:
     return _action_route_node(AgentRoute.TOOL_WORKFLOW.value, state)
 
@@ -484,11 +491,41 @@ def _plain_chat_node(state: PlannerGraphState) -> PlannerGraphState:
     return _action_route_node(AgentRoute.PLAIN_CHAT.value, state)
 
 
+def _task_tool_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_trace_node("task_tool_node", state)
+
+
+def _ask_user_pause_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_trace_node("ask_user_pause", state)
+
+
+def _confirmed_write_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_trace_node("confirmed_write", state)
+
+
+def _schedule_parse_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_trace_node("schedule_parse", state)
+
+
+def _plan_review_write_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_trace_node("plan_review_write", state)
+
+
+def _course_disambiguate_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_trace_node("course_disambiguate", state)
+
+
 _ACTION_ROUTE_NODE_BY_ROUTE = {
     AgentRoute.TOOL_WORKFLOW.value: AgentRoute.TOOL_WORKFLOW.value,
     AgentRoute.SCHEDULE_IMPORT.value: AgentRoute.SCHEDULE_IMPORT.value,
     AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
     AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
+}
+_ACTION_TRACE_STEPS_BY_ROUTE = {
+    AgentRoute.TOOL_WORKFLOW.value: ("task_tool_node", "ask_user_pause", "confirmed_write"),
+    AgentRoute.SCHEDULE_IMPORT.value: ("schedule_parse", "ask_user_pause", "confirmed_write"),
+    AgentRoute.STUDY_PLAN.value: ("plan_review_write", "confirmed_write"),
+    AgentRoute.COURSE_MAINTENANCE.value: ("course_disambiguate", "ask_user_pause", "confirmed_write"),
 }
 _TEXT_ROUTE_NODE_BY_ROUTE = {
     AgentRoute.RAG_QA.value: AgentRoute.RAG_QA.value,
@@ -516,6 +553,25 @@ def _route_after_compose_hints_node(state: PlannerGraphState) -> str:
     return _NATIVE_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
 
 
+def _apply_action_trace_steps(state: PlannerGraphState) -> PlannerGraphState:
+    next_state = state
+    for node_name in _ACTION_TRACE_STEPS_BY_ROUTE.get(str(state.get("route") or ""), ()):
+        next_state = _action_trace_node(node_name, next_state)
+    return next_state
+
+
+def _with_action_graph_trace(event: dict[str, Any], graph_nodes: list[str]) -> dict[str, Any]:
+    if event.get("type") != "tool_result" or not isinstance(event.get("result"), dict):
+        return event
+    return {
+        **event,
+        "result": {
+            **event["result"],
+            "graph_nodes": list(graph_nodes),
+        },
+    }
+
+
 def _build_graph():
     if StateGraph is None:
         return None
@@ -531,6 +587,12 @@ def _build_graph():
     graph.add_node(AgentRoute.COURSE_MAINTENANCE.value, _course_maintenance_node)
     graph.add_node(AgentRoute.RAG_QA.value, _rag_qa_node)
     graph.add_node(AgentRoute.PLAIN_CHAT.value, _plain_chat_node)
+    graph.add_node("task_tool_node", _task_tool_node)
+    graph.add_node("schedule_parse", _schedule_parse_node)
+    graph.add_node("plan_review_write", _plan_review_write_node)
+    graph.add_node("course_disambiguate", _course_disambiguate_node)
+    graph.add_node("ask_user_pause", _ask_user_pause_node)
+    graph.add_node("confirmed_write", _confirmed_write_node)
     graph.add_node("delegate_legacy_loop", _delegate_legacy_loop_node)
     graph.set_entry_point("route")
     graph.add_conditional_edges(
@@ -570,10 +632,16 @@ def _build_graph():
     )
     graph.add_edge("no_web", END)
     graph.add_edge("rag_insufficient", END)
-    graph.add_edge(AgentRoute.TOOL_WORKFLOW.value, END)
-    graph.add_edge(AgentRoute.SCHEDULE_IMPORT.value, END)
-    graph.add_edge(AgentRoute.STUDY_PLAN.value, END)
-    graph.add_edge(AgentRoute.COURSE_MAINTENANCE.value, END)
+    graph.add_edge(AgentRoute.TOOL_WORKFLOW.value, "task_tool_node")
+    graph.add_edge("task_tool_node", "ask_user_pause")
+    graph.add_edge(AgentRoute.SCHEDULE_IMPORT.value, "schedule_parse")
+    graph.add_edge("schedule_parse", "ask_user_pause")
+    graph.add_edge(AgentRoute.STUDY_PLAN.value, "plan_review_write")
+    graph.add_edge("plan_review_write", "confirmed_write")
+    graph.add_edge(AgentRoute.COURSE_MAINTENANCE.value, "course_disambiguate")
+    graph.add_edge("course_disambiguate", "ask_user_pause")
+    graph.add_edge("ask_user_pause", "confirmed_write")
+    graph.add_edge("confirmed_write", END)
     graph.add_edge(AgentRoute.RAG_QA.value, END)
     graph.add_edge(AgentRoute.PLAIN_CHAT.value, END)
     graph.add_edge("delegate_legacy_loop", END)
@@ -589,9 +657,18 @@ def get_langgraph_router_shell_mermaid() -> str:
             "  route --> no_web\n"
             "  route --> retrieve_rag\n"
             "  route --> tool_workflow\n"
+            "  tool_workflow --> task_tool_node\n"
+            "  task_tool_node --> ask_user_pause\n"
             "  route --> schedule_import\n"
+            "  schedule_import --> schedule_parse\n"
+            "  schedule_parse --> ask_user_pause\n"
             "  route --> study_plan\n"
+            "  study_plan --> plan_review_write\n"
+            "  plan_review_write --> confirmed_write\n"
             "  route --> course_maintenance\n"
+            "  course_maintenance --> course_disambiguate\n"
+            "  course_disambiguate --> ask_user_pause\n"
+            "  ask_user_pause --> confirmed_write\n"
             "  route --> plain_chat\n"
             "  route --> delegate_legacy_loop\n"
             "  retrieve_rag --> rag_insufficient\n"
@@ -602,10 +679,7 @@ def get_langgraph_router_shell_mermaid() -> str:
             "  compose_runtime_hints --> delegate_legacy_loop\n"
             "  no_web --> __end__\n"
             "  rag_insufficient --> __end__\n"
-            "  tool_workflow --> __end__\n"
-            "  schedule_import --> __end__\n"
-            "  study_plan --> __end__\n"
-            "  course_maintenance --> __end__\n"
+            "  confirmed_write --> __end__\n"
             "  rag_qa --> __end__\n"
             "  plain_chat --> __end__\n"
             "  delegate_legacy_loop --> __end__"
@@ -630,13 +704,13 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
     if route_target == "no_web":
         return _no_web_node(state)
     if route_target == AgentRoute.TOOL_WORKFLOW.value:
-        return _tool_workflow_node(state)
+        return _apply_action_trace_steps(_tool_workflow_node(state))
     if route_target == AgentRoute.SCHEDULE_IMPORT.value:
-        return _schedule_import_node(state)
+        return _apply_action_trace_steps(_schedule_import_node(state))
     if route_target == AgentRoute.STUDY_PLAN.value:
-        return _study_plan_node(state)
+        return _apply_action_trace_steps(_study_plan_node(state))
     if route_target == AgentRoute.COURSE_MAINTENANCE.value:
-        return _course_maintenance_node(state)
+        return _apply_action_trace_steps(_course_maintenance_node(state))
     if route_target == AgentRoute.PLAIN_CHAT.value:
         return _plain_chat_node(state)
     if route_target == "delegate_legacy_loop":
@@ -647,13 +721,13 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
     state = _compose_hints_node(state)
     route_target = _route_after_compose_hints_node(state)
     if route_target == AgentRoute.TOOL_WORKFLOW.value:
-        return _tool_workflow_node(state)
+        return _apply_action_trace_steps(_tool_workflow_node(state))
     if route_target == AgentRoute.SCHEDULE_IMPORT.value:
-        return _schedule_import_node(state)
+        return _apply_action_trace_steps(_schedule_import_node(state))
     if route_target == AgentRoute.STUDY_PLAN.value:
-        return _study_plan_node(state)
+        return _apply_action_trace_steps(_study_plan_node(state))
     if route_target == AgentRoute.COURSE_MAINTENANCE.value:
-        return _course_maintenance_node(state)
+        return _apply_action_trace_steps(_course_maintenance_node(state))
     if route_target == AgentRoute.RAG_QA.value:
         return _rag_qa_node(state)
     if route_target == AgentRoute.PLAIN_CHAT.value:
@@ -780,6 +854,8 @@ async def run_langgraph_agent_loop(
     try:
         event = await inner_loop.__anext__()
         while True:
+            if action_route in _ACTION_ROUTE_NODE_BY_ROUTE:
+                event = _with_action_graph_trace(event, list(state.get("graph_nodes", [])))
             if event.get("type") == "ask_user":
                 user_response = yield event
                 event = await inner_loop.asend(user_response)

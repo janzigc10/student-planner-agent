@@ -591,6 +591,8 @@ async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(m
         "retrieve_rag",
         "compose_runtime_hints",
         "study_plan",
+        "plan_review_write",
+        "confirmed_write",
     ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -608,7 +610,13 @@ async def test_prepare_langgraph_state_routes_schedule_import_to_native_action_n
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
     assert state["should_delegate_legacy_loop"] is False
-    assert state["graph_nodes"] == ["route", "schedule_import"]
+    assert state["graph_nodes"] == [
+        "route",
+        "schedule_import",
+        "schedule_parse",
+        "ask_user_pause",
+        "confirmed_write",
+    ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
 
@@ -636,6 +644,9 @@ async def test_prepare_langgraph_state_keeps_reminder_route_non_gating_with_rag_
         "retrieve_rag",
         "compose_runtime_hints",
         "tool_workflow",
+        "task_tool_node",
+        "ask_user_pause",
+        "confirmed_write",
     ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -653,7 +664,13 @@ async def test_prepare_langgraph_state_routes_task_update_reminder_to_native_act
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
     assert state["should_delegate_legacy_loop"] is False
-    assert state["graph_nodes"] == ["route", "tool_workflow"]
+    assert state["graph_nodes"] == [
+        "route",
+        "tool_workflow",
+        "task_tool_node",
+        "ask_user_pause",
+        "confirmed_write",
+    ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
 
@@ -670,7 +687,13 @@ async def test_prepare_langgraph_state_routes_course_maintenance_to_native_actio
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
     assert state["should_delegate_legacy_loop"] is False
-    assert state["graph_nodes"] == ["route", "course_maintenance"]
+    assert state["graph_nodes"] == [
+        "route",
+        "course_maintenance",
+        "course_disambiguate",
+        "ask_user_pause",
+        "confirmed_write",
+    ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
 

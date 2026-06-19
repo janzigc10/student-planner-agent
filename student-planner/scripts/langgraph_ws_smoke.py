@@ -487,6 +487,44 @@ def assert_smoke_evidence(sequences: dict) -> None:
     assert "create_task" in sequences["task_cancel"]["sequence"], json.dumps(
         sequences["task_cancel"], ensure_ascii=True
     )
+    assert "task_tool_node" in sequences["task_create"]["graph_nodes"], json.dumps(
+        sequences["task_create"], ensure_ascii=True
+    )
+    assert "ask_user_pause" in sequences["task_create"]["graph_nodes"], json.dumps(
+        sequences["task_create"], ensure_ascii=True
+    )
+    assert "confirmed_write" in sequences["task_create"]["graph_nodes"], json.dumps(
+        sequences["task_create"], ensure_ascii=True
+    )
+    assert "task_tool_node" in sequences["task_cancel"]["graph_nodes"], json.dumps(
+        sequences["task_cancel"], ensure_ascii=True
+    )
+    assert "schedule_parse" in sequences["schedule"]["graph_nodes"], json.dumps(
+        sequences["schedule"], ensure_ascii=True
+    )
+    assert "ask_user_pause" in sequences["schedule"]["graph_nodes"], json.dumps(
+        sequences["schedule"], ensure_ascii=True
+    )
+    assert "confirmed_write" in sequences["schedule"]["graph_nodes"], json.dumps(
+        sequences["schedule"], ensure_ascii=True
+    )
+    for label in ("study", "work"):
+        assert "plan_review_write" in sequences[label]["graph_nodes"], json.dumps(
+            {label: sequences[label]}, ensure_ascii=True
+        )
+        assert "confirmed_write" in sequences[label]["graph_nodes"], json.dumps(
+            {label: sequences[label]}, ensure_ascii=True
+        )
+    for label in ("course_rename", "course_delete", "course_merge"):
+        assert "course_disambiguate" in sequences[label]["graph_nodes"], json.dumps(
+            {label: sequences[label]}, ensure_ascii=True
+        )
+        assert "ask_user_pause" in sequences[label]["graph_nodes"], json.dumps(
+            {label: sequences[label]}, ensure_ascii=True
+        )
+        assert "confirmed_write" in sequences[label]["graph_nodes"], json.dumps(
+            {label: sequences[label]}, ensure_ascii=True
+        )
     for label, evidence in sequences.items():
         assert "delegate_legacy_loop" not in evidence["graph_nodes"], json.dumps(
             {label: evidence}, ensure_ascii=True
