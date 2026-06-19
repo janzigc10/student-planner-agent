@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -261,6 +262,7 @@ async def run_turn(ws, label: str, message: str, answers: list[str]) -> dict:
 async def run_ws_smoke(token: str) -> dict[str, list[str]]:
     import websockets
 
+    work_due = (date.today() + timedelta(days=21)).isoformat()
     async with websockets.connect(
         WS_URL,
         max_size=None,
@@ -346,7 +348,7 @@ async def run_ws_smoke(token: str) -> dict[str, list[str]]:
             "work": await run_turn(
                 ws,
                 "work",
-                "2099-06-10 要交 ML report 作业，帮我做作业计划，要求 PDF",
+                f"{work_due} 要交 ML report 作业，帮我做作业计划，要求 PDF",
                 ["ok"],
             ),
             "schedule": await run_turn(

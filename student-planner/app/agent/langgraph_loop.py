@@ -22,6 +22,7 @@ from app.agent.langchain_tools import langchain_assignment_tool_names, langchain
 from app.agent.loop import (
     _current_public_info_unavailable_text,
     _log_step,
+    _normalize_ask_type,
     _save_message,
     _to_persisted_tool_summary,
     run_agent_action_loop,
@@ -214,7 +215,7 @@ async def run_langgraph_tool_node(
 
     if tool_name == "ask_user":
         result = await _execute_tool_from_graph_node(tool_name, tool_args, runtime)
-        ask_type = str(result.get("ask_type") or result.get("type") or "text")
+        ask_type = _normalize_ask_type(result)
         events.append({**result, "type": "ask_user", "ask_type": ask_type})
         return {
             **next_state,

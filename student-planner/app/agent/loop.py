@@ -8,22 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.contracts import AgentRoute, CONFIRMATION_REQUIRED_TOOLS, DBWritePlan, PendingConfirmation
-from app.agent.guardrails import (
-    GuardrailViolation,
-    check_consecutive_ask_user,
-    check_max_loop_iterations,
-    check_max_retries,
-    check_unknown_tool,
-)
+from app.agent.guardrails import check_max_loop_iterations
 from app.agent.llm_client import AsyncOpenAI, chat_completion, chat_completion_stream
 from app.agent.prompt import build_system_prompt
 from app.agent.tool_preflight import (
-    apply_tool_preflight,
     extract_reminder_slot,
     looks_like_task_update_intent,
     should_include_confirmed_question,
-    task_tool_preflight_error,
-    tool_schema_preflight_error,
 )
 from app.agent.tool_executor import execute_tool
 from app.agent.tools import TOOL_DEFINITIONS
@@ -190,7 +181,6 @@ _PLAIN_TEXT_ASK_INFO_MARKERS = (
     "提前多久",
 )
 _TASK_WRITE_TOOLS = {"create_task", "update_task", "complete_task", "set_reminder"}
-_CONFIRMED_DB_WRITE_TOOLS = set(CONFIRMATION_REQUIRED_TOOLS)
 _TEXT_ONLY_STREAM_AFTER_TOOLS = {"recall_memory"}
 _TOOL_INTENT_KEYWORDS = (
     *_SCHEDULE_IMPORT_KEYWORDS,
@@ -3493,37 +3483,6 @@ async def run_agent_action_loop(
             except json.JSONDecodeError:
                 tool_args = {}
 
-            try:
-                check_unknown_tool(tool_name, KNOWN_TOOLS)
-                if tool_name == "ask_user":
-                    check_consecutive_ask_user(tool_history + [tool_name])
-                else:
-                    check_consecutive_ask_user(tool_history)
-                check_max_retries(tool_name, error_count)
-            except GuardrailViolation as exc:
-                tool_result = {"error": exc.message, "suggestion": exc.suggestion}
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps(tool_result, ensure_ascii=False),
-                    }
-                )
-                if exc.user_visible:
-                    yield {"type": "error", "message": exc.message}
-                continue
-
-            preflight_error = task_tool_preflight_error(tool_name, preflight_user_texts)
-            if preflight_error is not None:
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps(preflight_error, ensure_ascii=False),
-                    }
-                )
-                continue
-
             if tool_name in {"create_study_plan", "create_work_plan"} and last_free_slots_result is not None:
                 available_slots = tool_args.get("available_slots")
                 if not _has_real_available_slots(available_slots):
@@ -3595,35 +3554,86 @@ async def run_agent_action_loop(
                     preflight_reference_texts.append(context_text)
                     preflight_user_texts.append(context_text)
 
-            schema_preflight_error = tool_schema_preflight_error(
-                tool_name,
-                tool_args,
-                TOOL_DEFINITIONS,
-            )
-            if schema_preflight_error is not None:
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps(schema_preflight_error, ensure_ascii=False),
-                    }
+            async def confirmed_write_executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
+                return await _execute_confirmed_db_write_plan(
+                    pending_confirmation=pending_write_confirmation,
+                    db_write_plan=(
+                        _build_db_write_plan(
+                            pending_confirmation=pending_write_confirmation,
+                            tool_name=name,
+                            args=args,
+                            description=f"Confirmed generic {name} write.",
+                        )
+                        if pending_write_confirmation is not None
+                        else None
+                    ),
+                    confirmation_answer=pending_write_confirmation_answer or "",
+                    db=db,
+                    user_id=user.id,
                 )
+
+            from app.agent import langgraph_loop as langgraph_runtime
+
+            node_state = await langgraph_runtime.run_langgraph_tool_node(
+                {
+                    "messages": messages,
+                    "pending_tool_call": tool_call,
+                    "tool_history": tool_history,
+                    "preflight_reference_texts": preflight_reference_texts,
+                    "preflight_user_texts": preflight_user_texts,
+                    "error_count": error_count,
+                    "events": [],
+                    "step": step,
+                    **(
+                        {"last_free_slots_result": last_free_slots_result}
+                        if last_free_slots_result is not None
+                        else {}
+                    ),
+                },
+                langgraph_runtime.GraphToolNodeRuntime(
+                    db=db,
+                    user_id=user.id,
+                    session_id=session_id,
+                    confirmed_write_executor=confirmed_write_executor,
+                    known_tools=KNOWN_TOOLS,
+                    tool_definitions=TOOL_DEFINITIONS,
+                ),
+            )
+
+            messages = list(node_state.get("messages", messages))
+            tool_history = list(node_state.get("tool_history", tool_history))
+            error_count = dict(node_state.get("error_count", error_count))
+            step = int(node_state.get("step", step))
+            if "last_free_slots_result" in node_state:
+                last_free_slots_result = node_state["last_free_slots_result"]
+
+            pending_tool_call = node_state.get("pending_tool_call") or tool_call
+            if isinstance(pending_tool_call, dict):
+                pending_function = pending_tool_call.get("function")
+                if isinstance(pending_function, dict):
+                    tool_name = str(pending_function.get("name") or tool_name)
+                    tool_args_str = str(pending_function.get("arguments") or tool_args_str)
+                    try:
+                        parsed_tool_args = json.loads(tool_args_str)
+                    except json.JSONDecodeError:
+                        parsed_tool_args = {}
+                    if isinstance(parsed_tool_args, dict):
+                        tool_args = parsed_tool_args
+
+            user_response: str | None = None
+            saw_ask_user = False
+            for node_event in node_state.get("events", []):
+                if node_event.get("type") == "ask_user":
+                    saw_ask_user = True
+                    user_response = yield node_event
+                else:
+                    yield node_event
+
+            if "last_tool_result" not in node_state:
                 continue
 
-            tool_args, preflight_changed = apply_tool_preflight(
-                tool_name,
-                tool_args,
-                preflight_reference_texts,
-            )
-            if preflight_changed:
-                tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
-
-            yield {"type": "tool_call", "name": tool_name, "args": tool_args}
-
-            if tool_name == "ask_user":
-                result = await execute_tool(tool_name, tool_args, db, user.id)
-                ask_type = _normalize_ask_type(result)
-                user_response = yield {**result, "type": "ask_user", "ask_type": ask_type}
+            result = node_state["last_tool_result"]
+            if tool_name == "ask_user" or saw_ask_user:
                 if user_response is None:
                     user_response = "确认"
                 question = str(result.get("question") or "")
@@ -3638,51 +3648,16 @@ async def run_agent_action_loop(
                 )
                 pending_write_confirmation_answer = str(user_response) if pending_write_confirmation else None
                 tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)
-            else:
-                if tool_name in _CONFIRMED_DB_WRITE_TOOLS:
-                    result = await _execute_confirmed_db_write_plan(
-                        pending_confirmation=pending_write_confirmation,
-                        db_write_plan=(
-                            _build_db_write_plan(
-                                pending_confirmation=pending_write_confirmation,
-                                tool_name=tool_name,
-                                args=tool_args,
-                                description=f"Confirmed generic {tool_name} write.",
-                            )
-                            if pending_write_confirmation is not None
-                            else None
-                        ),
-                        confirmation_answer=pending_write_confirmation_answer or "",
-                        db=db,
-                        user_id=user.id,
-                    )
-                else:
-                    result = await execute_tool(tool_name, tool_args, db, user.id)
-                tool_result_content = compress_tool_result(tool_name, result)
-                if "error" in result:
-                    error_count[tool_name] = error_count.get(tool_name, 0) + 1
-                elif tool_name == "get_free_slots" and isinstance(result.get("slots"), list):
-                    last_free_slots_result = result
-                yield {"type": "tool_result", "name": tool_name, "result": result}
-                await _save_message(
-                    db,
-                    session_id,
-                    "assistant",
-                    _to_persisted_tool_summary(tool_name, tool_result_content),
-                    is_compressed=True,
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": tool_result_content,
+                    }
                 )
-
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": tool_result_content,
-                }
-            )
-
-            step += 1
-            tool_history.append(tool_name)
-            await _log_step(db, user.id, session_id, step, tool_name, tool_args, result)
+                step += 1
+                await _log_step(db, user.id, session_id, step, tool_name, tool_args, result)
+                continue
 
             if tool_name == "create_study_plan" and "error" not in result:
                 shortcut = _run_confirmed_study_plan_write(

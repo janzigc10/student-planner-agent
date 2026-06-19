@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
-from app.agent.langgraph_loop import prepare_langgraph_state, run_langgraph_agent_loop
+from app.agent.langgraph_loop import prepare_langgraph_state, run_langgraph_agent_loop, run_langgraph_tool_node
 from app.models.course import Course
 from app.models.reminder import Reminder
 from app.models.task import Task
@@ -143,6 +143,7 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
 
     with (
         patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
+        patch("app.agent.langgraph_loop.run_langgraph_tool_node", wraps=run_langgraph_tool_node) as tool_node_spy,
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Task/reminder action route should not delegate to run_agent_loop"),
@@ -178,6 +179,7 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
         "create_task",
         "set_reminder",
     ]
+    assert tool_node_spy.await_count == 3
     assert len(tasks) == 1
     assert tasks[0].title == "做饭"
     assert len(reminders) == 1
