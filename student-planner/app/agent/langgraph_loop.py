@@ -29,21 +29,39 @@ from app.agent.loop import (
     _current_public_info_unavailable_text,
     _build_confirmed_write_state_from_ask,
     _build_db_write_plan,
+    _build_pending_confirmation,
+    _build_plan_write_result_event,
     _build_schedule_import_write_state,
     _build_schedule_missing_info_question,
     _confirmed_tool_scope,
+    _extract_first_iso_date,
     _extract_period_entries_from_answer,
+    _extract_review_override,
     _extract_schedule_file_id,
     _extract_semester_start_date_from_answer,
     _extract_term_total_weeks_from_answer,
+    _extract_work_context_from_text,
+    _extract_work_item_title,
+    _extract_work_type,
+    _find_rescheduled_task_args,
     _is_confirmed_answer,
+    _is_cancelled_answer,
+    _is_time_conflict_result,
     _is_write_authorized_answer,
     _log_step,
+    _normalize_study_plan_tasks,
+    _normalize_work_plan_tasks,
+    _plan_task_date_range,
     _normalize_ask_type,
     _persist_local_tool_step,
     _save_message,
     _schedule_parse_tool_name,
+    _study_plan_review_data,
+    _task_duration_minutes,
     _to_persisted_tool_summary,
+    _work_context_has_quality,
+    _work_plan_date_range,
+    _work_plan_intake_question,
     run_agent_action_loop,
     run_agent_loop,
     run_agent_text_loop,
@@ -99,6 +117,7 @@ class PlannerGraphState(TypedDict, total=False):
     last_tool_result: dict[str, Any]
     last_free_slots_result: dict[str, Any]
     schedule_import: dict[str, Any]
+    plan_workflow: dict[str, Any]
 
 
 ToolExecutor = Callable[
@@ -122,6 +141,15 @@ class GraphToolNodeRuntime:
 
 @dataclass(frozen=True)
 class GraphScheduleImportRuntime:
+    db: AsyncSession
+    user: User
+    session_id: str
+    execute_tool_func: ToolExecutor | None = None
+    confirmed_write_executor: ConfirmedWritePlanExecutor | None = None
+
+
+@dataclass(frozen=True)
+class GraphPlanWorkflowRuntime:
     db: AsyncSession
     user: User
     session_id: str
@@ -331,6 +359,47 @@ def _schedule_import_text_event(text: str) -> dict[str, Any]:
     return {"type": "text", "message_id": str(uuid.uuid4()), "content": text}
 
 
+def _plan_workflow_state(state: PlannerGraphState) -> dict[str, Any]:
+    return dict(state.get("plan_workflow") or {})
+
+
+def _with_plan_workflow_state(
+    state: PlannerGraphState,
+    *,
+    node_name: str,
+    **updates: Any,
+) -> PlannerGraphState:
+    plan_state = {
+        **_plan_workflow_state(state),
+        "node": node_name,
+        **updates,
+    }
+    return {
+        **state,
+        "plan_workflow": plan_state,
+        "step": int(plan_state.get("step") or state.get("step") or 0),
+        "graph_nodes": [*state.get("graph_nodes", []), node_name],
+    }
+
+
+def _plan_workflow_profile(plan_kind: str) -> dict[str, Any]:
+    if plan_kind == "work":
+        return {
+            "normalize_tasks": _normalize_work_plan_tasks,
+            "task_label": "作业任务",
+            "empty_text": "作业计划已经生成，但里面没有可写入日程的完整任务时间。请补充截止日期、交付要求或每日可投入时间后再试。",
+            "review_question": "我已经拆出 {count} 条作业任务。确认后我会把它们写入你的日程。",
+            "cancel_text": "好的，我先不写入这些作业任务。你可以调整要求、工作量或空闲时间后再让我重新拆。",
+        }
+    return {
+        "normalize_tasks": _normalize_study_plan_tasks,
+        "task_label": "复习任务",
+        "empty_text": "复习计划已经生成，但里面没有可写入日程的完整任务时间。请补充考试范围或每日可复习时间后再试。",
+        "review_question": "我已经拆出 {count} 条复习任务。确认后我会把它们写入你的日程。",
+        "cancel_text": "好的，我先不写入这些复习任务。你可以调整考试范围、复习强度或空闲时间后再让我重新拆。",
+    }
+
+
 async def execute_langgraph_confirmed_db_write_plan(
     *,
     pending_confirmation: PendingConfirmation | None,
@@ -352,6 +421,516 @@ async def execute_langgraph_confirmed_db_write_plan(
     if not _is_write_authorized_answer(pending_confirmation, confirmation_answer):
         return {"status": "cancelled", "message": "Write cancelled before database execution."}
     return await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
+
+
+async def run_langgraph_plan_review_write_step(
+    state: PlannerGraphState,
+    runtime: GraphPlanWorkflowRuntime,
+    *,
+    node_name: str,
+) -> PlannerGraphState:
+    """Advance one study/work plan review or confirmed-write graph node."""
+
+    plan_state = _plan_workflow_state(state)
+    plan_kind = str(plan_state.get("plan_kind") or "study")
+    profile = _plan_workflow_profile(plan_kind)
+    step = int(plan_state.get("step") or state.get("step") or 0)
+
+    if node_name == "plan_review_write":
+        raw_tasks = plan_state.get("raw_tasks")
+        normalize_tasks = profile["normalize_tasks"]
+        tasks = normalize_tasks(raw_tasks)
+        if not tasks:
+            return _with_plan_workflow_state(
+                state,
+                node_name=node_name,
+                status="empty",
+                plan_kind=plan_kind,
+                raw_tasks=raw_tasks,
+                tasks=[],
+                step=step,
+            )
+
+        question = str(profile["review_question"]).format(count=len(tasks))
+        pending_confirmation = _build_pending_confirmation(
+            route=AgentRoute.STUDY_PLAN.value,
+            tool_name="create_task",
+            question=question,
+            ask_type="review",
+            data=_study_plan_review_data(tasks),
+            allowed_tool_names=("create_task",),
+        )
+        first_db_write_plan = _build_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            tool_name="create_task",
+            args=tasks[0],
+            description=f"Write confirmed {profile['task_label']}.",
+        )
+        ask_event = {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        }
+        next_state = record_langgraph_ask_user_pause_state(
+            state,
+            tool_args={
+                "question": pending_confirmation.question,
+                "type": pending_confirmation.ask_type,
+                "options": list(pending_confirmation.options),
+                "data": pending_confirmation.data,
+            },
+            ask_result=ask_event,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=first_db_write_plan,
+        )
+        return _with_plan_workflow_state(
+            next_state,
+            node_name=node_name,
+            status="awaiting_review",
+            plan_kind=plan_kind,
+            raw_tasks=raw_tasks,
+            tasks=tasks,
+            review_event=ask_event,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=first_db_write_plan,
+            step=step,
+        )
+
+    if node_name == "confirmed_write":
+        pending_confirmation = plan_state.get("pending_confirmation")
+        db_write_plan = plan_state.get("db_write_plan")
+        confirmation_answer = str(
+            plan_state.get("confirmation_answer")
+            or state.get("pending_confirmation_answer")
+            or state.get("submitted_answer")
+            or ""
+        )
+        confirmed_write_executor = (
+            runtime.confirmed_write_executor or execute_langgraph_confirmed_db_write_plan
+        )
+        confirmed_result = await confirmed_write_executor(
+            pending_confirmation=pending_confirmation if isinstance(pending_confirmation, PendingConfirmation) else None,
+            db_write_plan=db_write_plan if isinstance(db_write_plan, DBWritePlan) else None,
+            confirmation_answer=confirmation_answer,
+            db=runtime.db,
+            user_id=runtime.user.id,
+        )
+        step += 1
+        tool_args = dict(db_write_plan.args) if isinstance(db_write_plan, DBWritePlan) else {}
+        await _persist_local_tool_step(
+            runtime.db,
+            runtime.session_id,
+            runtime.user.id,
+            step,
+            "create_task",
+            tool_args,
+            confirmed_result,
+        )
+        return _with_plan_workflow_state(
+            state,
+            node_name=node_name,
+            status="confirmed_write",
+            plan_kind=plan_kind,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=db_write_plan,
+            confirmation_answer=confirmation_answer,
+            confirmed_result=confirmed_result,
+            current_result=confirmed_result,
+            step=step,
+        )
+
+    return _with_plan_workflow_state(state, node_name=node_name)
+
+
+async def run_langgraph_plan_review_write_workflow(
+    raw_tasks: Any,
+    runtime: GraphPlanWorkflowRuntime,
+    *,
+    plan_kind: str = "study",
+    start_step: int = 0,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Review generated study/work plan tasks and write them via graph state."""
+
+    profile = _plan_workflow_profile(plan_kind)
+    state: PlannerGraphState = {
+        "route": AgentRoute.STUDY_PLAN.value,
+        "graph_nodes": [AgentRoute.STUDY_PLAN.value],
+        "uses_langgraph": StateGraph is not None,
+        "uses_langchain_tools": True,
+        "messages": [],
+        "tool_history": [],
+        "preflight_reference_texts": [],
+        "preflight_user_texts": [],
+        "error_count": {},
+        "events": [],
+        "step": start_step,
+        "plan_workflow": {
+            "plan_kind": plan_kind,
+            "raw_tasks": raw_tasks,
+            "step": start_step,
+        },
+    }
+    state = await run_langgraph_plan_review_write_step(
+        state,
+        runtime,
+        node_name="plan_review_write",
+    )
+    plan_state = _plan_workflow_state(state)
+    tasks = list(plan_state.get("tasks") or [])
+    if not tasks:
+        message_id = str(uuid.uuid4())
+        text = str(profile["empty_text"])
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    confirm_answer = yield dict(plan_state.get("review_event") or {})
+    state = resume_langgraph_ask_user_state(state, user_response=str(confirm_answer or ""))
+
+    if not _is_confirmed_answer(str(confirm_answer or "")):
+        message_id = str(uuid.uuid4())
+        text = str(profile["cancel_text"])
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    review_override = _extract_review_override(str(confirm_answer or ""))
+    pending_confirmation = plan_state.get("pending_confirmation")
+    if review_override is not None:
+        normalize_tasks = profile["normalize_tasks"]
+        tasks = normalize_tasks(review_override.get("tasks"))
+        pending_confirmation = _build_pending_confirmation(
+            route=AgentRoute.STUDY_PLAN.value,
+            tool_name="create_task",
+            question=str(profile["review_question"]).format(count=len(tasks)),
+            ask_type="review",
+            data=_study_plan_review_data(tasks),
+            allowed_tool_names=("create_task",),
+        )
+        if not tasks:
+            message_id = str(uuid.uuid4())
+            text = f"浣犲凡缁忓垹闄や簡鍏ㄩ儴{profile['task_label']}锛岃繖娆℃病鏈夊啓鍏ユ棩绋嬨€?"
+            yield _with_graph_trace(
+                _build_plan_write_result_event(
+                    message_id=message_id,
+                    text=text,
+                    task_label=str(profile["task_label"]),
+                    created_count=0,
+                    failed_count=0,
+                    rescheduled_count=0,
+                ),
+                state["graph_nodes"],
+            )
+            yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+            await _save_message(runtime.db, runtime.session_id, "assistant", text)
+            yield {"type": "done"}
+            return
+
+    plan_date_range = _plan_task_date_range(tasks)
+    created_results: list[dict[str, Any]] = []
+    failed_results: list[dict[str, Any]] = []
+    rescheduled_results: list[dict[str, Any]] = []
+    executor = runtime.execute_tool_func or execute_tool
+
+    for task_args in tasks:
+        db_write_plan = _build_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            tool_name="create_task",
+            args=task_args,
+            description=f"Write confirmed {profile['task_label']}.",
+        )
+        state = _with_plan_workflow_state(
+            state,
+            node_name="confirmed_write",
+            plan_kind=plan_kind,
+            tasks=tasks,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=db_write_plan,
+            confirmation_answer=str(confirm_answer or ""),
+        )
+        yield {"type": "tool_call", "name": "create_task", "args": task_args}
+        state = await run_langgraph_plan_review_write_step(
+            state,
+            runtime,
+            node_name="confirmed_write",
+        )
+        create_result = dict(_plan_workflow_state(state).get("confirmed_result") or {})
+        yield _with_graph_trace({"type": "tool_result", "name": "create_task", "result": create_result}, state["graph_nodes"])
+        if "error" not in create_result:
+            created_results.append(create_result)
+            continue
+
+        duration = _task_duration_minutes(task_args)
+        if not (_is_time_conflict_result(create_result) and plan_date_range is not None and duration is not None):
+            failed_results.append(create_result)
+            continue
+
+        start_date, end_date = plan_date_range
+        free_args = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "min_duration_minutes": duration,
+        }
+        yield {"type": "tool_call", "name": "get_free_slots", "args": free_args}
+        free_result = await executor("get_free_slots", free_args, runtime.db, runtime.user.id)
+        step = int(_plan_workflow_state(state).get("step") or state.get("step") or 0) + 1
+        await _persist_local_tool_step(
+            runtime.db,
+            runtime.session_id,
+            runtime.user.id,
+            step,
+            "get_free_slots",
+            free_args,
+            free_result,
+        )
+        state = _with_plan_workflow_state(
+            state,
+            node_name="plan_generate",
+            plan_kind=plan_kind,
+            tasks=tasks,
+            step=step,
+            last_free_slots_result=free_result,
+        )
+        yield _with_graph_trace({"type": "tool_result", "name": "get_free_slots", "result": free_result}, state["graph_nodes"])
+
+        rescheduled_args = _find_rescheduled_task_args(task_args, free_result)
+        if rescheduled_args is None:
+            failed_results.append(create_result)
+            continue
+
+        retry_write_plan = _build_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            tool_name="create_task",
+            args=rescheduled_args,
+            description=f"Write rescheduled confirmed {profile['task_label']}.",
+        )
+        state = _with_plan_workflow_state(
+            state,
+            node_name="confirmed_write",
+            plan_kind=plan_kind,
+            tasks=tasks,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=retry_write_plan,
+            confirmation_answer=str(confirm_answer or ""),
+        )
+        yield {"type": "tool_call", "name": "create_task", "args": rescheduled_args}
+        state = await run_langgraph_plan_review_write_step(
+            state,
+            runtime,
+            node_name="confirmed_write",
+        )
+        retry_result = dict(_plan_workflow_state(state).get("confirmed_result") or {})
+        yield _with_graph_trace({"type": "tool_result", "name": "create_task", "result": retry_result}, state["graph_nodes"])
+        if "error" in retry_result:
+            failed_results.append(retry_result)
+            continue
+        created_results.append(retry_result)
+        rescheduled_results.append(
+            {
+                "title": rescheduled_args.get("title") or task_args.get("title"),
+                "from": f"{task_args.get('scheduled_date')} {task_args.get('start_time')}-{task_args.get('end_time')}",
+                "to": f"{rescheduled_args.get('scheduled_date')} {rescheduled_args.get('start_time')}-{rescheduled_args.get('end_time')}",
+            }
+        )
+
+    message_id = str(uuid.uuid4())
+    task_label = str(profile["task_label"])
+    reschedule_text = ""
+    if rescheduled_results:
+        reschedule_text = f"其中 {len(rescheduled_results)} 条因原时间冲突已自动重排，"
+    if failed_results and created_results:
+        text = f"已写入 {len(created_results)} 条{task_label}，{reschedule_text}另有 {len(failed_results)} 条因为时间冲突或参数问题未写入。"
+    elif failed_results:
+        text = f"这些{task_label}暂时没有写入成功，主要原因是时间冲突或参数不完整。请调整后再试。"
+    elif rescheduled_results:
+        text = f"已把 {len(created_results)} 条{task_label}写入日程，其中 {len(rescheduled_results)} 条因原时间冲突已自动重排。"
+    else:
+        text = f"已把 {len(created_results)} 条{task_label}写入日程。"
+
+    yield _with_graph_trace(
+        _build_plan_write_result_event(
+            message_id=message_id,
+            text=text,
+            task_label=str(profile["task_label"]),
+            created_count=len(created_results),
+            failed_count=len(failed_results),
+            rescheduled_count=len(rescheduled_results),
+        ),
+        state["graph_nodes"],
+    )
+    yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+    await _save_message(runtime.db, runtime.session_id, "assistant", text)
+    yield {"type": "done"}
+
+
+async def run_langgraph_work_plan_workflow(
+    user_message: str,
+    runtime: GraphPlanWorkflowRuntime,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Run the deterministic work-plan shortcut as explicit graph nodes."""
+
+    due_date = _extract_first_iso_date(user_message)
+    title = _extract_work_item_title(user_message)
+    state: PlannerGraphState = {
+        "user_message": user_message,
+        "route": AgentRoute.STUDY_PLAN.value,
+        "graph_nodes": [AgentRoute.STUDY_PLAN.value],
+        "uses_langgraph": StateGraph is not None,
+        "uses_langchain_tools": True,
+        "messages": [],
+        "tool_history": [],
+        "preflight_reference_texts": [user_message],
+        "preflight_user_texts": [user_message],
+        "error_count": {},
+        "events": [],
+        "step": 0,
+        "plan_workflow": {
+            "plan_kind": "work",
+            "step": 0,
+        },
+    }
+
+    if due_date is None:
+        message_id = str(uuid.uuid4())
+        text = "鎴戣繕娌¤瘑鍒埌浣滀笟鎴栨姤鍛婄殑鎴鏃ユ湡锛岃鎸夆€?026-06-12 瑕佷氦鏈哄櫒瀛︿範鎶ュ憡鈥濊繖绉嶆牸寮忓啀鍙戜竴娆°€?"
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    context = _extract_work_context_from_text(user_message)
+    if not _work_context_has_quality(context):
+        ask_event = {
+            "type": "ask_user",
+            "ask_type": "review",
+            "question": _work_plan_intake_question(title),
+            "options": [],
+            "data": None,
+        }
+        state = record_langgraph_ask_user_pause_state(
+            state,
+            tool_args={
+                "question": ask_event["question"],
+                "type": ask_event["ask_type"],
+                "options": [],
+            },
+            ask_result=ask_event,
+        )
+        state = _with_plan_workflow_state(
+            state,
+            node_name="ask_user_pause",
+            plan_kind="work",
+            context_event=ask_event,
+        )
+        context_answer = yield ask_event
+        state = resume_langgraph_ask_user_state(state, user_response=str(context_answer or ""))
+        if _is_cancelled_answer(str(context_answer or "")):
+            message_id = str(uuid.uuid4())
+            text = "濂界殑锛屾垜鍏堜笉鐢熸垚浣滀笟璁″垝銆備綘鏁寸悊濂借姹傚悗鍐嶅憡璇夋垜銆?"
+            yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+            await _save_message(runtime.db, runtime.session_id, "assistant", text)
+            yield {"type": "done"}
+            return
+        context_text = str(context_answer or "default")
+        context = _extract_work_context_from_text(context_text)
+        if not _work_context_has_quality(context):
+            context = {"raw_notes": context_text, "using_defaults": True}
+
+    start_date, end_date = _work_plan_date_range(due_date)
+    free_args = {"start_date": start_date, "end_date": end_date, "min_duration_minutes": 30}
+    executor = runtime.execute_tool_func or execute_tool
+    yield {"type": "tool_call", "name": "get_free_slots", "args": free_args}
+    free_result = await executor("get_free_slots", free_args, runtime.db, runtime.user.id)
+    step = int(_plan_workflow_state(state).get("step") or 0) + 1
+    await _persist_local_tool_step(
+        runtime.db,
+        runtime.session_id,
+        runtime.user.id,
+        step,
+        "get_free_slots",
+        free_args,
+        free_result,
+    )
+    state = _with_plan_workflow_state(
+        state,
+        node_name="plan_generate",
+        plan_kind="work",
+        step=step,
+        last_free_slots_result=free_result,
+    )
+    yield _with_graph_trace({"type": "tool_result", "name": "get_free_slots", "result": free_result}, state["graph_nodes"])
+
+    if "error" in free_result:
+        message_id = str(uuid.uuid4())
+        text = str(free_result.get("error") or "Failed to query free slots.")
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    work_args = {
+        "work_items": [
+            {
+                "title": title,
+                "due_date": due_date,
+                "work_type": _extract_work_type(title),
+            }
+        ],
+        "available_slots": free_result,
+        "work_context": context,
+        "strategy": "staged",
+    }
+    yield {"type": "tool_call", "name": "create_work_plan", "args": work_args}
+    work_result = await executor("create_work_plan", work_args, runtime.db, runtime.user.id)
+    step = int(_plan_workflow_state(state).get("step") or 0) + 1
+    await _persist_local_tool_step(
+        runtime.db,
+        runtime.session_id,
+        runtime.user.id,
+        step,
+        "create_work_plan",
+        work_args,
+        work_result,
+    )
+    state = _with_plan_workflow_state(
+        state,
+        node_name="plan_generate",
+        plan_kind="work",
+        step=step,
+        plan_args=work_args,
+        plan_result=work_result,
+    )
+    yield _with_graph_trace({"type": "tool_result", "name": "create_work_plan", "result": work_result}, state["graph_nodes"])
+
+    if "error" in work_result:
+        message_id = str(uuid.uuid4())
+        text = str(work_result.get("error") or "Failed to generate work plan.")
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    review_workflow = run_langgraph_plan_review_write_workflow(
+        work_result.get("tasks"),
+        runtime,
+        plan_kind="work",
+        start_step=step,
+    )
+    try:
+        event = await review_workflow.__anext__()
+        while True:
+            if event["type"] == "ask_user":
+                user_response = yield event
+                event = await review_workflow.asend(user_response)
+            else:
+                yield event
+                event = await review_workflow.__anext__()
+    except StopAsyncIteration:
+        pass
 
 
 async def run_langgraph_schedule_import_step(
@@ -980,6 +1559,10 @@ def _plan_review_write_node(state: PlannerGraphState) -> PlannerGraphState:
     return _action_trace_node("plan_review_write", state)
 
 
+def _plan_generate_node(state: PlannerGraphState) -> PlannerGraphState:
+    return _action_trace_node("plan_generate", state)
+
+
 def _course_disambiguate_node(state: PlannerGraphState) -> PlannerGraphState:
     return _action_trace_node("course_disambiguate", state)
 
@@ -993,7 +1576,7 @@ _ACTION_ROUTE_NODE_BY_ROUTE = {
 _ACTION_TRACE_STEPS_BY_ROUTE = {
     AgentRoute.TOOL_WORKFLOW.value: ("task_tool_node", "ask_user_pause", "confirmed_write"),
     AgentRoute.SCHEDULE_IMPORT.value: ("schedule_parse", "ask_user_pause", "confirmed_write"),
-    AgentRoute.STUDY_PLAN.value: ("plan_review_write", "confirmed_write"),
+    AgentRoute.STUDY_PLAN.value: ("plan_generate", "plan_review_write", "confirmed_write"),
     AgentRoute.COURSE_MAINTENANCE.value: ("course_disambiguate", "ask_user_pause", "confirmed_write"),
 }
 _TEXT_ROUTE_NODE_BY_ROUTE = {
@@ -1034,6 +1617,9 @@ def _with_graph_trace(event: dict[str, Any], graph_nodes: list[str]) -> dict[str
     if not trace:
         return event
     if event.get("type") == "tool_result" and isinstance(event.get("result"), dict):
+        existing_trace = event["result"].get("graph_nodes")
+        if isinstance(existing_trace, list):
+            trace = list(dict.fromkeys([*existing_trace, *trace]))
         return {
             **event,
             "result": {
@@ -1042,6 +1628,9 @@ def _with_graph_trace(event: dict[str, Any], graph_nodes: list[str]) -> dict[str
             },
         }
     if event.get("type") in {"text_delta", "text", "result"}:
+        existing_trace = event.get("graph_nodes")
+        if isinstance(existing_trace, list):
+            trace = list(dict.fromkeys([*existing_trace, *trace]))
         return {**event, "graph_nodes": trace}
     return event
 
@@ -1063,6 +1652,7 @@ def _build_graph():
     graph.add_node(AgentRoute.PLAIN_CHAT.value, _plain_chat_node)
     graph.add_node("task_tool_node", _task_tool_node)
     graph.add_node("schedule_parse", _schedule_parse_node)
+    graph.add_node("plan_generate", _plan_generate_node)
     graph.add_node("plan_review_write", _plan_review_write_node)
     graph.add_node("course_disambiguate", _course_disambiguate_node)
     graph.add_node("ask_user_pause", _ask_user_pause_node)
@@ -1110,7 +1700,8 @@ def _build_graph():
     graph.add_edge("task_tool_node", "ask_user_pause")
     graph.add_edge(AgentRoute.SCHEDULE_IMPORT.value, "schedule_parse")
     graph.add_edge("schedule_parse", "ask_user_pause")
-    graph.add_edge(AgentRoute.STUDY_PLAN.value, "plan_review_write")
+    graph.add_edge(AgentRoute.STUDY_PLAN.value, "plan_generate")
+    graph.add_edge("plan_generate", "plan_review_write")
     graph.add_edge("plan_review_write", "confirmed_write")
     graph.add_edge(AgentRoute.COURSE_MAINTENANCE.value, "course_disambiguate")
     graph.add_edge("course_disambiguate", "ask_user_pause")
@@ -1137,7 +1728,8 @@ def get_langgraph_router_shell_mermaid() -> str:
             "  schedule_import --> schedule_parse\n"
             "  schedule_parse --> ask_user_pause\n"
             "  route --> study_plan\n"
-            "  study_plan --> plan_review_write\n"
+            "  study_plan --> plan_generate\n"
+            "  plan_generate --> plan_review_write\n"
             "  plan_review_write --> confirmed_write\n"
             "  route --> course_maintenance\n"
             "  course_maintenance --> course_disambiguate\n"

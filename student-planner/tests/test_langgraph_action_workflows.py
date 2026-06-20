@@ -388,6 +388,10 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
 
 @pytest.mark.asyncio
 async def test_langgraph_native_study_plan_confirmed_write_does_not_delegate(setup_db):
+    from app.agent import langgraph_loop as langgraph_runtime
+
+    observed_plan_states: list[dict] = []
+    original_plan_step = langgraph_runtime.run_langgraph_plan_review_write_step
     generated_tasks = [
         {
             "title": "大学英语3复习 - Unit 1",
@@ -462,13 +466,24 @@ async def test_langgraph_native_study_plan_confirmed_write_does_not_delegate(set
 
     prompt = "下周四有大学英语3考试，帮我做复习计划"
     state = await prepare_langgraph_state(prompt)
+    async def spy_plan_step(state, runtime, *, node_name):
+        next_state = await original_plan_step(state, runtime, node_name=node_name)
+        observed_plan_states.append(dict(next_state.get("plan_workflow") or {}))
+        return next_state
+
     assert_native_action_graph(state, "study_plan")
+    assert "plan_generate" in state["graph_nodes"]
     assert "plan_review_write" in state["graph_nodes"]
     assert "confirmed_write" in state["graph_nodes"]
 
     with (
         patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
         patch("app.agent.tool_executor.generate_study_plan", side_effect=fake_generate_study_plan),
+        patch("app.agent.langgraph_loop.run_langgraph_plan_review_write_step", side_effect=spy_plan_step),
+        patch(
+            "app.agent.loop._run_confirmed_study_plan_write",
+            side_effect=AssertionError("Study plan writeback should be driven by LangGraph plan workflow"),
+        ),
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Study plan action route should not delegate to run_agent_loop"),
@@ -495,14 +510,21 @@ async def test_langgraph_native_study_plan_confirmed_write_does_not_delegate(set
     ]
     assert events[-1]["type"] == "done"
     event_graph_nodes = graph_nodes_from_tool_results(events)
+    assert "plan_generate" in event_graph_nodes
     assert "plan_review_write" in event_graph_nodes
     assert "confirmed_write" in event_graph_nodes
+    assert any(state.get("node") == "plan_review_write" and state.get("pending_confirmation") for state in observed_plan_states)
+    assert sum(1 for state in observed_plan_states if state.get("node") == "confirmed_write") == 1
     assert len(tasks) == 1
     assert tasks[0].title == "大学英语3复习 - Unit 1"
 
 
 @pytest.mark.asyncio
 async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setup_db):
+    from app.agent import langgraph_loop as langgraph_runtime
+
+    observed_plan_states: list[dict] = []
+    original_plan_step = langgraph_runtime.run_langgraph_plan_review_write_step
     generated_tasks = [
         {
             "title": "机器学习报告 - 整理资料",
@@ -528,11 +550,26 @@ async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setu
     prompt = "2099-06-12 要交机器学习报告，帮我做作业计划。"
     state = await prepare_langgraph_state(prompt)
     assert_native_action_graph(state, "study_plan")
+    assert "plan_generate" in state["graph_nodes"]
     assert "plan_review_write" in state["graph_nodes"]
     assert "confirmed_write" in state["graph_nodes"]
 
+    async def spy_plan_step(state, runtime, *, node_name):
+        next_state = await original_plan_step(state, runtime, node_name=node_name)
+        observed_plan_states.append(dict(next_state.get("plan_workflow") or {}))
+        return next_state
+
     with (
         patch("app.agent.tool_executor.generate_work_plan", side_effect=fake_generate_work_plan),
+        patch("app.agent.langgraph_loop.run_langgraph_plan_review_write_step", side_effect=spy_plan_step),
+        patch(
+            "app.agent.loop._run_work_plan_shortcut",
+            side_effect=AssertionError("Work plan action route should be driven by LangGraph plan workflow"),
+        ),
+        patch(
+            "app.agent.loop._run_confirmed_work_plan_write",
+            side_effect=AssertionError("Work plan writeback should be driven by LangGraph plan workflow"),
+        ),
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Study/work plan action route should not delegate to run_agent_loop"),
@@ -560,8 +597,11 @@ async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setu
     ]
     assert events[-1]["type"] == "done"
     event_graph_nodes = graph_nodes_from_tool_results(events)
+    assert "plan_generate" in event_graph_nodes
     assert "plan_review_write" in event_graph_nodes
     assert "confirmed_write" in event_graph_nodes
+    assert any(state.get("node") == "plan_review_write" and state.get("pending_confirmation") for state in observed_plan_states)
+    assert sum(1 for state in observed_plan_states if state.get("node") == "confirmed_write") == 2
     assert [task.title for task in tasks] == ["机器学习报告 - 整理资料", "机器学习报告 - 完成初稿"]
 
 

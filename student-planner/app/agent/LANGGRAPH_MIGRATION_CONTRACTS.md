@@ -16,7 +16,7 @@ legacy-delegate or terminal action node:
 2. `langgraph_loop.py` exposes a Router Shell V3 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, `rag_qa`, `plain_chat`, `tool_workflow`, `schedule_import`, `study_plan`, `course_maintenance`, route-specific action nodes, and `delegate_legacy_loop` nodes.
 3. `route` conditionally sends no-web requests directly to the no-web terminal response, sends RAG/context candidates through retrieval, and sends native action routes to their corresponding action nodes.
 4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; sufficient RAG QA goes through `compose_runtime_hints` and then `rag_qa`, while non-gated RAG side-channel paths continue through hints and then to the selected action node or compatibility fallback.
-5. `tool_workflow` now traces through `task_tool_node -> ask_user_pause -> confirmed_write`; `schedule_import` traces through `schedule_parse -> ask_user_pause -> confirmed_write`; `study_plan` and work-plan requests trace through `plan_review_write -> confirmed_write`; `course_maintenance` traces through `course_disambiguate -> ask_user_pause -> confirmed_write`.
+5. `tool_workflow` now traces through `task_tool_node -> ask_user_pause -> confirmed_write`; `schedule_import` traces through `schedule_parse -> ask_user_pause -> confirmed_write`; `study_plan` and work-plan requests trace through `plan_generate -> plan_review_write -> confirmed_write`; `course_maintenance` traces through `course_disambiguate -> ask_user_pause -> confirmed_write`.
 6. `run_langgraph_agent_loop()` still dispatches the action work through `run_agent_action_loop()`, preserving the existing WebSocket event protocol, `ask_user` pause/resume, preflight, and confirmation write gate without appending `delegate_legacy_loop` to `graph_nodes`. Action `tool_result.result.graph_nodes` carries the route-specific trace for regression and smoke evidence.
 7. `run_langgraph_agent_loop()` dispatches `rag_qa` and `plain_chat` through `run_agent_text_loop()`, preserving text streaming without exposing tool calls or appending `delegate_legacy_loop` to `graph_nodes`. Text-only trace evidence is attached as an optional top-level `graph_nodes` field on existing `text_delta`, `text`, or `result` events.
 8. `delegate_legacy_loop` remains only as an explicitly marked compatibility fallback for routes not covered by the golden matrix; golden paths must not trace through it.
@@ -50,7 +50,8 @@ graph TD
   schedule_import --> schedule_parse
   schedule_parse --> ask_user_pause
   route -.-> study_plan
-  study_plan --> plan_review_write
+  study_plan --> plan_generate
+  plan_generate --> plan_review_write
   plan_review_write --> confirmed_write
   route -.-> course_maintenance
   course_maintenance --> course_disambiguate

@@ -3443,18 +3443,25 @@ async def run_agent_action_loop(
         return
 
     if _should_handle_work_plan_locally(user_message):
-        shortcut = _run_shortcut_with_langgraph_ask_state(
-            _run_work_plan_shortcut(user_message, user, session_id, db)
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        work_plan_workflow = langgraph_runtime.run_langgraph_work_plan_workflow(
+            user_message,
+            langgraph_runtime.GraphPlanWorkflowRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+            ),
         )
         try:
-            event = await shortcut.__anext__()
+            event = await work_plan_workflow.__anext__()
             while True:
                 if event["type"] == "ask_user":
                     user_response = yield event
-                    event = await shortcut.asend(user_response)
+                    event = await work_plan_workflow.asend(user_response)
                 else:
                     yield event
-                    event = await shortcut.__anext__()
+                    event = await work_plan_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return
@@ -3898,49 +3905,49 @@ async def run_agent_action_loop(
             graph_state = dict(node_state)
 
             if tool_name == "create_study_plan" and "error" not in result:
-                shortcut = _run_shortcut_with_langgraph_ask_state(
-                    _run_confirmed_study_plan_write(
-                        result.get("tasks"),
-                        user,
-                        session_id,
-                        db,
-                        step,
+                plan_workflow = langgraph_runtime.run_langgraph_plan_review_write_workflow(
+                    result.get("tasks"),
+                    langgraph_runtime.GraphPlanWorkflowRuntime(
+                        db=db,
+                        user=user,
+                        session_id=session_id,
                     ),
-                    graph_state=graph_state,
+                    plan_kind="study",
+                    start_step=step,
                 )
                 try:
-                    event = await shortcut.__anext__()
+                    event = await plan_workflow.__anext__()
                     while True:
                         if event["type"] == "ask_user":
                             user_response = yield event
-                            event = await shortcut.asend(user_response)
+                            event = await plan_workflow.asend(user_response)
                         else:
                             yield event
-                            event = await shortcut.__anext__()
+                            event = await plan_workflow.__anext__()
                 except StopAsyncIteration:
                     pass
                 return
 
             if tool_name == "create_work_plan" and "error" not in result:
-                shortcut = _run_shortcut_with_langgraph_ask_state(
-                    _run_confirmed_work_plan_write(
-                        result.get("tasks"),
-                        user,
-                        session_id,
-                        db,
-                        step,
+                plan_workflow = langgraph_runtime.run_langgraph_plan_review_write_workflow(
+                    result.get("tasks"),
+                    langgraph_runtime.GraphPlanWorkflowRuntime(
+                        db=db,
+                        user=user,
+                        session_id=session_id,
                     ),
-                    graph_state=graph_state,
+                    plan_kind="work",
+                    start_step=step,
                 )
                 try:
-                    event = await shortcut.__anext__()
+                    event = await plan_workflow.__anext__()
                     while True:
                         if event["type"] == "ask_user":
                             user_response = yield event
-                            event = await shortcut.asend(user_response)
+                            event = await plan_workflow.asend(user_response)
                         else:
                             yield event
-                            event = await shortcut.__anext__()
+                            event = await plan_workflow.__anext__()
                 except StopAsyncIteration:
                     pass
                 return

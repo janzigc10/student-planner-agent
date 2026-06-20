@@ -591,6 +591,7 @@ async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(m
         "retrieve_rag",
         "compose_runtime_hints",
         "study_plan",
+        "plan_generate",
         "plan_review_write",
         "confirmed_write",
     ]
