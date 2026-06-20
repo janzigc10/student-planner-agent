@@ -70,7 +70,6 @@ from app.agent.loop import (
     _work_plan_intake_question,
     _course_maintenance_intent,
     run_agent_action_loop,
-    run_agent_loop,
     run_agent_text_loop,
 )
 from app.agent.rag import build_rag_context
@@ -105,7 +104,6 @@ class PlannerGraphState(TypedDict, total=False):
     uses_langgraph: bool
     uses_langchain_tools: bool
     should_gate_rag_answer: bool
-    should_delegate_legacy_loop: bool
     terminal_response: str
     messages: list[dict[str, Any]]
     pending_tool_call: dict[str, Any]
@@ -1916,6 +1914,8 @@ async def run_langgraph_tool_node(
 
 
 RAG_INSUFFICIENT_EVIDENCE_TEXT = "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
+UNSUPPORTED_LANGGRAPH_ROUTE_TEXT = "当前 LangGraph 运行时没有可用的处理路径，请换一种说法或明确任务类型。"
+UNSUPPORTED_ROUTE_NODE = "unsupported_route"
 
 
 def _route_node(state: PlannerGraphState) -> PlannerGraphState:
@@ -1939,7 +1939,6 @@ def _no_web_node(state: PlannerGraphState) -> PlannerGraphState:
         **state,
         "should_retrieve": False,
         "should_gate_rag_answer": False,
-        "should_delegate_legacy_loop": False,
         "terminal_response": "no_web",
         "graph_nodes": [*state.get("graph_nodes", []), "no_web"],
     }
@@ -1964,7 +1963,6 @@ def _rag_insufficient_node(state: PlannerGraphState) -> PlannerGraphState:
     return {
         **state,
         "route": AgentRoute.RAG_INSUFFICIENT.value,
-        "should_delegate_legacy_loop": False,
         "terminal_response": "rag_insufficient",
         "graph_nodes": [*state.get("graph_nodes", []), "rag_insufficient"],
     }
@@ -1990,18 +1988,17 @@ def _compose_hints_node(state: PlannerGraphState) -> PlannerGraphState:
     }
 
 
-def _delegate_legacy_loop_node(state: PlannerGraphState) -> PlannerGraphState:
+def _unsupported_route_node(state: PlannerGraphState) -> PlannerGraphState:
     return {
         **state,
-        "should_delegate_legacy_loop": True,
-        "graph_nodes": [*state.get("graph_nodes", []), "delegate_legacy_loop"],
+        "terminal_response": UNSUPPORTED_ROUTE_NODE,
+        "graph_nodes": [*state.get("graph_nodes", []), UNSUPPORTED_ROUTE_NODE],
     }
 
 
 def _action_route_node(node_name: str, state: PlannerGraphState) -> PlannerGraphState:
     return {
         **state,
-        "should_delegate_legacy_loop": False,
         "graph_nodes": [*state.get("graph_nodes", []), node_name],
     }
 
@@ -2089,7 +2086,7 @@ def _route_from_route_node(state: PlannerGraphState) -> str:
         return "no_web"
     if state.get("should_retrieve"):
         return "retrieve_rag"
-    return _NATIVE_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
+    return _NATIVE_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), UNSUPPORTED_ROUTE_NODE)
 
 
 def _route_after_retrieve_node(state: PlannerGraphState) -> str:
@@ -2100,7 +2097,7 @@ def _route_after_retrieve_node(state: PlannerGraphState) -> str:
 
 
 def _route_after_compose_hints_node(state: PlannerGraphState) -> str:
-    return _NATIVE_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), "delegate_legacy_loop")
+    return _NATIVE_ROUTE_NODE_BY_ROUTE.get(str(state.get("route") or ""), UNSUPPORTED_ROUTE_NODE)
 
 
 def _apply_action_trace_steps(state: PlannerGraphState) -> PlannerGraphState:
@@ -2155,7 +2152,7 @@ def _build_graph():
     graph.add_node("course_disambiguate", _course_disambiguate_node)
     graph.add_node("ask_user_pause", _ask_user_pause_node)
     graph.add_node("confirmed_write", _confirmed_write_node)
-    graph.add_node("delegate_legacy_loop", _delegate_legacy_loop_node)
+    graph.add_node(UNSUPPORTED_ROUTE_NODE, _unsupported_route_node)
     graph.set_entry_point("route")
     graph.add_conditional_edges(
         "route",
@@ -2168,7 +2165,7 @@ def _build_graph():
             AgentRoute.STUDY_PLAN.value: AgentRoute.STUDY_PLAN.value,
             AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
             AgentRoute.PLAIN_CHAT.value: AgentRoute.PLAIN_CHAT.value,
-            "delegate_legacy_loop": "delegate_legacy_loop",
+            UNSUPPORTED_ROUTE_NODE: UNSUPPORTED_ROUTE_NODE,
         },
     )
     graph.add_conditional_edges(
@@ -2189,7 +2186,7 @@ def _build_graph():
             AgentRoute.COURSE_MAINTENANCE.value: AgentRoute.COURSE_MAINTENANCE.value,
             AgentRoute.RAG_QA.value: AgentRoute.RAG_QA.value,
             AgentRoute.PLAIN_CHAT.value: AgentRoute.PLAIN_CHAT.value,
-            "delegate_legacy_loop": "delegate_legacy_loop",
+            UNSUPPORTED_ROUTE_NODE: UNSUPPORTED_ROUTE_NODE,
         },
     )
     graph.add_edge("no_web", END)
@@ -2207,7 +2204,7 @@ def _build_graph():
     graph.add_edge("confirmed_write", END)
     graph.add_edge(AgentRoute.RAG_QA.value, END)
     graph.add_edge(AgentRoute.PLAIN_CHAT.value, END)
-    graph.add_edge("delegate_legacy_loop", END)
+    graph.add_edge(UNSUPPORTED_ROUTE_NODE, END)
     return graph.compile()
 
 
@@ -2234,19 +2231,19 @@ def get_langgraph_router_shell_mermaid() -> str:
             "  course_disambiguate --> ask_user_pause\n"
             "  ask_user_pause --> confirmed_write\n"
             "  route --> plain_chat\n"
-            "  route --> delegate_legacy_loop\n"
+            "  route --> unsupported_route\n"
             "  retrieve_rag --> rag_insufficient\n"
             "  retrieve_rag --> compose_runtime_hints\n"
             "  compose_runtime_hints --> rag_qa\n"
             "  compose_runtime_hints --> tool_workflow\n"
             "  compose_runtime_hints --> study_plan\n"
-            "  compose_runtime_hints --> delegate_legacy_loop\n"
+            "  compose_runtime_hints --> unsupported_route\n"
             "  no_web --> __end__\n"
             "  rag_insufficient --> __end__\n"
             "  confirmed_write --> __end__\n"
             "  rag_qa --> __end__\n"
             "  plain_chat --> __end__\n"
-            "  delegate_legacy_loop --> __end__"
+            "  unsupported_route --> __end__"
         )
     return compiled_graph.get_graph().draw_mermaid()
 
@@ -2277,8 +2274,8 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
         return _apply_action_trace_steps(_course_maintenance_node(state))
     if route_target == AgentRoute.PLAIN_CHAT.value:
         return _plain_chat_node(state)
-    if route_target == "delegate_legacy_loop":
-        return _delegate_legacy_loop_node(state)
+    if route_target == UNSUPPORTED_ROUTE_NODE:
+        return _unsupported_route_node(state)
     state = _retrieve_rag_node(state)
     if _route_after_retrieve_node(state) == "rag_insufficient":
         return _rag_insufficient_node(state)
@@ -2296,7 +2293,7 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
         return _rag_qa_node(state)
     if route_target == AgentRoute.PLAIN_CHAT.value:
         return _plain_chat_node(state)
-    return _delegate_legacy_loop_node(state)
+    return _unsupported_route_node(state)
 
 
 async def run_langgraph_agent_loop(
@@ -2394,6 +2391,21 @@ async def run_langgraph_agent_loop(
             return
 
     action_route = str(state.get("route") or "")
+    if state.get("terminal_response") == UNSUPPORTED_ROUTE_NODE or action_route not in _NATIVE_ROUTE_NODE_BY_ROUTE:
+        message_id = str(uuid.uuid4())
+        await _save_message(db, session_id, "user", user_message)
+        yield _with_graph_trace(
+            {
+                "type": "text",
+                "message_id": message_id,
+                "content": UNSUPPORTED_LANGGRAPH_ROUTE_TEXT,
+            },
+            list(state.get("graph_nodes", [])),
+        )
+        await _save_message(db, session_id, "assistant", UNSUPPORTED_LANGGRAPH_ROUTE_TEXT)
+        yield {"type": "done"}
+        return
+
     if action_route in _ACTION_ROUTE_NODE_BY_ROUTE:
         inner_loop = run_agent_action_loop(
             user_message,
@@ -2405,15 +2417,6 @@ async def run_langgraph_agent_loop(
         )
     elif action_route in _TEXT_ROUTE_NODE_BY_ROUTE:
         inner_loop = run_agent_text_loop(
-            user_message,
-            user,
-            session_id,
-            db,
-            llm_client,
-            runtime_hints=state.get("runtime_hints", []),
-        )
-    else:
-        inner_loop = run_agent_loop(
             user_message,
             user,
             session_id,

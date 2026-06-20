@@ -1,26 +1,30 @@
 # LangGraph Migration Contracts
 
-This is the pre-migration contract for replacing the legacy `run_agent_loop()` with a LangGraph-native loop later. It is not a full migration plan and it must not change the current product behavior by itself.
+This is the runtime contract for the LangGraph-native agent loop. It records the
+control-plane boundary that must hold while selected graph nodes still reuse
+helper functions internally.
 
 ## Architecture Boundary
 
 LangGraph should own orchestration: route selection, state transitions, loop limits, confirmation pauses, tool execution ordering, and event emission order. LangChain chains or Runnables are still useful inside graph nodes for local LLM work, prompt formatting, parsing, retrieval, and tool-bound model calls. The graph is the control plane; chains are node implementation details.
 
-The current runtime is still partial. It is a LangGraph route shell with
+The current runtime is graph-routed and keeps helper execution inside selected nodes. It includes
 route-specific trace nodes plus graph-owned workflow state machines for the
-migrated schedule, study/work-plan, and course-maintenance slices; generic
-tool actions and other compatibility paths still use delegated helper
-execution. The golden paths now enter explicit LangGraph route-specific trace
-nodes instead of stopping at one generic legacy-delegate or terminal action node:
+migrated schedule, study/work-plan, and course-maintenance slices. Generic tool
+actions still use graph-selected helper execution after the route is resolved.
+The runtime no longer falls back to the full legacy `run_agent_loop()` for
+uncovered routes; unknown routes terminate inside the graph as `unsupported_route`.
+The golden paths now enter explicit LangGraph route-specific trace nodes instead
+of stopping at one generic legacy-delegate or terminal action node:
 
-1. `chat.py` chooses `run_langgraph_agent_loop` when `SP_AGENT_RUNTIME=langgraph`.
-2. `langgraph_loop.py` exposes a Router Shell V3 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, `rag_qa`, `plain_chat`, `tool_workflow`, `schedule_import`, `study_plan`, `course_maintenance`, route-specific action nodes, and `delegate_legacy_loop` nodes.
+1. `chat.py` chooses `run_langgraph_agent_loop`; `SP_AGENT_RUNTIME` is no longer a chat fallback switch in this worktree.
+2. `langgraph_loop.py` exposes a Router Shell V3 graph with `route`, `no_web`, `retrieve_rag`, `compose_runtime_hints`, `rag_insufficient`, `rag_qa`, `plain_chat`, `tool_workflow`, `schedule_import`, `study_plan`, `course_maintenance`, route-specific action nodes, and an `unsupported_route` terminal node.
 3. `route` conditionally sends no-web requests directly to the no-web terminal response, sends RAG/context candidates through retrieval, and sends native action routes to their corresponding action nodes.
-4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; sufficient RAG QA goes through `compose_runtime_hints` and then `rag_qa`, while non-gated RAG side-channel paths continue through hints and then to the selected action node or compatibility fallback.
+4. `retrieve_rag` conditionally sends insufficient gated RAG QA to `rag_insufficient`; sufficient RAG QA goes through `compose_runtime_hints` and then `rag_qa`, while non-gated RAG side-channel paths continue through hints and then to the selected action node or `unsupported_route`.
 5. `tool_workflow` now traces through `task_tool_node -> ask_user_pause -> confirmed_write`; `schedule_import` traces through `schedule_parse -> ask_user_pause -> confirmed_write`; `study_plan` and work-plan requests trace through `plan_generate -> plan_review_write -> confirmed_write`; `course_maintenance` traces through `course_disambiguate -> ask_user_pause -> confirmed_write`.
 6. `schedule_import`, study/work-plan review/writeback, and course-maintenance rename/delete/merge now have explicit workflow state in `PlannerGraphState` (`schedule_import`, `plan_workflow`, `course_maintenance`) and node step functions that own parse/list/generate, review pause, confirmation answer, `PendingConfirmation`, `DBWritePlan`, and confirmed write results. `run_langgraph_agent_loop()` still dispatches generic action work through `run_agent_action_loop()`, preserving the existing WebSocket event protocol, `ask_user` pause/resume, preflight, and confirmation write gate without appending `delegate_legacy_loop` to `graph_nodes`. Action `tool_result.result.graph_nodes` carries the route-specific trace for regression and smoke evidence.
 7. `run_langgraph_agent_loop()` dispatches `rag_qa` and `plain_chat` through `run_agent_text_loop()`, preserving text streaming without exposing tool calls or appending `delegate_legacy_loop` to `graph_nodes`. Text-only trace evidence is attached as an optional top-level `graph_nodes` field on existing `text_delta`, `text`, or `result` events.
-8. `delegate_legacy_loop` remains only as an explicitly marked compatibility fallback for routes not covered by the golden matrix; golden paths must not trace through it.
+8. `unsupported_route` is the only uncovered-route terminal; it returns a controlled user-facing response and does not call the full legacy loop.
 
 ## Router Contract
 
@@ -59,7 +63,7 @@ graph TD
   course_disambiguate --> ask_user_pause
   ask_user_pause --> confirmed_write
   route -.-> plain_chat
-  route -.-> delegate_legacy_loop
+  route -.-> unsupported_route
   retrieve_rag -.-> rag_insufficient
   retrieve_rag -.-> compose_runtime_hints
   compose_runtime_hints -.-> rag_qa
@@ -67,13 +71,13 @@ graph TD
   compose_runtime_hints -.-> schedule_import
   compose_runtime_hints -.-> study_plan
   compose_runtime_hints -.-> course_maintenance
-  compose_runtime_hints -.-> delegate_legacy_loop
+  compose_runtime_hints -.-> unsupported_route
   no_web --> __end__
   rag_insufficient --> __end__
   confirmed_write --> __end__
   rag_qa --> __end__
   plain_chat --> __end__
-  delegate_legacy_loop --> __end__
+  unsupported_route --> __end__
 ```
 
 ## State Schema
@@ -152,7 +156,7 @@ Confirmation State V1 now has a shared agent-loop DB write gate. Schedule import
 
 Current LangGraph-native action state: generic `ask_user` pauses now write `pending_ask` and `resume_state` from `run_langgraph_tool_node()`. Plain-text ask fallback is represented as a synthetic `ask_user` tool call and also enters `run_langgraph_tool_node()` instead of calling `execute_tool("ask_user")` directly. Schedule import, study/work plan writeback, and course maintenance now own their deterministic product flow through graph workflow state and step functions. Remaining local action shortcuts still mirror their `ask_user` pauses through `record_langgraph_ask_user_pause_state()` / `resume_langgraph_ask_user_state()` so `pending_ask`, `submitted_answer`, `pending_confirmation`, and the first applicable `db_write_plan` are visible in graph state while internal confirmation metadata is stripped before WebSocket emission. Confirmed write tools then rebuild or reuse `db_write_plan` immediately before execution, so the task/reminder, study/work plan, schedule import, and course-maintenance golden paths can assert confirmation id and tool-scope matching without relying only on inner generator local variables.
 
-Current remaining legacy caveat: `execute_tool` is still a direct dispatcher for non-agent callers and direct tool tests. The gate is enforced in the agent loop before write tools execute, not in HTTP routers or the low-level dispatcher. The outer generator still owns the actual WebSocket `asend` suspension/resume point, and no persistent DB-backed session table has been introduced. Local product shortcuts and compatibility fallback paths remain legacy-compatible, but golden tests and smoke must prove that the core LangGraph runtime paths preserve `pending_ask/submitted_answer/pending_confirmation/db_write_plan/resume_state` and do not depend on `delegate_legacy_loop`.
+Current remaining legacy caveat: `execute_tool` is still a direct dispatcher for non-agent callers and direct tool tests. The gate is enforced in the agent loop before write tools execute, not in HTTP routers or the low-level dispatcher. The outer generator still owns the actual WebSocket `asend` suspension/resume point, and no persistent DB-backed session table has been introduced. Local product shortcuts still mirror state into LangGraph where needed, but uncovered routes no longer delegate to the full legacy loop; golden tests and smoke must prove that the core LangGraph runtime paths preserve `pending_ask/submitted_answer/pending_confirmation/db_write_plan/resume_state` and do not depend on `delegate_legacy_loop`.
 
 ## Tool Boundary
 
@@ -172,7 +176,7 @@ The graph-native tool node must preserve the current boundary:
 12. Append tool message for the model.
 13. Update `tool_history` and `error_count`.
 
-Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call and is now used by the production generic action loop under `SP_AGENT_RUNTIME=langgraph`. It owns guardrails, task/schema preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, `last_tool_result`, `last_free_slots_result`, `pending_ask`, `submitted_answer`, `pending_confirmation`, `pending_confirmation_answer`, `db_write_plan`, and `resume_state` updates through graph state. The outer action loop still owns multi-turn orchestration concerns that require WebSocket `asend` before the pending generic tool call enters the node, but generic ask-user resume now calls `resume_langgraph_ask_user_state()` so the resumed answer and confirmation state are mirrored in `PlannerGraphState`. Streaming action-route orchestration now enters LangGraph action route-specific trace nodes and calls `run_agent_action_loop()` without `delegate_legacy_loop`; RAG-hit and plain-chat golden paths enter `rag_qa` / `plain_chat` and call `run_agent_text_loop()` instead of the compatibility fallback. Schedule import, study/work plan review/writeback, and course-maintenance rename/delete/merge have graph-owned workflow state machines; remaining generic and compatibility paths are still delegated helper execution behind graph trace nodes. `delegate_legacy_loop` remains only for explicitly compatible non-golden routes, and golden tests/smoke must prove their `graph_nodes` do not include it while text paths expose `no_web`, `rag_qa`, `rag_insufficient`, or `plain_chat`, and action paths expose `task_tool_node`, `ask_user_pause`, `confirmed_write`, `schedule_parse`, `course_disambiguate`, or `plan_review_write` as applicable.
+Current migration status: `run_langgraph_tool_node()` provides an independently testable node-level harness for one pending tool call and is now used by the production generic action helper inside the LangGraph runtime. It owns guardrails, task/schema preflight, reminder argument repair, execution dispatch, tool-result events, compressed tool summary persistence, agent-log persistence, tool messages, `tool_history`, `error_count`, `last_tool_result`, `last_free_slots_result`, `pending_ask`, `submitted_answer`, `pending_confirmation`, `pending_confirmation_answer`, `db_write_plan`, and `resume_state` updates through graph state. The outer action loop still owns multi-turn orchestration concerns that require WebSocket `asend` before the pending generic tool call enters the node, but generic ask-user resume now calls `resume_langgraph_ask_user_state()` so the resumed answer and confirmation state are mirrored in `PlannerGraphState`. Streaming action-route orchestration now enters LangGraph action route-specific trace nodes and calls `run_agent_action_loop()` without `delegate_legacy_loop`; RAG-hit and plain-chat golden paths enter `rag_qa` / `plain_chat` and call `run_agent_text_loop()` after graph route selection. Schedule import, study/work plan review/writeback, and course-maintenance rename/delete/merge have graph-owned workflow state machines; remaining generic paths are graph-selected helper execution behind graph trace nodes. Uncovered routes now terminate as `unsupported_route`, and golden tests/smoke must prove their `graph_nodes` do not include `delegate_legacy_loop` while text paths expose `no_web`, `rag_qa`, `rag_insufficient`, or `plain_chat`, and action paths expose `task_tool_node`, `ask_user_pause`, `confirmed_write`, `schedule_parse`, `course_disambiguate`, or `plan_review_write` as applicable.
 
 ## Streaming Strategy
 

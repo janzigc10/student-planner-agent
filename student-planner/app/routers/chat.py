@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.agent.langgraph_loop import run_langgraph_agent_loop
 from app.agent.llm_client import create_llm_client
-from app.agent.loop import run_agent_loop, run_review_override_plan_write
+from app.agent.loop import run_review_override_plan_write
 from app.agent.session_lifecycle import end_session
 from app.auth.jwt import verify_token
 from app.config import settings
@@ -24,9 +24,7 @@ GENERIC_CHAT_ERROR_MESSAGE = "聊天暂时不可用，请稍后重试"
 
 
 def _select_agent_loop():
-    if settings.agent_runtime.strip().lower() == "langgraph":
-        return run_langgraph_agent_loop
-    return run_agent_loop
+    return run_langgraph_agent_loop
 
 
 def _iter_exception_chain(exc: BaseException) -> Iterator[BaseException]:

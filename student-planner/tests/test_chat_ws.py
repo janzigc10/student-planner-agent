@@ -85,7 +85,7 @@ async def test_ws_returns_error_event_when_agent_loop_raises(setup_db):
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=failing_agent_loop),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=failing_agent_loop),
         patch("app.routers.chat.end_session", new_callable=AsyncMock),
     ):
         client = TestClient(app, raise_server_exceptions=False)
@@ -126,7 +126,7 @@ async def test_ws_returns_recoverable_provider_error_when_agent_loop_network_fai
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=failing_agent_loop),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=failing_agent_loop),
         patch("app.routers.chat.end_session", new_callable=AsyncMock),
     ):
         client = TestClient(app, raise_server_exceptions=False)
@@ -177,7 +177,7 @@ async def test_ws_disconnect_while_waiting_for_ask_user_answer_is_graceful(setup
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=ask_then_wait),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=ask_then_wait),
         patch("app.routers.chat.end_session", new_callable=AsyncMock) as mock_end_session,
     ):
         client = TestClient(app)
@@ -217,7 +217,7 @@ async def test_ws_returns_error_for_orphan_answer_payload(setup_db):
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=done_only_agent_loop),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=done_only_agent_loop),
         patch("app.routers.chat.end_session", new_callable=AsyncMock),
     ):
         client = TestClient(app)

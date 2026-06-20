@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
+from app.agent import langgraph_loop as langgraph_runtime
 from app.agent import rag as rag_module
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
 from app.agent.langgraph_loop import (
@@ -506,9 +507,14 @@ def test_langgraph_router_shell_mermaid_exposes_route_nodes():
         "study_plan",
         "schedule_import",
         "course_maintenance",
-        "delegate_legacy_loop",
+        "unsupported_route",
     ):
         assert node_name in mermaid
+    assert "delegate_legacy_loop" not in mermaid
+
+
+def test_langgraph_runtime_does_not_expose_legacy_agent_loop():
+    assert not hasattr(langgraph_runtime, "run_agent_loop")
 
 
 @pytest.mark.asyncio
@@ -522,7 +528,6 @@ async def test_prepare_langgraph_state_routes_no_web_inside_graph(monkeypatch):
 
     assert state["route"] == "no_web"
     assert state["should_retrieve"] is False
-    assert state["should_delegate_legacy_loop"] is False
     assert state["terminal_response"] == "no_web"
     assert state["graph_nodes"] == ["route", "no_web"]
 
@@ -537,7 +542,6 @@ async def test_prepare_langgraph_state_adds_rag_runtime_hint():
     assert "compose_runtime_hints" in state["graph_nodes"]
     assert "rag_qa" in state["graph_nodes"]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
-    assert state["should_delegate_legacy_loop"] is False
     assert state["uses_langchain_tools"] is True
     assert any("RAG 检索上下文" in hint for hint in state["runtime_hints"])
     assert any("复习问答" in hint for hint in state["runtime_hints"])
@@ -561,7 +565,6 @@ async def test_prepare_langgraph_state_routes_rag_insufficient_inside_graph(monk
 
     assert state["route"] == "rag_insufficient"
     assert state["should_gate_rag_answer"] is True
-    assert state["should_delegate_legacy_loop"] is False
     assert state["terminal_response"] == "rag_insufficient"
     assert state["graph_nodes"] == ["route", "retrieve_rag", "rag_insufficient"]
 
@@ -584,7 +587,6 @@ async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(m
     assert state["route"] == "study_plan"
     assert state["should_retrieve"] is True
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is False
     assert state["runtime_hints"] == []
     assert state["graph_nodes"] == [
         "route",
@@ -610,7 +612,6 @@ async def test_prepare_langgraph_state_routes_schedule_import_to_native_action_n
     assert state["route"] == "schedule_import"
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is False
     assert state["graph_nodes"] == [
         "route",
         "schedule_import",
@@ -639,7 +640,6 @@ async def test_prepare_langgraph_state_keeps_reminder_route_non_gating_with_rag_
     assert state["route"] == "tool_workflow"
     assert state["should_retrieve"] is True
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is False
     assert state["graph_nodes"] == [
         "route",
         "retrieve_rag",
@@ -664,7 +664,6 @@ async def test_prepare_langgraph_state_routes_task_update_reminder_to_native_act
     assert state["route"] == "tool_workflow"
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is False
     assert state["graph_nodes"] == [
         "route",
         "tool_workflow",
@@ -687,7 +686,6 @@ async def test_prepare_langgraph_state_routes_course_maintenance_to_native_actio
     assert state["route"] == "course_maintenance"
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is False
     assert state["graph_nodes"] == [
         "route",
         "course_maintenance",
@@ -710,9 +708,45 @@ async def test_prepare_langgraph_state_routes_plain_chat_to_native_text_node(mon
     assert state["route"] == "plain_chat"
     assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
-    assert state["should_delegate_legacy_loop"] is False
     assert state["graph_nodes"] == ["route", "plain_chat"]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_returns_unsupported_route_without_legacy_delegate(monkeypatch, setup_db):
+    async def fake_prepare_langgraph_state(_message: str) -> dict:
+        return {
+            "route": "unknown_route",
+            "terminal_response": "unsupported_route",
+            "should_retrieve": False,
+            "graph_nodes": ["route", "unsupported_route"],
+        }
+
+    monkeypatch.setattr(langgraph_runtime, "prepare_langgraph_state", fake_prepare_langgraph_state)
+
+    with patch(
+        "app.agent.langgraph_loop.run_agent_loop",
+        side_effect=AssertionError("Unsupported routes must not delegate to run_agent_loop"),
+        create=True,
+    ):
+        async with TestSession() as db:
+            user = User(id="user-langgraph-unsupported", username="langgraph-unsupported", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "force unsupported route",
+                user,
+                "session-langgraph-unsupported",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    assert [event["type"] for event in events] == ["text", "done"]
+    assert events[0]["content"] == langgraph_runtime.UNSUPPORTED_LANGGRAPH_ROUTE_TEXT
+    assert events[0]["graph_nodes"] == ["route", "unsupported_route"]
 
 
 @pytest.mark.asyncio
@@ -755,6 +789,7 @@ async def test_langgraph_agent_loop_emits_rag_events_and_answers_without_legacy_
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("RAG hit golden path should not delegate to run_agent_loop"),
+            create=True,
         ),
         patch("app.agent.loop.chat_completion_stream") as mock_chat_completion_stream,
     ):
@@ -796,6 +831,7 @@ async def test_langgraph_agent_loop_streams_plain_chat_without_legacy_delegate(s
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Plain chat golden path should not delegate to run_agent_loop"),
+            create=True,
         ),
         patch("app.agent.loop.chat_completion_stream") as mock_chat_completion_stream,
     ):
@@ -842,6 +878,7 @@ async def test_langgraph_agent_loop_blocks_rag_qa_when_evidence_is_insufficient(
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("RAG evidence gate should not delegate to the LLM loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -883,6 +920,7 @@ async def test_langgraph_agent_loop_blocks_topic_only_rag_candidate_without_ques
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Topic-only RAG candidates should still be evidence gated"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -921,6 +959,7 @@ async def test_langgraph_agent_loop_blocks_rag_qa_when_task_is_domain_word(setup
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Domain-word task questions should still be evidence gated"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -958,6 +997,7 @@ async def test_langgraph_agent_loop_blocks_arrangement_question_when_evidence_is
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Knowledge questions using 安排 should still be evidence gated"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -1002,6 +1042,7 @@ async def test_langgraph_agent_loop_keeps_task_planning_path_when_rag_evidence_i
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Action routes should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -1046,6 +1087,7 @@ async def test_langgraph_agent_loop_keeps_arrangement_workflow_when_rag_evidence
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Action routes should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -1086,6 +1128,7 @@ async def test_langgraph_agent_loop_preserves_no_web_guard_for_current_public_ev
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Current public event questions should not delegate to legacy loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -1122,6 +1165,7 @@ async def test_langgraph_agent_loop_forwards_ask_user_answers_to_inner_loop(setu
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("ask_user action golden path should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -1144,14 +1188,14 @@ async def test_langgraph_agent_loop_forwards_ask_user_answers_to_inner_loop(setu
     assert captured["answer"] == "确认"
 
 
-def test_chat_runtime_selector_can_use_langgraph(monkeypatch):
+def test_chat_runtime_selector_always_uses_langgraph(monkeypatch):
     from app.routers import chat
 
     monkeypatch.setattr(chat.settings, "agent_runtime", "langgraph")
     assert chat._select_agent_loop() is chat.run_langgraph_agent_loop
 
     monkeypatch.setattr(chat.settings, "agent_runtime", "legacy")
-    assert chat._select_agent_loop() is chat.run_agent_loop
+    assert chat._select_agent_loop() is chat.run_langgraph_agent_loop
 
 
 @pytest.mark.asyncio

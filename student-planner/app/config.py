@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_max_tokens: int = 4096
     llm_temperature: float = 0.3
-    agent_runtime: str = "legacy"
+    agent_runtime: str = "langgraph"
     rag_corpus_dir: str = "data/rag"
     rag_embedding_provider: str = "dashscope"
     rag_embedding_model: str = "text-embedding-v4"

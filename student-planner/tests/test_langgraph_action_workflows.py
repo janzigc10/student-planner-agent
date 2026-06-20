@@ -49,7 +49,6 @@ async def collect_events(generator, *, answers: list[str] | None = None) -> list
 
 def assert_native_action_graph(state: dict, route: str) -> None:
     assert state["route"] == route
-    assert state["should_delegate_legacy_loop"] is False
     assert route in state["graph_nodes"]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -113,6 +112,7 @@ async def test_langgraph_plain_text_ask_fallback_uses_tool_node_state(setup_db):
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Plain-text ask action route should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -166,6 +166,7 @@ async def test_langgraph_missing_task_shortcut_records_confirmation_state(setup_
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Missing-task shortcut should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -331,6 +332,7 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Task/reminder action route should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -499,6 +501,7 @@ async def test_langgraph_native_study_plan_confirmed_write_does_not_delegate(set
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Study plan action route should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -585,6 +588,7 @@ async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setu
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
             side_effect=AssertionError("Study/work plan action route should not delegate to run_agent_loop"),
+            create=True,
         ),
     ):
         async with TestSession() as db:
@@ -716,6 +720,7 @@ async def test_langgraph_native_schedule_import_confirmed_write_does_not_delegat
     with patch(
         "app.agent.langgraph_loop.run_agent_loop",
         side_effect=AssertionError("Schedule import action route should not delegate to run_agent_loop"),
+        create=True,
     ), patch(
         "app.agent.loop._run_schedule_import_shortcut",
         side_effect=AssertionError("Schedule import action route should be driven by LangGraph workflow nodes"),
@@ -810,6 +815,7 @@ async def test_langgraph_native_course_maintenance_confirmed_write_does_not_dele
     with patch(
         "app.agent.langgraph_loop.run_agent_loop",
         side_effect=AssertionError("Course maintenance action route should not delegate to run_agent_loop"),
+        create=True,
     ), patch(
         "app.agent.loop._run_course_merge_shortcut",
         side_effect=AssertionError("Course maintenance should be driven by LangGraph workflow nodes"),
@@ -882,6 +888,7 @@ async def test_langgraph_native_course_maintenance_cancel_does_not_write(setup_d
     with patch(
         "app.agent.langgraph_loop.run_agent_loop",
         side_effect=AssertionError("Course maintenance action route should not delegate to run_agent_loop"),
+        create=True,
     ), patch(
         "app.agent.loop._run_course_merge_shortcut",
         side_effect=AssertionError("Course maintenance should be driven by LangGraph workflow nodes"),
