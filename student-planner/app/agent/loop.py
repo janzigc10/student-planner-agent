@@ -3501,18 +3501,26 @@ async def run_agent_action_loop(
         return
 
     if _should_handle_course_merge_locally(user_message, history_messages):
-        shortcut = _run_shortcut_with_langgraph_ask_state(
-            _run_course_merge_shortcut(user_message, user, session_id, db, history_messages)
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        course_workflow = langgraph_runtime.run_langgraph_course_maintenance_workflow(
+            user_message,
+            langgraph_runtime.GraphCourseMaintenanceRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+                history_messages=history_messages,
+            ),
         )
         try:
-            event = await shortcut.__anext__()
+            event = await course_workflow.__anext__()
             while True:
                 if event["type"] == "ask_user":
                     user_response = yield event
-                    event = await shortcut.asend(user_response)
+                    event = await course_workflow.asend(user_response)
                 else:
                     yield event
-                    event = await shortcut.__anext__()
+                    event = await course_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return

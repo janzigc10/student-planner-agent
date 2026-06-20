@@ -28,6 +28,10 @@ from app.agent.langchain_tools import langchain_assignment_tool_names, langchain
 from app.agent.loop import (
     _current_public_info_unavailable_text,
     _build_confirmed_write_state_from_ask,
+    _actions_from_course_merge_plan,
+    _build_course_delete_actions,
+    _build_course_merge_plan,
+    _build_course_rename_actions,
     _build_db_write_plan,
     _build_pending_confirmation,
     _build_plan_write_result_event,
@@ -46,9 +50,11 @@ from app.agent.loop import (
     _find_rescheduled_task_args,
     _is_confirmed_answer,
     _is_cancelled_answer,
+    _is_course_followup_message,
     _is_time_conflict_result,
     _is_write_authorized_answer,
     _log_step,
+    _match_courses_from_text,
     _normalize_study_plan_tasks,
     _normalize_work_plan_tasks,
     _plan_task_date_range,
@@ -62,6 +68,7 @@ from app.agent.loop import (
     _work_context_has_quality,
     _work_plan_date_range,
     _work_plan_intake_question,
+    _course_maintenance_intent,
     run_agent_action_loop,
     run_agent_loop,
     run_agent_text_loop,
@@ -118,6 +125,7 @@ class PlannerGraphState(TypedDict, total=False):
     last_free_slots_result: dict[str, Any]
     schedule_import: dict[str, Any]
     plan_workflow: dict[str, Any]
+    course_maintenance: dict[str, Any]
 
 
 ToolExecutor = Callable[
@@ -153,6 +161,16 @@ class GraphPlanWorkflowRuntime:
     db: AsyncSession
     user: User
     session_id: str
+    execute_tool_func: ToolExecutor | None = None
+    confirmed_write_executor: ConfirmedWritePlanExecutor | None = None
+
+
+@dataclass(frozen=True)
+class GraphCourseMaintenanceRuntime:
+    db: AsyncSession
+    user: User
+    session_id: str
+    history_messages: list[Any]
     execute_tool_func: ToolExecutor | None = None
     confirmed_write_executor: ConfirmedWritePlanExecutor | None = None
 
@@ -1263,6 +1281,486 @@ async def run_langgraph_schedule_import_workflow(
         imported_count = int(import_result.get("count") or len(courses))
         text = f"课表已导入完成，共 {imported_count} 条。"
     yield _schedule_import_text_event(text)
+    await _save_message(runtime.db, runtime.session_id, "assistant", text)
+    yield {"type": "done"}
+
+
+def _course_maintenance_state(state: PlannerGraphState) -> dict[str, Any]:
+    return dict(state.get("course_maintenance") or {})
+
+
+def _with_course_maintenance_state(
+    state: PlannerGraphState,
+    *,
+    node_name: str,
+    **updates: Any,
+) -> PlannerGraphState:
+    course_state = {
+        **_course_maintenance_state(state),
+        "node": node_name,
+        **updates,
+    }
+    return {
+        **state,
+        "course_maintenance": course_state,
+        "step": int(course_state.get("step") or state.get("step") or 0),
+        "graph_nodes": [*state.get("graph_nodes", []), node_name],
+    }
+
+
+def _course_review_question(kind: str) -> str:
+    if kind == "rename":
+        return "我准备按下面方案修改课程名。确认后我就直接处理。"
+    if kind == "delete":
+        return "我准备删除下面这些课程记录。确认后我就直接处理。"
+    if kind == "merge":
+        return "我准备把这些重复课程合并成每个时段 1 条记录。确认后我就直接处理。"
+    return "我准备按下面方案维护课程记录。确认后我就直接处理。"
+
+
+def _course_no_action_text(kind: str, intent: dict[str, str], issue: str | None) -> str:
+    if issue == "ambiguous":
+        return "我先查了当前课表，但匹配到多条同名课程。请补充周几、时间或地点后我再删除，避免误删。"
+    if kind == "rename":
+        return (
+            "我先查了当前课表，但没有找到 "
+            + str(intent.get("old_name") or "")
+            + "。请确认课程名后再让我修改。"
+        )
+    if kind == "delete":
+        return (
+            "我先查了当前课表，但没有找到 "
+            + str(intent.get("target_name") or "")
+            + "。请确认课程名后再让我删除。"
+        )
+    return "我先查了当前课表，但还没定位到可以直接合并的重复记录。你可以把要保留的课程名再明确发我一次。"
+
+
+def _course_write_plan_for_action(
+    *,
+    pending_confirmation: PendingConfirmation,
+    action_item: dict[str, Any],
+) -> tuple[str, dict[str, Any], DBWritePlan] | None:
+    action = str(action_item.get("action") or "")
+    course = action_item.get("course") if isinstance(action_item.get("course"), dict) else {}
+    course_id = str(course.get("id") or "")
+    if action == "update" and course_id:
+        update_args = {"course_id": course_id, **dict(action_item.get("updates") or {})}
+        return (
+            "update_course",
+            update_args,
+            _build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="update_course",
+                args=update_args,
+                description="Confirmed course update.",
+            ),
+        )
+    if action == "delete" and course_id:
+        delete_args = {"course_id": course_id}
+        return (
+            "delete_course",
+            delete_args,
+            _build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="delete_course",
+                args=delete_args,
+                description="Confirmed course delete.",
+            ),
+        )
+    return None
+
+
+async def run_langgraph_course_maintenance_step(
+    state: PlannerGraphState,
+    runtime: GraphCourseMaintenanceRuntime,
+    *,
+    node_name: str,
+) -> PlannerGraphState:
+    """Advance one course-maintenance workflow node using graph state."""
+
+    course_state = _course_maintenance_state(state)
+    step = int(course_state.get("step") or state.get("step") or 0)
+    executor = runtime.execute_tool_func or execute_tool
+
+    if node_name == "course_disambiguate":
+        intent = course_state.get("intent")
+        intent = intent if isinstance(intent, dict) else {"kind": "merge"}
+        kind = str(intent.get("kind") or "merge")
+        selected_names_text = str(course_state.get("selected_names_text") or state.get("user_message") or "")
+        list_result = await executor("list_courses", {}, runtime.db, runtime.user.id)
+        step += 1
+        await _persist_local_tool_step(
+            runtime.db,
+            runtime.session_id,
+            runtime.user.id,
+            step,
+            "list_courses",
+            {},
+            list_result,
+        )
+        if "error" in list_result:
+            return _with_course_maintenance_state(
+                state,
+                node_name=node_name,
+                status="error",
+                intent=intent,
+                kind=kind,
+                selected_names_text=selected_names_text,
+                current_result=list_result,
+                step=step,
+            )
+
+        courses = list(list_result.get("courses") or [])
+        actions: list[dict[str, Any]] = []
+        issue: str | None = None
+        if kind == "rename":
+            actions, issue = _build_course_rename_actions(
+                str(intent.get("old_name") or ""),
+                str(intent.get("new_name") or ""),
+                courses,
+            )
+        elif kind == "delete":
+            actions, issue = _build_course_delete_actions(
+                str(intent.get("target_name") or ""),
+                courses,
+                str(state.get("user_message") or ""),
+            )
+        else:
+            matched_courses = _match_courses_from_text(selected_names_text, courses)
+            merge_plan = _build_course_merge_plan(matched_courses)
+            if not merge_plan:
+                issue = "not_found"
+            else:
+                actions = _actions_from_course_merge_plan(merge_plan, matched_courses)
+
+        return _with_course_maintenance_state(
+            state,
+            node_name=node_name,
+            status="ready" if actions else "no_action",
+            intent=intent,
+            kind=kind,
+            selected_names_text=selected_names_text,
+            current_result=list_result,
+            courses=courses,
+            actions=actions,
+            issue=issue,
+            step=step,
+        )
+
+    if node_name == "ask_user_pause":
+        actions = list(course_state.get("actions") or [])
+        kind = str(course_state.get("kind") or "merge")
+        review_data = {
+            "actions": [
+                {
+                    "action": item["action"],
+                    "course": item["course"],
+                    "updates": item.get("updates"),
+                    "reason": item.get("reason"),
+                }
+                for item in actions
+            ],
+            "count": len(actions),
+        }
+        allowed_tool_names = tuple(
+            dict.fromkeys(
+                "update_course" if str(item.get("action") or "") == "update" else "delete_course"
+                for item in actions
+                if str(item.get("action") or "") in {"update", "delete"}
+            )
+        )
+        pending_confirmation = _build_pending_confirmation(
+            route=AgentRoute.COURSE_MAINTENANCE.value,
+            tool_name=allowed_tool_names[0] if allowed_tool_names else "update_course",
+            question=_course_review_question(kind),
+            ask_type="review",
+            data=review_data,
+            allowed_tool_names=allowed_tool_names,
+        )
+        first_plan: DBWritePlan | None = None
+        for item in actions:
+            write_plan = _course_write_plan_for_action(
+                pending_confirmation=pending_confirmation,
+                action_item=item,
+            )
+            if write_plan is not None:
+                first_plan = write_plan[2]
+                break
+        ask_event = {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        }
+        next_state = record_langgraph_ask_user_pause_state(
+            state,
+            tool_args={
+                "question": pending_confirmation.question,
+                "type": pending_confirmation.ask_type,
+                "options": list(pending_confirmation.options),
+                "data": pending_confirmation.data,
+            },
+            ask_result=ask_event,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=first_plan,
+        )
+        return _with_course_maintenance_state(
+            next_state,
+            node_name=node_name,
+            status="awaiting_review",
+            intent=course_state.get("intent"),
+            kind=kind,
+            actions=actions,
+            review_event=ask_event,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=first_plan,
+            step=step,
+        )
+
+    if node_name == "confirmed_write":
+        pending_confirmation = course_state.get("pending_confirmation")
+        db_write_plan = course_state.get("db_write_plan")
+        tool_name = str(course_state.get("tool_name") or (db_write_plan.tool_name if isinstance(db_write_plan, DBWritePlan) else ""))
+        confirmation_answer = str(
+            course_state.get("confirmation_answer")
+            or state.get("pending_confirmation_answer")
+            or state.get("submitted_answer")
+            or ""
+        )
+        confirmed_write_executor = (
+            runtime.confirmed_write_executor or execute_langgraph_confirmed_db_write_plan
+        )
+        confirmed_result = await confirmed_write_executor(
+            pending_confirmation=pending_confirmation if isinstance(pending_confirmation, PendingConfirmation) else None,
+            db_write_plan=db_write_plan if isinstance(db_write_plan, DBWritePlan) else None,
+            confirmation_answer=confirmation_answer,
+            db=runtime.db,
+            user_id=runtime.user.id,
+        )
+        step += 1
+        tool_args = dict(db_write_plan.args) if isinstance(db_write_plan, DBWritePlan) else {}
+        await _persist_local_tool_step(
+            runtime.db,
+            runtime.session_id,
+            runtime.user.id,
+            step,
+            tool_name,
+            tool_args,
+            confirmed_result,
+        )
+        return _with_course_maintenance_state(
+            state,
+            node_name=node_name,
+            status="confirmed_write",
+            intent=course_state.get("intent"),
+            kind=course_state.get("kind"),
+            actions=list(course_state.get("actions") or []),
+            pending_confirmation=pending_confirmation,
+            db_write_plan=db_write_plan,
+            tool_name=tool_name,
+            confirmation_answer=confirmation_answer,
+            confirmed_result=confirmed_result,
+            current_result=confirmed_result,
+            step=step,
+        )
+
+    return _with_course_maintenance_state(state, node_name=node_name)
+
+
+async def run_langgraph_course_maintenance_workflow(
+    user_message: str,
+    runtime: GraphCourseMaintenanceRuntime,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Run course maintenance as explicit LangGraph workflow state."""
+
+    intent = _course_maintenance_intent(user_message, runtime.history_messages) or {"kind": "merge"}
+    kind = str(intent.get("kind") or "merge")
+    selected_names_text = user_message
+    state: PlannerGraphState = {
+        "user_message": user_message,
+        "route": AgentRoute.COURSE_MAINTENANCE.value,
+        "graph_nodes": [AgentRoute.COURSE_MAINTENANCE.value],
+        "uses_langgraph": StateGraph is not None,
+        "uses_langchain_tools": False,
+        "messages": [],
+        "tool_history": [],
+        "preflight_reference_texts": [],
+        "preflight_user_texts": [],
+        "error_count": {},
+        "events": [],
+        "step": 0,
+        "course_maintenance": {
+            "intent": intent,
+            "kind": kind,
+            "selected_names_text": selected_names_text,
+            "step": 0,
+        },
+    }
+
+    if kind == "merge" and not _is_course_followup_message(user_message, runtime.history_messages):
+        ask_event = {
+            "type": "ask_user",
+            "ask_type": "review",
+            "question": "你想合并的是哪两门课？请直接把课程名发给我，我来按当前课表里的记录帮你收口。",
+            "options": [],
+            "data": None,
+        }
+        state = record_langgraph_ask_user_pause_state(
+            state,
+            tool_args={
+                "question": ask_event["question"],
+                "type": ask_event["ask_type"],
+                "options": [],
+            },
+            ask_result=ask_event,
+        )
+        state = _with_course_maintenance_state(
+            state,
+            node_name="ask_user_pause",
+            intent=intent,
+            kind=kind,
+            disambiguation_event=ask_event,
+            step=0,
+        )
+        selected_answer = yield ask_event
+        state = resume_langgraph_ask_user_state(state, user_response=str(selected_answer or ""))
+        selected_names_text = str(selected_answer or "").strip()
+        if not selected_names_text:
+            message_id = str(uuid.uuid4())
+            text = "好的，等你把要合并的课程名发给我后，我再帮你处理。"
+            yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+            await _save_message(runtime.db, runtime.session_id, "assistant", text)
+            yield {"type": "done"}
+            return
+
+    state = _with_course_maintenance_state(
+        state,
+        node_name="course_disambiguate",
+        intent=intent,
+        kind=kind,
+        selected_names_text=selected_names_text,
+    )
+    yield {"type": "tool_call", "name": "list_courses", "args": {}}
+    state = await run_langgraph_course_maintenance_step(
+        state,
+        runtime,
+        node_name="course_disambiguate",
+    )
+    course_state = _course_maintenance_state(state)
+    list_result = dict(course_state.get("current_result") or {})
+    yield _with_graph_trace({"type": "tool_result", "name": "list_courses", "result": list_result}, state["graph_nodes"])
+
+    if "error" in list_result:
+        message_id = str(uuid.uuid4())
+        text = str(list_result.get("error") or "课表查询失败，请稍后重试。")
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    actions = list(course_state.get("actions") or [])
+    if not actions:
+        message_id = str(uuid.uuid4())
+        text = _course_no_action_text(kind, intent, course_state.get("issue"))
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    state = await run_langgraph_course_maintenance_step(
+        state,
+        runtime,
+        node_name="ask_user_pause",
+    )
+    course_state = _course_maintenance_state(state)
+    review_event = dict(course_state.get("review_event") or {})
+    confirm_answer = yield review_event
+    state = resume_langgraph_ask_user_state(state, user_response=str(confirm_answer or ""))
+    state = _with_course_maintenance_state(
+        state,
+        node_name="ask_user_pause",
+        intent=intent,
+        kind=kind,
+        actions=actions,
+        pending_confirmation=course_state.get("pending_confirmation"),
+        db_write_plan=course_state.get("db_write_plan"),
+        confirmation_answer=str(confirm_answer or ""),
+    )
+
+    if not _is_confirmed_answer(str(confirm_answer or "")):
+        message_id = str(uuid.uuid4())
+        text = "好的，我先不改。你后面想继续的话，直接告诉我保留哪一个课程名就行。"
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    pending_confirmation = course_state.get("pending_confirmation")
+    updated_results: list[dict[str, Any]] = []
+    deleted_results: list[dict[str, Any]] = []
+    failed_results: list[dict[str, Any]] = []
+    for item in actions:
+        if not isinstance(pending_confirmation, PendingConfirmation):
+            failed_results.append({"error": "Missing course maintenance confirmation state."})
+            continue
+        write_plan = _course_write_plan_for_action(
+            pending_confirmation=pending_confirmation,
+            action_item=item,
+        )
+        if write_plan is None:
+            failed_results.append({"error": "Invalid course maintenance action"})
+            continue
+        tool_name, tool_args, db_write_plan = write_plan
+        state = _with_course_maintenance_state(
+            state,
+            node_name="confirmed_write",
+            intent=intent,
+            kind=kind,
+            actions=actions,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=db_write_plan,
+            tool_name=tool_name,
+            confirmation_answer=str(confirm_answer or ""),
+        )
+        yield {"type": "tool_call", "name": tool_name, "args": tool_args}
+        state = await run_langgraph_course_maintenance_step(
+            state,
+            runtime,
+            node_name="confirmed_write",
+        )
+        result = dict(_course_maintenance_state(state).get("confirmed_result") or {})
+        yield _with_graph_trace({"type": "tool_result", "name": tool_name, "result": result}, state["graph_nodes"])
+        if "error" in result:
+            failed_results.append(result)
+        elif tool_name == "update_course":
+            updated_results.append(result)
+        else:
+            deleted_results.append(result)
+
+    message_id = str(uuid.uuid4())
+    if failed_results and (updated_results or deleted_results):
+        text = (
+            "已完成 "
+            + str(len(updated_results))
+            + " 条课程修改、"
+            + str(len(deleted_results))
+            + " 条课程删除；另有 "
+            + str(len(failed_results))
+            + " 条因为参数或记录不存在未处理。"
+        )
+    elif failed_results:
+        text = "这些课程记录暂时没有处理成功，主要原因是参数不完整或记录不存在。请确认后再试。"
+    elif kind == "rename" and deleted_results and not updated_results:
+        text = "已经帮你删除 " + str(len(deleted_results)) + " 条重复错名课程记录，保留同一时段已有的正确课程。"
+    elif kind == "rename":
+        text = "已经帮你修改 " + str(len(updated_results)) + " 条课程记录。"
+    elif kind == "delete":
+        text = "已经帮你删除 " + str(len(deleted_results)) + " 条课程记录。"
+    else:
+        text = "已经帮你把重复课程合并好了，删除 " + str(len(deleted_results)) + " 条重复记录。"
+    yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
     await _save_message(runtime.db, runtime.session_id, "assistant", text)
     yield {"type": "done"}
 

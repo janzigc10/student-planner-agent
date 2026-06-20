@@ -696,6 +696,15 @@ async def test_langgraph_native_schedule_import_confirmed_write_does_not_delegat
 
 @pytest.mark.asyncio
 async def test_langgraph_native_course_maintenance_confirmed_write_does_not_delegate(setup_db):
+    from app.agent import langgraph_loop as langgraph_runtime
+
+    observed_course_states: list[dict] = []
+    original_course_step = langgraph_runtime.run_langgraph_course_maintenance_step
+
+    async def spy_course_step(state, runtime, *, node_name):
+        next_state = await original_course_step(state, runtime, node_name=node_name)
+        observed_course_states.append(dict(next_state.get("course_maintenance") or {}))
+        return next_state
     prompt = "把自然语言处理课程改名为 NLP"
     state = await prepare_langgraph_state(prompt)
     assert_native_action_graph(state, "course_maintenance")
@@ -706,6 +715,12 @@ async def test_langgraph_native_course_maintenance_confirmed_write_does_not_dele
     with patch(
         "app.agent.langgraph_loop.run_agent_loop",
         side_effect=AssertionError("Course maintenance action route should not delegate to run_agent_loop"),
+    ), patch(
+        "app.agent.loop._run_course_merge_shortcut",
+        side_effect=AssertionError("Course maintenance should be driven by LangGraph workflow nodes"),
+    ), patch(
+        "app.agent.langgraph_loop.run_langgraph_course_maintenance_step",
+        side_effect=spy_course_step,
     ):
         async with TestSession() as db:
             user = User(id="user-lg-course", username="lg-course", hashed_password="x")
@@ -741,5 +756,75 @@ async def test_langgraph_native_course_maintenance_confirmed_write_does_not_dele
     assert "course_disambiguate" in event_graph_nodes
     assert "ask_user_pause" in event_graph_nodes
     assert "confirmed_write" in event_graph_nodes
+    assert [course_state.get("node") for course_state in observed_course_states] == [
+        "course_disambiguate",
+        "ask_user_pause",
+        "confirmed_write",
+    ]
+    assert observed_course_states[0]["current_result"]["courses"]
+    assert observed_course_states[0]["actions"][0]["action"] == "update"
+    assert isinstance(observed_course_states[1]["pending_confirmation"], PendingConfirmation)
+    assert isinstance(observed_course_states[1]["db_write_plan"], DBWritePlan)
+    assert observed_course_states[1]["db_write_plan"].tool_name == "update_course"
+    assert observed_course_states[2]["confirmed_result"]["status"] == "updated"
     assert len(courses) == 1
     assert courses[0].name == "NLP"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_native_course_maintenance_cancel_does_not_write(setup_db):
+    from app.agent import langgraph_loop as langgraph_runtime
+
+    prompt = "把课程 Course Cancel 改名为 Course Written"
+    observed_course_states: list[dict] = []
+    original_course_step = langgraph_runtime.run_langgraph_course_maintenance_step
+
+    async def spy_course_step(state, runtime, *, node_name):
+        next_state = await original_course_step(state, runtime, node_name=node_name)
+        observed_course_states.append(dict(next_state.get("course_maintenance") or {}))
+        return next_state
+
+    with patch(
+        "app.agent.langgraph_loop.run_agent_loop",
+        side_effect=AssertionError("Course maintenance action route should not delegate to run_agent_loop"),
+    ), patch(
+        "app.agent.loop._run_course_merge_shortcut",
+        side_effect=AssertionError("Course maintenance should be driven by LangGraph workflow nodes"),
+    ), patch(
+        "app.agent.langgraph_loop.run_langgraph_course_maintenance_step",
+        side_effect=spy_course_step,
+    ):
+        async with TestSession() as db:
+            user = User(id="user-lg-course-cancel", username="lg-course-cancel", hashed_password="x")
+            db.add(user)
+            db.add(
+                Course(
+                    user_id=user.id,
+                    name="Course Cancel",
+                    weekday=1,
+                    start_time="08:30",
+                    end_time="10:05",
+                    week_start=1,
+                    week_end=18,
+                    week_pattern="all",
+                )
+            )
+            await db.commit()
+
+            events = await collect_events(
+                run_langgraph_agent_loop(prompt, user, "session-lg-course-cancel", db, AsyncMock()),
+                answers=["取消"],
+            )
+
+            course_result = await db.execute(select(Course).where(Course.user_id == user.id))
+            courses = list(course_result.scalars().all())
+
+    assert [event["name"] for event in events if event["type"] == "tool_call"] == ["list_courses"]
+    assert [course_state.get("node") for course_state in observed_course_states] == [
+        "course_disambiguate",
+        "ask_user_pause",
+    ]
+    assert isinstance(observed_course_states[1]["pending_confirmation"], PendingConfirmation)
+    assert isinstance(observed_course_states[1]["db_write_plan"], DBWritePlan)
+    assert len(courses) == 1
+    assert courses[0].name == "Course Cancel"
