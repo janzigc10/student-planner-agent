@@ -631,7 +631,7 @@ async def run_langgraph_plan_review_write_workflow(
         )
         if not tasks:
             message_id = str(uuid.uuid4())
-            text = f"浣犲凡缁忓垹闄や簡鍏ㄩ儴{profile['task_label']}锛岃繖娆℃病鏈夊啓鍏ユ棩绋嬨€?"
+            text = f"你已经删除了全部{profile['task_label']}，这次没有写入日程。"
             yield _with_graph_trace(
                 _build_plan_write_result_event(
                     message_id=message_id,
@@ -814,7 +814,7 @@ async def run_langgraph_work_plan_workflow(
 
     if due_date is None:
         message_id = str(uuid.uuid4())
-        text = "鎴戣繕娌¤瘑鍒埌浣滀笟鎴栨姤鍛婄殑鎴鏃ユ湡锛岃鎸夆€?026-06-12 瑕佷氦鏈哄櫒瀛︿範鎶ュ憡鈥濊繖绉嶆牸寮忓啀鍙戜竴娆°€?"
+        text = "我还没有识别到作业截止日期。请补充一个明确日期，例如 2026-06-12，我再帮你拆成日程任务。"
         yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
         await _save_message(runtime.db, runtime.session_id, "assistant", text)
         yield {"type": "done"}
@@ -848,7 +848,7 @@ async def run_langgraph_work_plan_workflow(
         state = resume_langgraph_ask_user_state(state, user_response=str(context_answer or ""))
         if _is_cancelled_answer(str(context_answer or "")):
             message_id = str(uuid.uuid4())
-            text = "濂界殑锛屾垜鍏堜笉鐢熸垚浣滀笟璁″垝銆備綘鏁寸悊濂借姹傚悗鍐嶅憡璇夋垜銆?"
+            text = "好的，我先不生成作业计划。你整理好要求后再告诉我。"
             yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
             await _save_message(runtime.db, runtime.session_id, "assistant", text)
             yield {"type": "done"}

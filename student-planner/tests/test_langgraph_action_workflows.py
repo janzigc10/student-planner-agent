@@ -6,7 +6,14 @@ import pytest
 from sqlalchemy import select
 
 from app.agent.contracts import DBWritePlan, PendingConfirmation
-from app.agent.langgraph_loop import prepare_langgraph_state, run_langgraph_agent_loop, run_langgraph_tool_node
+from app.agent.langgraph_loop import (
+    GraphPlanWorkflowRuntime,
+    prepare_langgraph_state,
+    run_langgraph_agent_loop,
+    run_langgraph_plan_review_write_workflow,
+    run_langgraph_tool_node,
+    run_langgraph_work_plan_workflow,
+)
 from app.models.course import Course
 from app.models.reminder import Reminder
 from app.models.task import Task
@@ -54,6 +61,11 @@ def graph_nodes_from_tool_results(events: list[dict]) -> list[str]:
         if isinstance(result, dict) and isinstance(result.get("graph_nodes"), list):
             nodes.extend(str(node) for node in result["graph_nodes"])
     return nodes
+
+
+def assert_no_mojibake_text(text: str) -> None:
+    markers = ("浣犲", "鎴戣", "濂界", "娴ｇ", "閹", "婵傜")
+    assert not any(marker in text for marker in markers)
 
 
 @pytest.mark.asyncio
@@ -603,6 +615,89 @@ async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setu
     assert any(state.get("node") == "plan_review_write" and state.get("pending_confirmation") for state in observed_plan_states)
     assert sum(1 for state in observed_plan_states if state.get("node") == "confirmed_write") == 2
     assert [task.title for task in tasks] == ["机器学习报告 - 整理资料", "机器学习报告 - 完成初稿"]
+
+
+@pytest.mark.asyncio
+async def test_langgraph_work_plan_missing_due_date_message_is_readable(setup_db):
+    async with TestSession() as db:
+        user = User(id="user-lg-work-missing-date", username="lg-work-missing-date", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        events = await collect_events(
+            run_langgraph_work_plan_workflow(
+                "帮我做机器学习报告作业计划",
+                GraphPlanWorkflowRuntime(db=db, user=user, session_id="session-lg-work-missing-date"),
+            )
+        )
+
+    text_events = [event for event in events if event["type"] == "text"]
+    assert text_events
+    content = text_events[-1]["content"]
+    assert "作业截止日期" in content
+    assert "2026-06-12" in content
+    assert_no_mojibake_text(content)
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_work_plan_context_cancel_message_is_readable(setup_db):
+    async with TestSession() as db:
+        user = User(id="user-lg-work-context-cancel", username="lg-work-context-cancel", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        events = await collect_events(
+            run_langgraph_work_plan_workflow(
+                "2099-06-12 要交机器学习报告，帮我做作业计划",
+                GraphPlanWorkflowRuntime(db=db, user=user, session_id="session-lg-work-context-cancel"),
+            ),
+            answers=["取消"],
+        )
+
+    text_events = [event for event in events if event["type"] == "text"]
+    assert text_events
+    content = text_events[-1]["content"]
+    assert content == "好的，我先不生成作业计划。你整理好要求后再告诉我。"
+    assert_no_mojibake_text(content)
+    assert [event.get("name") for event in events if event["type"] == "tool_call"] == []
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_work_plan_review_override_empty_tasks_message_is_readable(setup_db):
+    raw_tasks = [
+        {
+            "title": "机器学习报告 - 整理资料",
+            "work_item_name": "机器学习报告",
+            "date": "2099-06-08",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "description": "整理要求和资料。",
+        }
+    ]
+
+    async with TestSession() as db:
+        user = User(id="user-lg-work-empty-override", username="lg-work-empty-override", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        events = await collect_events(
+            run_langgraph_plan_review_write_workflow(
+                raw_tasks,
+                GraphPlanWorkflowRuntime(db=db, user=user, session_id="session-lg-work-empty-override"),
+                plan_kind="work",
+            ),
+            answers=['确认 review_override={"tasks": []}'],
+        )
+
+    text_events = [event for event in events if event["type"] == "text"]
+    assert text_events
+    content = text_events[-1]["content"]
+    assert content == "你已经删除了全部作业任务，这次没有写入日程。"
+    assert_no_mojibake_text(content)
+    assert [event.get("name") for event in events if event["type"] == "tool_call"] == []
+    assert events[-1]["type"] == "done"
 
 
 @pytest.mark.asyncio
