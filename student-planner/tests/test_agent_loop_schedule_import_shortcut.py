@@ -14,7 +14,16 @@ from tests.conftest import TestSession
 
 @pytest.mark.asyncio
 async def test_schedule_import_shortcut_collects_missing_info_and_imports_without_llm(setup_db):
+    from app.agent import langgraph_loop as langgraph_runtime
+
     mock_client = AsyncMock()
+    observed_graph_states: list[dict] = []
+    original_step = langgraph_runtime.run_langgraph_schedule_import_step
+
+    async def spy_schedule_step(state, runtime, *, node_name):
+        next_state = await original_step(state, runtime, node_name=node_name)
+        observed_graph_states.append(dict(next_state))
+        return next_state
 
     with patch(
         "app.agent.loop.chat_completion_stream",
@@ -22,6 +31,9 @@ async def test_schedule_import_shortcut_collects_missing_info_and_imports_withou
     ), patch(
         "app.agent.loop.chat_completion",
         side_effect=AssertionError("LLM fallback should not be called for local schedule import shortcut"),
+    ), patch(
+        "app.agent.langgraph_loop.run_langgraph_schedule_import_step",
+        side_effect=spy_schedule_step,
     ):
         async with TestSession() as db:
             user = User(id="u8", username="test8", hashed_password="x")
@@ -151,6 +163,29 @@ async def test_schedule_import_shortcut_collects_missing_info_and_imports_withou
                 ("odd-course", "10:20", "11:55", "odd"),
             ]
 
+    observed_schedule_states = [
+        dict(state.get("schedule_import") or {}) for state in observed_graph_states
+    ]
+    assert [state.get("node") for state in observed_schedule_states] == [
+        "schedule_parse",
+        "ask_user_pause",
+        "schedule_parse",
+        "ask_user_pause",
+        "schedule_parse",
+        "ask_user_pause",
+        "confirmed_write",
+    ]
+    assert observed_schedule_states[0]["current_result"]["status"] == "need_period_times"
+    assert observed_schedule_states[2]["last_tool_name"] == "save_period_times"
+    assert observed_schedule_states[2]["current_result"]["status"] == "need_period_times"
+    assert observed_schedule_states[4]["last_tool_name"] == "save_period_times"
+    assert observed_schedule_states[4]["current_result"]["status"] == "ready"
+    assert observed_graph_states[1]["pending_ask"]["status"] == "awaiting_answer"
+    assert observed_graph_states[3]["pending_ask"]["status"] == "awaiting_answer"
+    assert isinstance(observed_schedule_states[5]["pending_confirmation"], PendingConfirmation)
+    assert isinstance(observed_schedule_states[5]["db_write_plan"], DBWritePlan)
+    assert observed_schedule_states[6]["confirmed_result"]["status"] == "imported"
+
 
 @pytest.mark.asyncio
 async def test_schedule_import_shortcut_prepares_confirmation_state_before_write(setup_db):
@@ -163,7 +198,7 @@ async def test_schedule_import_shortcut_prepares_confirmation_state_before_write
         "app.agent.loop.chat_completion",
         side_effect=AssertionError("LLM fallback should not be called for local schedule import shortcut"),
     ), patch(
-        "app.agent.loop._execute_confirmed_db_write_plan",
+        "app.agent.langgraph_loop.execute_langgraph_confirmed_db_write_plan",
         new_callable=AsyncMock,
         return_value={"status": "imported", "count": 1, "courses": ["stateful-course"]},
     ) as mock_execute_confirmed:
@@ -247,7 +282,7 @@ async def test_schedule_import_shortcut_cancel_does_not_execute_write_plan(setup
         "app.agent.loop.chat_completion",
         side_effect=AssertionError("LLM fallback should not be called for local schedule import shortcut"),
     ), patch(
-        "app.agent.loop._execute_confirmed_db_write_plan",
+        "app.agent.langgraph_loop.execute_langgraph_confirmed_db_write_plan",
         new_callable=AsyncMock,
         side_effect=AssertionError("Cancelled schedule import should not execute its write plan"),
     ):

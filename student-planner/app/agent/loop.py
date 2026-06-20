@@ -3402,18 +3402,25 @@ async def run_agent_action_loop(
         )
 
     if _should_handle_schedule_import_locally(user_message):
-        shortcut = _run_shortcut_with_langgraph_ask_state(
-            _run_schedule_import_shortcut(user_message, user, session_id, db)
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        schedule_workflow = langgraph_runtime.run_langgraph_schedule_import_workflow(
+            user_message,
+            langgraph_runtime.GraphScheduleImportRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+            ),
         )
         try:
-            event = await shortcut.__anext__()
+            event = await schedule_workflow.__anext__()
             while True:
                 if event["type"] == "ask_user":
                     user_response = yield event
-                    event = await shortcut.asend(user_response)
+                    event = await schedule_workflow.asend(user_response)
                 else:
                     yield event
-                    event = await shortcut.__anext__()
+                    event = await schedule_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return

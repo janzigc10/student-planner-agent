@@ -568,10 +568,28 @@ async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setu
 @pytest.mark.asyncio
 async def test_langgraph_native_schedule_import_confirmed_write_does_not_delegate(setup_db):
     prompt_template = "please import this schedule file_id={file_id}"
+    from app.agent import langgraph_loop as langgraph_runtime
+
+    observed_schedule_states: list[dict] = []
+    original_step = langgraph_runtime.run_langgraph_schedule_import_step
+
+    async def spy_schedule_step(state, runtime, *, node_name):
+        next_state = await original_step(state, runtime, node_name=node_name)
+        observed_schedule_states.append(dict(next_state.get("schedule_import") or {}))
+        return next_state
 
     with patch(
         "app.agent.langgraph_loop.run_agent_loop",
         side_effect=AssertionError("Schedule import action route should not delegate to run_agent_loop"),
+    ), patch(
+        "app.agent.loop._run_schedule_import_shortcut",
+        side_effect=AssertionError("Schedule import action route should be driven by LangGraph workflow nodes"),
+    ), patch(
+        "app.agent.loop.execute_tool",
+        side_effect=AssertionError("Schedule import LangGraph workflow should not execute tools through legacy loop dispatcher"),
+    ), patch(
+        "app.agent.langgraph_loop.run_langgraph_schedule_import_step",
+        side_effect=spy_schedule_step,
     ):
         async with TestSession() as db:
             user = User(
@@ -623,6 +641,15 @@ async def test_langgraph_native_schedule_import_confirmed_write_does_not_delegat
     assert "schedule_parse" in event_graph_nodes
     assert "ask_user_pause" in event_graph_nodes
     assert "confirmed_write" in event_graph_nodes
+    assert [state.get("node") for state in observed_schedule_states] == [
+        "schedule_parse",
+        "ask_user_pause",
+        "confirmed_write",
+    ]
+    assert observed_schedule_states[0]["current_result"]["status"] == "ready"
+    assert isinstance(observed_schedule_states[1]["pending_confirmation"], PendingConfirmation)
+    assert isinstance(observed_schedule_states[1]["db_write_plan"], DBWritePlan)
+    assert observed_schedule_states[2]["confirmed_result"]["status"] == "imported"
     assert len(courses) == 1
     assert courses[0].name == "LangGraph Native"
 

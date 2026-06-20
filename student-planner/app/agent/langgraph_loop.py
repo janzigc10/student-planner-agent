@@ -29,9 +29,20 @@ from app.agent.loop import (
     _current_public_info_unavailable_text,
     _build_confirmed_write_state_from_ask,
     _build_db_write_plan,
+    _build_schedule_import_write_state,
+    _build_schedule_missing_info_question,
+    _confirmed_tool_scope,
+    _extract_period_entries_from_answer,
+    _extract_schedule_file_id,
+    _extract_semester_start_date_from_answer,
+    _extract_term_total_weeks_from_answer,
+    _is_confirmed_answer,
+    _is_write_authorized_answer,
     _log_step,
     _normalize_ask_type,
+    _persist_local_tool_step,
     _save_message,
+    _schedule_parse_tool_name,
     _to_persisted_tool_summary,
     run_agent_action_loop,
     run_agent_loop,
@@ -87,6 +98,7 @@ class PlannerGraphState(TypedDict, total=False):
     step: int
     last_tool_result: dict[str, Any]
     last_free_slots_result: dict[str, Any]
+    schedule_import: dict[str, Any]
 
 
 ToolExecutor = Callable[
@@ -94,6 +106,7 @@ ToolExecutor = Callable[
     Awaitable[dict[str, Any]],
 ]
 ConfirmedWriteExecutor = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+ConfirmedWritePlanExecutor = Callable[..., Awaitable[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -105,6 +118,15 @@ class GraphToolNodeRuntime:
     confirmed_write_executor: ConfirmedWriteExecutor | None = None
     known_tools: set[str] | None = None
     tool_definitions: list[dict[str, Any]] | None = None
+
+
+@dataclass(frozen=True)
+class GraphScheduleImportRuntime:
+    db: AsyncSession
+    user: User
+    session_id: str
+    execute_tool_func: ToolExecutor | None = None
+    confirmed_write_executor: ConfirmedWritePlanExecutor | None = None
 
 
 def _tool_node_known_tools(runtime: GraphToolNodeRuntime) -> set[str]:
@@ -280,6 +302,390 @@ def resume_langgraph_ask_user_state(
         next_state.pop("pending_confirmation", None)
     next_state.pop("db_write_plan", None)
     return next_state
+
+
+def _schedule_import_state(state: PlannerGraphState) -> dict[str, Any]:
+    return dict(state.get("schedule_import") or {})
+
+
+def _with_schedule_import_state(
+    state: PlannerGraphState,
+    *,
+    node_name: str,
+    **updates: Any,
+) -> PlannerGraphState:
+    schedule_state = {
+        **_schedule_import_state(state),
+        "node": node_name,
+        **updates,
+    }
+    return {
+        **state,
+        "schedule_import": schedule_state,
+        "step": int(schedule_state.get("step") or state.get("step") or 0),
+        "graph_nodes": [*state.get("graph_nodes", []), node_name],
+    }
+
+
+def _schedule_import_text_event(text: str) -> dict[str, Any]:
+    return {"type": "text", "message_id": str(uuid.uuid4()), "content": text}
+
+
+async def execute_langgraph_confirmed_db_write_plan(
+    *,
+    pending_confirmation: PendingConfirmation | None,
+    db_write_plan: DBWritePlan | None,
+    confirmation_answer: str,
+    db: AsyncSession,
+    user_id: str,
+) -> dict[str, Any]:
+    if pending_confirmation is None:
+        return {"error": "Missing pending confirmation state for database write."}
+    if db_write_plan is None:
+        return {"error": "Missing database write plan for confirmed write."}
+    if pending_confirmation.confirmation_id != db_write_plan.confirmation_id:
+        return {"error": "Confirmation state does not match database write plan."}
+    if pending_confirmation.route != db_write_plan.route:
+        return {"error": "Confirmation state does not match database write plan."}
+    if db_write_plan.tool_name not in _confirmed_tool_scope(pending_confirmation):
+        return {"error": "Confirmation state does not match database write plan."}
+    if not _is_write_authorized_answer(pending_confirmation, confirmation_answer):
+        return {"status": "cancelled", "message": "Write cancelled before database execution."}
+    return await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
+
+
+async def run_langgraph_schedule_import_step(
+    state: PlannerGraphState,
+    runtime: GraphScheduleImportRuntime,
+    *,
+    node_name: str,
+) -> PlannerGraphState:
+    """Advance one schedule-import workflow node and persist its graph state."""
+
+    schedule_state = _schedule_import_state(state)
+    step = int(schedule_state.get("step") or state.get("step") or 0)
+    executor = runtime.execute_tool_func or execute_tool
+
+    if node_name == "schedule_parse":
+        file_id = str(schedule_state.get("file_id") or _extract_schedule_file_id(state.get("user_message", "")) or "")
+        if not file_id:
+            return _with_schedule_import_state(
+                state,
+                node_name=node_name,
+                status="missing_file_id",
+                file_id=None,
+            )
+
+        pending_save_args = schedule_state.get("pending_save_args")
+        if isinstance(pending_save_args, dict):
+            tool_name = "save_period_times"
+            tool_args = dict(pending_save_args)
+            parse_tool_name = str(schedule_state.get("parse_tool_name") or "")
+        else:
+            tool_name = str(
+                schedule_state.get("parse_tool_name")
+                or _schedule_parse_tool_name(state.get("user_message", ""), runtime.user.id)
+            )
+            tool_args = {"file_id": file_id}
+            parse_tool_name = tool_name
+
+        tool_result = await executor(tool_name, tool_args, runtime.db, runtime.user.id)
+        step += 1
+        await _persist_local_tool_step(
+            runtime.db,
+            runtime.session_id,
+            runtime.user.id,
+            step,
+            tool_name,
+            tool_args,
+            tool_result,
+        )
+        return _with_schedule_import_state(
+            state,
+            node_name=node_name,
+            file_id=file_id,
+            parse_tool_name=parse_tool_name,
+            last_tool_name=tool_name,
+            last_tool_args=tool_args,
+            current_result=tool_result,
+            status=str(tool_result.get("status") or ""),
+            step=step,
+        )
+
+    if node_name == "ask_user_pause":
+        current_result = dict(schedule_state.get("current_result") or {})
+        courses = list(current_result.get("courses") or [])
+        if courses and str(current_result.get("status") or "") == "ready":
+            pending_confirmation, db_write_plan = _build_schedule_import_write_state(courses)
+            ask_event = {
+                "type": "ask_user",
+                "ask_type": pending_confirmation.ask_type,
+                "question": pending_confirmation.question,
+                "options": list(pending_confirmation.options),
+                "data": pending_confirmation.data,
+            }
+            next_state = record_langgraph_ask_user_pause_state(
+                state,
+                tool_args={
+                    "question": pending_confirmation.question,
+                    "type": pending_confirmation.ask_type,
+                    "options": list(pending_confirmation.options),
+                    "data": pending_confirmation.data,
+                },
+                ask_result=ask_event,
+                pending_confirmation=pending_confirmation,
+                db_write_plan=db_write_plan,
+            )
+            return _with_schedule_import_state(
+                next_state,
+                node_name=node_name,
+                current_result=current_result,
+                courses=courses,
+                review_event=ask_event,
+                pending_confirmation=pending_confirmation,
+                db_write_plan=db_write_plan,
+                step=step,
+            )
+
+        ask_event = {
+            "type": "ask_user",
+            "ask_type": "review",
+            "question": _build_schedule_missing_info_question(
+                current_result,
+                schedule_state.get("retry_hint"),
+            ),
+            "options": [],
+            "data": None,
+        }
+        next_state = record_langgraph_ask_user_pause_state(
+            state,
+            tool_args={
+                "question": ask_event["question"],
+                "type": ask_event["ask_type"],
+                "options": [],
+            },
+            ask_result=ask_event,
+        )
+        return _with_schedule_import_state(
+            next_state,
+            node_name=node_name,
+            current_result=current_result,
+            missing_info_event=ask_event,
+            step=step,
+        )
+
+    if node_name == "confirmed_write":
+        pending_confirmation = schedule_state.get("pending_confirmation")
+        db_write_plan = schedule_state.get("db_write_plan")
+        confirmation_answer = str(
+            schedule_state.get("confirmation_answer")
+            or state.get("pending_confirmation_answer")
+            or state.get("submitted_answer")
+            or ""
+        )
+        confirmed_write_executor = (
+            runtime.confirmed_write_executor or execute_langgraph_confirmed_db_write_plan
+        )
+        confirmed_result = await confirmed_write_executor(
+            pending_confirmation=pending_confirmation if isinstance(pending_confirmation, PendingConfirmation) else None,
+            db_write_plan=db_write_plan if isinstance(db_write_plan, DBWritePlan) else None,
+            confirmation_answer=confirmation_answer,
+            db=runtime.db,
+            user_id=runtime.user.id,
+        )
+        step += 1
+        tool_args = dict(db_write_plan.args) if isinstance(db_write_plan, DBWritePlan) else {}
+        await _persist_local_tool_step(
+            runtime.db,
+            runtime.session_id,
+            runtime.user.id,
+            step,
+            "bulk_import_courses",
+            tool_args,
+            confirmed_result,
+        )
+        return _with_schedule_import_state(
+            state,
+            node_name=node_name,
+            pending_confirmation=pending_confirmation,
+            db_write_plan=db_write_plan,
+            confirmation_answer=confirmation_answer,
+            confirmed_result=confirmed_result,
+            current_result=confirmed_result,
+            step=step,
+        )
+
+    return _with_schedule_import_state(state, node_name=node_name)
+
+
+async def run_langgraph_schedule_import_workflow(
+    user_message: str,
+    runtime: GraphScheduleImportRuntime,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Run the schedule-import action route as a LangGraph-owned workflow."""
+
+    file_id = _extract_schedule_file_id(user_message)
+    if not file_id:
+        text = "我没有识别到这次课表上传的 file_id，请重新上传后再试。"
+        yield _schedule_import_text_event(text)
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    parse_tool_name = _schedule_parse_tool_name(user_message, runtime.user.id)
+    state: PlannerGraphState = {
+        "user_message": user_message,
+        "route": AgentRoute.SCHEDULE_IMPORT.value,
+        "graph_nodes": [AgentRoute.SCHEDULE_IMPORT.value],
+        "uses_langgraph": StateGraph is not None,
+        "uses_langchain_tools": False,
+        "messages": [],
+        "tool_history": [],
+        "preflight_reference_texts": [],
+        "preflight_user_texts": [],
+        "error_count": {},
+        "events": [],
+        "step": 0,
+        "schedule_import": {
+            "file_id": file_id,
+            "parse_tool_name": parse_tool_name,
+            "step": 0,
+        },
+    }
+
+    yield {"type": "tool_call", "name": parse_tool_name, "args": {"file_id": file_id}}
+    state = await run_langgraph_schedule_import_step(state, runtime, node_name="schedule_parse")
+    schedule_state = _schedule_import_state(state)
+    current_result = dict(schedule_state.get("current_result") or {})
+    yield {
+        "type": "tool_result",
+        "name": str(schedule_state.get("last_tool_name") or parse_tool_name),
+        "result": current_result,
+    }
+
+    if "error" in current_result:
+        text = str(current_result.get("error") or "课表解析失败，请重新上传后再试。")
+        yield _schedule_import_text_event(text)
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    if str(current_result.get("status") or "") in {"processing", "failed"}:
+        text = str(
+            current_result.get("message")
+            or current_result.get("error")
+            or "课表暂时还不能导入，请稍后重试。"
+        )
+        yield _schedule_import_text_event(text)
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    retry_hint: str | None = None
+    while str(current_result.get("status") or "") == "need_period_times":
+        state = _with_schedule_import_state(
+            state,
+            node_name=str(schedule_state.get("node") or "schedule_parse"),
+            current_result=current_result,
+            retry_hint=retry_hint,
+        )
+        state = await run_langgraph_schedule_import_step(state, runtime, node_name="ask_user_pause")
+        ask_event = dict(_schedule_import_state(state).get("missing_info_event") or {})
+        answer = yield ask_event
+        state = resume_langgraph_ask_user_state(state, user_response=str(answer or ""))
+        answer_text = str(answer or "").strip()
+        entries = _extract_period_entries_from_answer(answer_text)
+        semester_start_date = _extract_semester_start_date_from_answer(answer_text)
+        term_total_weeks = _extract_term_total_weeks_from_answer(answer_text)
+
+        if not entries and semester_start_date is None and term_total_weeks is None:
+            retry_hint = "我还没识别到有效的节次时间或学期信息，请按示例格式再发一次。"
+            schedule_state = _schedule_import_state(state)
+            current_result = dict(schedule_state.get("current_result") or current_result)
+            continue
+
+        save_args: dict[str, Any] = {"file_id": file_id}
+        if entries:
+            save_args["entries"] = entries
+        if semester_start_date is not None:
+            save_args["semester_start_date"] = semester_start_date
+        if term_total_weeks is not None:
+            save_args["term_total_weeks"] = term_total_weeks
+
+        yield {"type": "tool_call", "name": "save_period_times", "args": save_args}
+        state = _with_schedule_import_state(
+            state,
+            node_name="schedule_parse",
+            pending_save_args=save_args,
+            current_result=current_result,
+            retry_hint=retry_hint,
+        )
+        state = await run_langgraph_schedule_import_step(state, runtime, node_name="schedule_parse")
+        schedule_state = _schedule_import_state(state)
+        current_result = dict(schedule_state.get("current_result") or {})
+        yield {"type": "tool_result", "name": "save_period_times", "result": current_result}
+
+        if "error" in current_result:
+            retry_hint = str(
+                current_result.get("error")
+                or "补充信息保存失败，请按示例重新发送。"
+            )
+            continue
+        retry_hint = None
+
+    if str(current_result.get("status") or "") != "ready":
+        text = str(current_result.get("message") or "课表解析结果异常，请重新上传后再试。")
+        yield _schedule_import_text_event(text)
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    courses = list(current_result.get("courses") or [])
+    if not courses:
+        text = "我没有从这张图片里识别到课程信息。请确认上传的是清晰的课表截图，最好包含周一到周日、节次和课程格子。"
+        yield _schedule_import_text_event(text)
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    state = _with_schedule_import_state(state, node_name="schedule_parse", current_result=current_result, courses=courses)
+    state = await run_langgraph_schedule_import_step(state, runtime, node_name="ask_user_pause")
+    schedule_state = _schedule_import_state(state)
+    review_event = dict(schedule_state.get("review_event") or {})
+    confirm_answer = yield review_event
+    state = resume_langgraph_ask_user_state(state, user_response=str(confirm_answer or ""))
+    state = _with_schedule_import_state(
+        state,
+        node_name="ask_user_pause",
+        current_result=current_result,
+        courses=courses,
+        pending_confirmation=schedule_state.get("pending_confirmation"),
+        db_write_plan=schedule_state.get("db_write_plan"),
+        confirmation_answer=str(confirm_answer or ""),
+    )
+
+    if not _is_confirmed_answer(str(confirm_answer or "")):
+        text = "好的，这次我先不导入。你后面想继续的话，重新确认一次就行。"
+        yield _schedule_import_text_event(text)
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    db_write_plan = schedule_state.get("db_write_plan")
+    import_args = dict(db_write_plan.args) if isinstance(db_write_plan, DBWritePlan) else {}
+    yield {"type": "tool_call", "name": "bulk_import_courses", "args": import_args}
+    state = await run_langgraph_schedule_import_step(state, runtime, node_name="confirmed_write")
+    import_result = dict(_schedule_import_state(state).get("confirmed_result") or {})
+    yield {"type": "tool_result", "name": "bulk_import_courses", "result": import_result}
+
+    if "error" in import_result:
+        text = str(import_result.get("error") or "课表导入失败，请稍后重试。")
+    else:
+        imported_count = int(import_result.get("count") or len(courses))
+        text = f"课表已导入完成，共 {imported_count} 条。"
+    yield _schedule_import_text_event(text)
+    await _save_message(runtime.db, runtime.session_id, "assistant", text)
+    yield {"type": "done"}
 
 
 async def _execute_tool_from_graph_node(
