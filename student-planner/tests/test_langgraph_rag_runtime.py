@@ -601,6 +601,30 @@ async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(m
 
 
 @pytest.mark.asyncio
+async def test_prepare_langgraph_state_routes_assignment_breakdown_to_plan_not_rag_gate(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _: {
+            "hits": [],
+            "context": "",
+            "evidence_sufficient": False,
+            "evidence_count": 0,
+            "evidence_reason": "no_relevant_local_evidence",
+        },
+    )
+
+    state = await prepare_langgraph_state("2026-07-03 要交机器学习报告，帮我拆成任务。")
+
+    assert state["route"] == "study_plan"
+    assert state["should_retrieve"] is True
+    assert state["should_gate_rag_answer"] is False
+    assert "rag_insufficient" not in state["graph_nodes"]
+    assert "study_plan" in state["graph_nodes"]
+    assert "plan_generate" in state["graph_nodes"]
+    assert "plan_review_write" in state["graph_nodes"]
+
+
+@pytest.mark.asyncio
 async def test_prepare_langgraph_state_routes_schedule_import_to_native_action_node(monkeypatch):
     monkeypatch.setattr(
         "app.agent.langgraph_loop.build_rag_context",
@@ -747,6 +771,48 @@ async def test_langgraph_agent_loop_returns_unsupported_route_without_legacy_del
     assert [event["type"] for event in events] == ["text", "done"]
     assert events[0]["content"] == langgraph_runtime.UNSUPPORTED_LANGGRAPH_ROUTE_TEXT
     assert events[0]["graph_nodes"] == ["route", "unsupported_route"]
+
+
+@pytest.mark.asyncio
+async def test_langgraph_agent_loop_does_not_emit_internal_tool_summary_text(monkeypatch, setup_db):
+    async def fake_prepare_langgraph_state(_message: str) -> dict:
+        return {
+            "route": "tool_workflow",
+            "should_retrieve": False,
+            "graph_nodes": ["route", "tool_workflow", "task_tool_node", "ask_user_pause", "confirmed_write"],
+        }
+
+    async def fake_run_agent_action_loop(*_args, **_kwargs):
+        yield {"type": "text_delta", "message_id": "summary", "delta": "[TOOL_SUMMARY:update_task:v1] {}"}
+        yield {"type": "text", "message_id": "final", "content": "已更新任务。"}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(langgraph_runtime, "prepare_langgraph_state", fake_prepare_langgraph_state)
+
+    with patch("app.agent.langgraph_loop.run_agent_action_loop", side_effect=fake_run_agent_action_loop):
+        async with TestSession() as db:
+            user = User(id="user-langgraph-summary-filter", username="langgraph-summary-filter", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            async for event in run_langgraph_agent_loop(
+                "把刚才的任务改到明天上午9点，不提醒。",
+                user,
+                "session-langgraph-summary-filter",
+                db,
+                AsyncMock(),
+            ):
+                events.append(event)
+
+    visible_text = "\n".join(
+        str(event.get("delta") or event.get("content") or "")
+        for event in events
+        if event.get("type") in {"text_delta", "text"}
+    )
+    assert "[TOOL_SUMMARY:" not in visible_text
+    assert [event["type"] for event in events] == ["text", "done"]
+    assert events[0]["content"] == "已更新任务。"
 
 
 @pytest.mark.asyncio

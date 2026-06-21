@@ -43,6 +43,7 @@ from app.agent.loop import (
     _extract_review_override,
     _extract_schedule_file_id,
     _extract_semester_start_date_from_answer,
+    _extract_study_plan_request,
     _extract_term_total_weeks_from_answer,
     _extract_work_context_from_text,
     _extract_work_item_title,
@@ -62,6 +63,9 @@ from app.agent.loop import (
     _persist_local_tool_step,
     _save_message,
     _schedule_parse_tool_name,
+    _study_plan_date_range,
+    _study_context_has_quality,
+    _study_plan_intake_question,
     _study_plan_review_data,
     _task_duration_minutes,
     _to_persisted_tool_summary,
@@ -781,6 +785,151 @@ async def run_langgraph_plan_review_write_workflow(
     yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
     await _save_message(runtime.db, runtime.session_id, "assistant", text)
     yield {"type": "done"}
+
+
+async def run_langgraph_study_plan_workflow(
+    user_message: str,
+    runtime: GraphPlanWorkflowRuntime,
+    *,
+    study_context_override: dict[str, Any] | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Run a deterministic study-plan shortcut as explicit graph nodes."""
+
+    request = _extract_study_plan_request(user_message)
+    state: PlannerGraphState = {
+        "user_message": user_message,
+        "route": AgentRoute.STUDY_PLAN.value,
+        "graph_nodes": [AgentRoute.STUDY_PLAN.value],
+        "uses_langgraph": StateGraph is not None,
+        "uses_langchain_tools": True,
+        "messages": [],
+        "tool_history": [],
+        "preflight_reference_texts": [user_message],
+        "preflight_user_texts": [user_message],
+        "error_count": {},
+        "events": [],
+        "step": 0,
+        "plan_workflow": {
+            "plan_kind": "study",
+            "step": 0,
+        },
+    }
+
+    if request is None:
+        ask_event = {
+            "type": "ask_user",
+            "ask_type": "review",
+            "question": _study_plan_intake_question({"exams": []}),
+            "options": [],
+            "data": None,
+        }
+        state = record_langgraph_ask_user_pause_state(
+            state,
+            tool_args={
+                "question": ask_event["question"],
+                "type": ask_event["ask_type"],
+                "options": [],
+            },
+            ask_result=ask_event,
+        )
+        yield ask_event
+        yield {"type": "done"}
+        return
+
+    exams = list(request["exams"])
+    study_context = (
+        study_context_override
+        if _study_context_has_quality(study_context_override)
+        else request.get("study_context")
+    )
+    if not _study_context_has_quality(study_context):
+        study_context = {"raw_notes": "按默认", "using_defaults": True}
+
+    start_date, end_date = _study_plan_date_range(exams)
+    free_args = {"start_date": start_date, "end_date": end_date, "min_duration_minutes": 60}
+    executor = runtime.execute_tool_func or execute_tool
+    yield {"type": "tool_call", "name": "get_free_slots", "args": free_args}
+    free_result = await executor("get_free_slots", free_args, runtime.db, runtime.user.id)
+    step = int(_plan_workflow_state(state).get("step") or 0) + 1
+    await _persist_local_tool_step(
+        runtime.db,
+        runtime.session_id,
+        runtime.user.id,
+        step,
+        "get_free_slots",
+        free_args,
+        free_result,
+    )
+    state = _with_plan_workflow_state(
+        state,
+        node_name="plan_generate",
+        plan_kind="study",
+        step=step,
+        last_free_slots_result=free_result,
+    )
+    yield _with_graph_trace({"type": "tool_result", "name": "get_free_slots", "result": free_result}, state["graph_nodes"])
+
+    if "error" in free_result:
+        message_id = str(uuid.uuid4())
+        text = str(free_result.get("error") or "Failed to query free slots.")
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    plan_args = {
+        "exams": exams,
+        "available_slots": free_result,
+        "study_context": study_context,
+        "strategy": "balanced",
+    }
+    yield {"type": "tool_call", "name": "create_study_plan", "args": plan_args}
+    plan_result = await executor("create_study_plan", plan_args, runtime.db, runtime.user.id)
+    step = int(_plan_workflow_state(state).get("step") or 0) + 1
+    await _persist_local_tool_step(
+        runtime.db,
+        runtime.session_id,
+        runtime.user.id,
+        step,
+        "create_study_plan",
+        plan_args,
+        plan_result,
+    )
+    state = _with_plan_workflow_state(
+        state,
+        node_name="plan_generate",
+        plan_kind="study",
+        step=step,
+        plan_args=plan_args,
+        plan_result=plan_result,
+    )
+    yield _with_graph_trace({"type": "tool_result", "name": "create_study_plan", "result": plan_result}, state["graph_nodes"])
+
+    if "error" in plan_result:
+        message_id = str(uuid.uuid4())
+        text = str(plan_result.get("error") or "Failed to generate study plan.")
+        yield _with_graph_trace({"type": "text", "message_id": message_id, "content": text}, state["graph_nodes"])
+        await _save_message(runtime.db, runtime.session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
+    review_workflow = run_langgraph_plan_review_write_workflow(
+        plan_result.get("tasks"),
+        runtime,
+        plan_kind="study",
+        start_step=step,
+    )
+    try:
+        event = await review_workflow.__anext__()
+        while True:
+            if event["type"] == "ask_user":
+                user_response = yield event
+                event = await review_workflow.asend(user_response)
+            else:
+                yield event
+                event = await review_workflow.__anext__()
+    except StopAsyncIteration:
+        pass
 
 
 async def run_langgraph_work_plan_workflow(
@@ -2130,6 +2279,18 @@ def _with_graph_trace(event: dict[str, Any], graph_nodes: list[str]) -> dict[str
     return event
 
 
+def _is_internal_tool_summary_text(value: Any) -> bool:
+    return str(value or "").lstrip().startswith("[TOOL_SUMMARY:")
+
+
+def _suppress_internal_tool_summary_text_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    if event.get("type") == "text_delta" and _is_internal_tool_summary_text(event.get("delta")):
+        return None
+    if event.get("type") == "text" and _is_internal_tool_summary_text(event.get("content")):
+        return None
+    return event
+
+
 def _build_graph():
     if StateGraph is None:
         return None
@@ -2429,6 +2590,10 @@ async def run_langgraph_agent_loop(
         while True:
             if action_route in _NATIVE_ROUTE_NODE_BY_ROUTE:
                 event = _with_graph_trace(event, list(state.get("graph_nodes", [])))
+            event = _suppress_internal_tool_summary_text_event(event)
+            if event is None:
+                event = await inner_loop.__anext__()
+                continue
             if event.get("type") == "ask_user":
                 user_response = yield event
                 event = await inner_loop.asend(user_response)

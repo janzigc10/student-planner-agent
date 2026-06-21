@@ -82,6 +82,51 @@ async def test_generate_study_plan_falls_back_when_json_invalid_with_slots():
 
 
 @pytest.mark.asyncio
+async def test_generate_study_plan_binds_optional_scope_and_weakness_to_each_exam():
+    raw_notes = (
+        "2026-06-10 有高等数学考试，范围第1-5章；"
+        "2026-06-12 有大学英语3考试，范围 Unit1-6，听力薄弱。"
+        "帮我做复习计划，每天最多2小时。"
+    )
+    with patch("app.agent.study_planner.chat_completion") as mock_chat_completion:
+        mock_chat_completion.return_value = {"content": "这不是JSON"}
+
+        result = await generate_study_plan(
+            exams=[
+                {"course_name": "高等数学", "exam_date": "2026-06-10"},
+                {"course_name": "大学英语3", "exam_date": "2026-06-12"},
+            ],
+            available_slots={
+                "slots": [
+                    {
+                        "date": "2026-06-08",
+                        "free_periods": [{"start": "09:00", "end": "11:00", "duration_minutes": 120}],
+                    },
+                    {
+                        "date": "2026-06-09",
+                        "free_periods": [{"start": "14:00", "end": "16:00", "duration_minutes": 120}],
+                    },
+                ]
+            },
+            study_context={
+                "exam_scope": raw_notes,
+                "weak_areas": ["听力"],
+                "daily_study_limit_minutes": 120,
+                "raw_notes": raw_notes,
+            },
+            llm_client=AsyncMock(),
+        )
+
+    math_tasks = [task for task in result if task["exam_name"] == "高等数学"]
+    english_tasks = [task for task in result if task["exam_name"] == "大学英语3"]
+    assert math_tasks
+    assert english_tasks
+    assert any("第1-5章" in task["description"] for task in math_tasks)
+    assert not any("Unit1-6" in task["description"] or "听力" in task["description"] for task in math_tasks)
+    assert any("Unit1-6" in task["description"] and "听力" in task["description"] for task in english_tasks)
+
+
+@pytest.mark.asyncio
 async def test_generate_study_plan_adds_missing_exam_from_fallback():
     model_tasks = [
         {

@@ -55,6 +55,18 @@ def test_router_contract_keeps_exam_arrangement_on_study_plan_path():
     assert decision.retrieval_mode == "local_rag_context"
 
 
+def test_router_contract_keeps_assignment_breakdown_on_work_plan_path():
+    decision = decide_agent_route(
+        "2026-07-03 要交机器学习报告，帮我拆成任务。",
+        rag_result={"evidence_sufficient": False},
+    )
+
+    assert decision.route == AgentRoute.STUDY_PLAN
+    assert decision.should_retrieve is True
+    assert decision.should_gate_rag_answer is False
+    assert decision.retrieval_mode == "local_rag_context"
+
+
 def test_router_contract_matches_current_langgraph_retrieval_side_channel():
     message = "下周四有大学英语3考试，帮我安排一下"
 

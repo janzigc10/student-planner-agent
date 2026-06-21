@@ -285,6 +285,9 @@ _TOOL_ACTION_MARKERS = (
     "取消",
     "提醒",
     "提前",
+    "拆成",
+    "拆解",
+    "分解",
 )
 _TOOL_OBJECT_MARKERS = (
     "任务",
@@ -294,6 +297,9 @@ _TOOL_OBJECT_MARKERS = (
     "计划",
     "待办",
     "作业",
+    "报告",
+    "大作业",
+    "项目",
     "复习",
 )
 _SCHEDULE_IMPORT_MARKERS = ("file_id", "上传", "导入", "课表", "图片", "截图", "excel", "xlsx", "xls")
@@ -400,8 +406,8 @@ def _looks_like_schedule_import(compact: str) -> bool:
 def _looks_like_study_plan(compact: str) -> bool:
     if any(marker in compact for marker in _STUDY_PLAN_MARKERS):
         return True
-    return ("考试" in compact or "作业" in compact) and any(
-        marker in compact for marker in ("安排", "规划", "计划")
+    return any(target in compact for target in ("考试", "作业", "报告", "大作业", "项目", "论文")) and any(
+        marker in compact for marker in ("安排", "规划", "计划", "拆成", "拆解", "分解")
     )
 
 

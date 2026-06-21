@@ -355,6 +355,11 @@ _STUDY_CONTEXT_DETAIL_KEYWORDS = (
     "专项",
     "针对",
 )
+_EXAM_ITEM_RE = re.compile(
+    r"(?P<year>20\d{2})[-/年](?P<month>\d{1,2})[-/月](?P<day>\d{1,2})日?"
+    r"(?:（[^）]*）|\([^)]*\))?\s*(?:有|要|将有)?\s*"
+    r"(?P<course>[^，,；;。.\n]{1,40}?)(?:期中|期末)?考试"
+)
 _WORK_PLAN_KEYWORDS = (
     "实验报告",
     "大作业",
@@ -847,6 +852,54 @@ def _has_complete_exam_info(exams: Any) -> bool:
         if not str(exam.get("exam_date") or "").strip():
             return False
     return True
+
+
+def _normalize_exam_date(year: str, month: str, day: str) -> str:
+    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
+def _clean_exam_course_name(value: str) -> str:
+    course = str(value or "").strip(" \t，,；;。.")
+    course = re.sub(r"^(?:有|要|将有|一门|一科)", "", course).strip()
+    return course
+
+
+def _extract_exams_from_text(text: str) -> list[dict[str, Any]]:
+    exams: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in _EXAM_ITEM_RE.finditer(text or ""):
+        course_name = _clean_exam_course_name(match.group("course"))
+        exam_date = _normalize_exam_date(match.group("year"), match.group("month"), match.group("day"))
+        if not course_name:
+            continue
+        key = (course_name, exam_date)
+        if key in seen:
+            continue
+        seen.add(key)
+        exams.append(
+            {
+                "course_name": course_name,
+                "exam_date": exam_date,
+                "difficulty": "medium",
+            }
+        )
+    return exams
+
+
+def _extract_study_plan_request(user_message: str) -> dict[str, Any] | None:
+    if not _looks_like_study_plan_request(user_message):
+        return None
+    exams = _extract_exams_from_text(user_message)
+    if not _has_complete_exam_info(exams):
+        return None
+    study_context = _extract_study_context_from_text(user_message)
+    if not _study_context_has_quality(study_context):
+        study_context = {"raw_notes": "按默认", "using_defaults": True}
+    return {"exams": exams, "study_context": study_context}
+
+
+def _should_handle_study_plan_locally(user_message: str) -> bool:
+    return _extract_study_plan_request(user_message) is not None
 
 
 def _wants_detailed_study_context(text: str) -> bool:
@@ -2923,6 +2976,18 @@ def _work_plan_date_range(due_date: str) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
+def _study_plan_date_range(exams: list[dict[str, Any]]) -> tuple[str, str]:
+    exam_dates = [
+        date.fromisoformat(str(exam["exam_date"]))
+        for exam in exams
+        if isinstance(exam, dict) and str(exam.get("exam_date") or "").strip()
+    ]
+    first_exam_date = min(exam_dates)
+    start = first_exam_date - timedelta(days=8)
+    end = first_exam_date - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
 async def _run_work_plan_shortcut(
     user_message: str,
     user: User,
@@ -3370,6 +3435,7 @@ async def run_agent_action_loop(
         return
 
     initial_study_context_text: str | None = None
+    initial_study_context: dict[str, Any] | None = None
     if _should_collect_study_context_locally(user_message):
         context_answer = yield {
             "type": "ask_user",
@@ -3438,6 +3504,31 @@ async def run_agent_action_loop(
                 else:
                     yield event
                     event = await shortcut.__anext__()
+        except StopAsyncIteration:
+            pass
+        return
+
+    if _should_handle_study_plan_locally(user_message):
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        study_plan_workflow = langgraph_runtime.run_langgraph_study_plan_workflow(
+            user_message,
+            langgraph_runtime.GraphPlanWorkflowRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+            ),
+            study_context_override=initial_study_context,
+        )
+        try:
+            event = await study_plan_workflow.__anext__()
+            while True:
+                if event["type"] == "ask_user":
+                    user_response = yield event
+                    event = await study_plan_workflow.asend(user_response)
+                else:
+                    yield event
+                    event = await study_plan_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return

@@ -142,6 +142,21 @@ TOOL_DEFINITIONS: list[dict] = [
                                 "course_name": {"type": "string"},
                                 "exam_date": {"type": "string", "description": "Exam date in YYYY-MM-DD format"},
                                 "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+                                "scope": {
+                                    "type": "string",
+                                    "description": (
+                                        "Optional exam-specific scope, chapters, units, or topics. "
+                                        "Only include this when the user provided scope for this exam."
+                                    ),
+                                },
+                                "weak_areas": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Optional exam-specific weak areas. "
+                                        "Only include items that belong to this exam."
+                                    ),
+                                },
                             },
                             "required": ["course_name", "exam_date"],
                         },

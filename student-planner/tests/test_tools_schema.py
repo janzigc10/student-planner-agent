@@ -59,8 +59,13 @@ def test_update_task_contract_exposes_task_reminder_cancellation():
 
 def test_create_study_plan_contract_exposes_study_context():
     tool = _tool_by_name("create_study_plan")
+    exam_schema = tool["function"]["parameters"]["properties"]["exams"]["items"]
     study_context = tool["function"]["parameters"]["properties"]["study_context"]
 
+    assert "scope" in exam_schema["properties"]
+    assert "weak_areas" in exam_schema["properties"]
+    assert "scope" not in exam_schema["required"]
+    assert "weak_areas" not in exam_schema["required"]
     assert "study-quality context" in study_context["description"]
     assert "exam_scope" in study_context["properties"]
     assert "weak_areas" in study_context["properties"]
