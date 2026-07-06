@@ -7,22 +7,14 @@ from typing import Any, AsyncGenerator, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.guardrails import (
-    GuardrailViolation,
-    check_consecutive_ask_user,
-    check_max_loop_iterations,
-    check_max_retries,
-    check_unknown_tool,
-)
+from app.agent.contracts import AgentRoute, CONFIRMATION_REQUIRED_TOOLS, DBWritePlan, PendingConfirmation
+from app.agent.guardrails import check_max_loop_iterations
 from app.agent.llm_client import AsyncOpenAI, chat_completion, chat_completion_stream
 from app.agent.prompt import build_system_prompt
 from app.agent.tool_preflight import (
-    apply_tool_preflight,
     extract_reminder_slot,
     looks_like_task_update_intent,
     should_include_confirmed_question,
-    task_tool_preflight_error,
-    tool_schema_preflight_error,
 )
 from app.agent.tool_executor import execute_tool
 from app.agent.tools import TOOL_DEFINITIONS
@@ -97,7 +89,6 @@ _COURSE_DISAMBIGUATION_KEYWORDS = (
 _TASK_WRITE_CONTEXT_KEYWORDS = (
     "任务",
     "提醒",
-    "复习",
     "作业",
     "安排",
     "创建",
@@ -110,6 +101,71 @@ _TASK_WRITE_CONTEXT_KEYWORDS = (
     "调整",
     "换到",
     "挪到",
+)
+_TASK_WRITE_CONTEXT_PHRASES = (
+    "复习计划",
+    "学习计划",
+    "备考计划",
+    "拆复习任务",
+    "拆学习任务",
+    "复习任务",
+    "学习任务",
+    "写入日程",
+    "加入日程",
+    "落到日程",
+)
+_TASK_WRITE_ACTION_MARKERS = (
+    "任务",
+    "提醒",
+    "日程",
+    "创建",
+    "新建",
+    "新增",
+    "写入",
+    "落库",
+    "加入",
+    "安排",
+    "规划",
+    "制定",
+    "生成",
+    "拆",
+    "分解",
+    "改到",
+    "改成",
+    "改为",
+    "修改",
+    "调整",
+    "换到",
+    "挪到",
+)
+_INFORMATIONAL_QA_MARKERS = (
+    "是什么",
+    "为什么",
+    "怎么理解",
+    "如何理解",
+    "解释",
+    "说明",
+    "区别",
+    "关系",
+    "作用",
+    "意义",
+    "原因",
+    "概念",
+    "定义",
+    "判断",
+    "简述",
+    "论述",
+    "分析",
+    "怎么答",
+    "怎么回答",
+    "如何回答",
+    "简答题",
+    "考点",
+    "用一句话",
+    "一句话",
+    "讲讲",
+    "梳理",
+    "总结",
 )
 _PLAIN_TEXT_ASK_CONFIRM_MARKERS = (
     "确认",
@@ -131,6 +187,99 @@ _PLAIN_TEXT_ASK_INFO_MARKERS = (
     "提前多久",
 )
 _TASK_WRITE_TOOLS = {"create_task", "update_task", "complete_task", "set_reminder"}
+_TEXT_ONLY_STREAM_AFTER_TOOLS = {"recall_memory"}
+_TOOL_INTENT_KEYWORDS = (
+    *_SCHEDULE_IMPORT_KEYWORDS,
+    *_COURSE_CONTEXT_KEYWORDS,
+    *_COURSE_VIEW_KEYWORDS,
+    *_COURSE_EDIT_KEYWORDS,
+    *_TASK_WRITE_CONTEXT_KEYWORDS,
+    *_TASK_WRITE_CONTEXT_PHRASES,
+    "course",
+    "schedule",
+    "timetable",
+    "task",
+    "todo",
+    "reminder",
+    "studyplan",
+    "workplan",
+    "deadline",
+    "assignment",
+    "exam",
+    "memory",
+    "今天",
+    "明天",
+    "后天",
+    "下周",
+    "本周",
+    "周一",
+    "周二",
+    "周三",
+    "周四",
+    "周五",
+    "周六",
+    "周日",
+    "星期",
+    "几点",
+    "时间",
+    "课",
+    "上课",
+    "日程",
+    "空闲",
+    "有空",
+    "计划",
+    "考试",
+    "截止",
+    "记忆",
+    "长期记忆",
+    "记得",
+    "记住",
+    "保存",
+    "偏好",
+    "习惯",
+    "帮我",
+    "查看",
+    "查一下",
+    "列出",
+    "删除",
+    "完成",
+)
+_CURRENT_INFO_TIME_MARKERS = (
+    "最新",
+    "最近",
+    "近期",
+    "刚刚",
+    "刚发生",
+    "刚发布",
+    "今天",
+    "现在",
+    "目前",
+    "本周",
+    "这个月",
+    "今年",
+    "2026",
+    "发生了什么",
+)
+_PUBLIC_NEWS_DOMAIN_MARKERS = (
+    "新闻",
+    "大事",
+    "大事件",
+    "时事",
+    "热点",
+    "国家大事",
+    "国家级",
+    "国内",
+    "国际",
+    "世界",
+    "中国",
+    "社会",
+    "政策",
+    "法律",
+    "科技",
+    "航天",
+    "经济",
+    "政治",
+)
 
 _SCHEDULE_FILE_ID_RE = re.compile(r"file_id\s*=\s*([a-zA-Z0-9\-]+)")
 _SCHEDULE_PERIOD_ENTRY_RE = re.compile(
@@ -211,6 +360,11 @@ _STUDY_CONTEXT_DETAIL_KEYWORDS = (
     "高效",
     "专项",
     "针对",
+)
+_EXAM_ITEM_RE = re.compile(
+    r"(?P<year>20\d{2})[-/年](?P<month>\d{1,2})[-/月](?P<day>\d{1,2})日?"
+    r"(?:（[^）]*）|\([^)]*\))?\s*(?:有|要|将有)?\s*"
+    r"(?P<course>[^，,；;。.\n]{1,40}?)(?:期中|期末)?考试"
 )
 _WORK_PLAN_KEYWORDS = (
     "实验报告",
@@ -433,9 +587,56 @@ def _build_task_routing_hint(user_message: str) -> str | None:
     )
 
 
+def _compact_user_texts(user_texts: list[str]) -> str:
+    texts = [str(text or "") for text in user_texts if str(text or "").strip()]
+    return "\n".join(texts).lower().replace(" ", "")
+
+
+def _latest_compact_user_text(user_texts: list[str]) -> str:
+    texts = [str(text or "") for text in user_texts if str(text or "").strip()]
+    return texts[-1].lower().replace(" ", "") if texts else ""
+
+
+def _has_compact_keyword(compact_text: str, keywords: tuple[str, ...]) -> bool:
+    return any(str(keyword).lower().replace(" ", "") in compact_text for keyword in keywords)
+
+
 def _looks_like_task_write_context(user_texts: list[str]) -> bool:
-    compact_text = "\n".join(str(text or "") for text in user_texts).lower().replace(" ", "")
+    compact_text = _compact_user_texts(user_texts)
+    if not compact_text:
+        return False
+
+    latest_text = _latest_compact_user_text(user_texts)
+    explicit_write_intent = any(marker in latest_text for marker in _TASK_WRITE_ACTION_MARKERS)
+    explicit_write_intent = explicit_write_intent or any(
+        phrase in latest_text for phrase in _TASK_WRITE_CONTEXT_PHRASES
+    )
+    is_informational_qa = any(marker in latest_text for marker in _INFORMATIONAL_QA_MARKERS)
+    if is_informational_qa and not explicit_write_intent:
+        return False
+
+    if any(phrase in compact_text for phrase in _TASK_WRITE_CONTEXT_PHRASES):
+        return True
     return any(keyword in compact_text for keyword in _TASK_WRITE_CONTEXT_KEYWORDS)
+
+
+def _looks_like_tool_intent(user_texts: list[str]) -> bool:
+    compact_text = _compact_user_texts(user_texts)
+    if not compact_text:
+        return False
+
+    latest_text = _latest_compact_user_text(user_texts)
+    explicit_write_intent = any(marker in latest_text for marker in _TASK_WRITE_ACTION_MARKERS)
+    explicit_write_intent = explicit_write_intent or any(
+        phrase in latest_text for phrase in _TASK_WRITE_CONTEXT_PHRASES
+    )
+    is_informational_qa = any(marker in latest_text for marker in _INFORMATIONAL_QA_MARKERS)
+    if is_informational_qa and not explicit_write_intent:
+        return False
+
+    if _looks_like_task_write_context(user_texts) or looks_like_task_update_intent(user_texts):
+        return True
+    return _has_compact_keyword(compact_text, _TOOL_INTENT_KEYWORDS)
 
 
 def _looks_like_plain_text_ask(text: str) -> bool:
@@ -470,6 +671,34 @@ def _should_require_task_tool_response(user_texts: list[str], tool_history: list
     if not _looks_like_task_write_context(user_texts):
         return False
     return not any(tool_name in _TASK_WRITE_TOOLS for tool_name in tool_history)
+
+
+def _should_use_text_only_stream(user_texts: list[str], tool_history: list[str]) -> bool:
+    if tool_history:
+        return tool_history[-1] in _TEXT_ONLY_STREAM_AFTER_TOOLS
+    return not _looks_like_tool_intent(user_texts)
+
+
+def _looks_like_current_public_info_request(user_message: str) -> bool:
+    compact_text = str(user_message or "").lower().replace(" ", "")
+    if not compact_text:
+        return False
+
+    mentions_current_window = _has_compact_keyword(compact_text, _CURRENT_INFO_TIME_MARKERS)
+    mentions_public_news = _has_compact_keyword(compact_text, _PUBLIC_NEWS_DOMAIN_MARKERS)
+    if not mentions_current_window or not mentions_public_news:
+        return False
+
+    if _looks_like_tool_intent([user_message]) or looks_like_task_update_intent([user_message]):
+        return False
+    return True
+
+
+def _current_public_info_unavailable_text() -> str:
+    return (
+        "我这里没有联网检索、新闻搜索或网页浏览工具，不能可靠回答“最新/最近发生了什么”这类实时公共事件问题。"
+        "如果你提供具体材料或新闻链接内容，我可以帮你整理、提炼重点；如果是课程资料库里的知识点，我可以按本地资料回答。"
+    )
 
 
 async def _build_initial_messages(
@@ -674,6 +903,54 @@ def _has_complete_exam_info(exams: Any) -> bool:
         if not str(exam.get("exam_date") or "").strip():
             return False
     return True
+
+
+def _normalize_exam_date(year: str, month: str, day: str) -> str:
+    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
+def _clean_exam_course_name(value: str) -> str:
+    course = str(value or "").strip(" \t，,；;。.")
+    course = re.sub(r"^(?:有|要|将有|一门|一科)", "", course).strip()
+    return course
+
+
+def _extract_exams_from_text(text: str) -> list[dict[str, Any]]:
+    exams: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in _EXAM_ITEM_RE.finditer(text or ""):
+        course_name = _clean_exam_course_name(match.group("course"))
+        exam_date = _normalize_exam_date(match.group("year"), match.group("month"), match.group("day"))
+        if not course_name:
+            continue
+        key = (course_name, exam_date)
+        if key in seen:
+            continue
+        seen.add(key)
+        exams.append(
+            {
+                "course_name": course_name,
+                "exam_date": exam_date,
+                "difficulty": "medium",
+            }
+        )
+    return exams
+
+
+def _extract_study_plan_request(user_message: str) -> dict[str, Any] | None:
+    if not _looks_like_study_plan_request(user_message):
+        return None
+    exams = _extract_exams_from_text(user_message)
+    if not _has_complete_exam_info(exams):
+        return None
+    study_context = _extract_study_context_from_text(user_message)
+    if not _study_context_has_quality(study_context):
+        study_context = {"raw_notes": "按默认", "using_defaults": True}
+    return {"exams": exams, "study_context": study_context}
+
+
+def _should_handle_study_plan_locally(user_message: str) -> bool:
+    return _extract_study_plan_request(user_message) is not None
 
 
 def _wants_detailed_study_context(text: str) -> bool:
@@ -1458,6 +1735,271 @@ def _is_confirmed_answer(answer: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in positive_prefixes)
 
 
+def _build_schedule_import_write_state(
+    courses: list[dict[str, Any]],
+) -> tuple[PendingConfirmation, DBWritePlan]:
+    confirmation_id = f"{AgentRoute.SCHEDULE_IMPORT.value}:{uuid.uuid4().hex}"
+    data = {"courses": courses, "count": len(courses)}
+    question = f"以下是解析出的课表（共{len(courses)}条），请确认是否导入？"
+    pending_confirmation = PendingConfirmation(
+        confirmation_id=confirmation_id,
+        route=AgentRoute.SCHEDULE_IMPORT.value,
+        tool_name="bulk_import_courses",
+        ask_type="review",
+        question=question,
+        options=("确认", "取消"),
+        data=data,
+    )
+    db_write_plan = DBWritePlan(
+        confirmation_id=confirmation_id,
+        route=AgentRoute.SCHEDULE_IMPORT.value,
+        tool_name="bulk_import_courses",
+        args={"courses": courses},
+        description=f"Import {len(courses)} parsed schedule courses.",
+    )
+    return pending_confirmation, db_write_plan
+
+
+def _route_for_db_write_tool(tool_name: str) -> str:
+    if tool_name in {"add_course", "update_course", "delete_course", "bulk_import_courses", "save_period_times"}:
+        return AgentRoute.COURSE_MAINTENANCE.value if tool_name != "bulk_import_courses" else AgentRoute.SCHEDULE_IMPORT.value
+    if tool_name in {"create_task", "update_task", "complete_task", "set_reminder"}:
+        return AgentRoute.TOOL_WORKFLOW.value
+    return AgentRoute.TOOL_WORKFLOW.value
+
+
+def _build_pending_confirmation(
+    *,
+    route: str,
+    tool_name: str,
+    question: str,
+    ask_type: str = "confirm",
+    options: tuple[str, ...] = ("确认", "取消"),
+    data: dict[str, Any] | None = None,
+    allowed_tool_names: tuple[str, ...] | None = None,
+) -> PendingConfirmation:
+    return PendingConfirmation(
+        confirmation_id=f"{route}:{uuid.uuid4().hex}",
+        route=route,
+        tool_name=tool_name,
+        ask_type=ask_type,
+        question=question,
+        options=options,
+        data=data,
+        allowed_tool_names=allowed_tool_names or (),
+    )
+
+
+def _build_db_write_plan(
+    *,
+    pending_confirmation: PendingConfirmation,
+    tool_name: str,
+    args: dict[str, Any],
+    description: str | None = None,
+) -> DBWritePlan:
+    return DBWritePlan(
+        confirmation_id=pending_confirmation.confirmation_id,
+        route=pending_confirmation.route,
+        tool_name=tool_name,
+        args=dict(args),
+        description=description or f"Confirmed {tool_name} database write.",
+    )
+
+
+def _restore_confirmed_task_reminder_arg(
+    *,
+    tool_name: str,
+    args: dict[str, Any],
+    pending_confirmation: PendingConfirmation,
+    confirmation_answer: str,
+) -> dict[str, Any]:
+    if tool_name not in {"create_task", "update_task"}:
+        return args
+    if args.get("reminder_advance_minutes") is not None:
+        return args
+    if not isinstance(pending_confirmation.data, dict):
+        return args
+    if "reminder_advance_minutes" not in pending_confirmation.data:
+        return args
+
+    answer_slot = extract_reminder_slot([confirmation_answer])
+    if answer_slot is not None and answer_slot.advance_minutes is None:
+        return args
+
+    restored = dict(args)
+    restored["reminder_advance_minutes"] = pending_confirmation.data.get("reminder_advance_minutes")
+    return restored
+
+
+def _confirmed_tool_scope(pending_confirmation: PendingConfirmation) -> tuple[str, ...]:
+    if pending_confirmation.allowed_tool_names:
+        return pending_confirmation.allowed_tool_names
+    return (pending_confirmation.tool_name,)
+
+
+def _is_write_authorized_answer(pending_confirmation: PendingConfirmation, answer: str) -> bool:
+    if _is_confirmed_answer(answer):
+        return True
+    if pending_confirmation.ask_type == "review" and str(answer or "").strip():
+        return not _is_cancelled_answer(answer)
+    return False
+
+
+def _infer_confirmed_write_scope(
+    *,
+    question: str,
+    data: Any,
+    confirmation_answer: str,
+) -> tuple[str, ...]:
+    answer_is_write_authorizing = _is_confirmed_answer(confirmation_answer) or (
+        not _is_cancelled_answer(confirmation_answer)
+        and _looks_like_missing_write_info_question(question)
+    )
+    if not answer_is_write_authorizing:
+        return ()
+
+    if isinstance(data, dict):
+        actions = data.get("actions")
+        if isinstance(actions, list):
+            tools: list[str] = []
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                action_name = str(action.get("action") or "")
+                if action_name == "update":
+                    tools.append("update_course")
+                elif action_name == "delete":
+                    tools.append("delete_course")
+            if tools:
+                return tuple(dict.fromkeys(tools))
+
+        tasks = data.get("tasks")
+        if isinstance(tasks, list):
+            return ("create_task",)
+
+    compact_question = str(question or "").lower().replace(" ", "")
+    if not compact_question:
+        return ()
+
+    if "课程" in compact_question or "课表" in compact_question or "course" in compact_question:
+        course_tools: list[str] = []
+        if any(marker in compact_question for marker in ("修改", "改名", "改成", "改为", "合并", "update", "rename", "merge")):
+            course_tools.append("update_course")
+        if any(marker in compact_question for marker in ("删除", "删掉", "移除", "delete", "remove")):
+            course_tools.append("delete_course")
+        if course_tools:
+            return tuple(dict.fromkeys(course_tools))
+
+    if (
+        "任务" in compact_question
+        or "日程" in compact_question
+        or "提醒" in compact_question
+        or "task" in compact_question
+        or "todo" in compact_question
+        or "reminder" in compact_question
+    ):
+        task_tools: list[str] = []
+        if any(marker in compact_question for marker in ("创建", "新建", "新增", "写入", "加入", "create", "new", "add")):
+            task_tools.append("create_task")
+        if any(
+            marker in compact_question
+            for marker in ("修改", "更新", "改到", "改成", "调整", "取消提醒", "不提醒", "update", "updating", "change", "withoutareminder")
+        ):
+            task_tools.append("update_task")
+        if _looks_like_missing_write_info_question(question) and not any(
+            tool in task_tools for tool in ("create_task", "update_task")
+        ):
+            task_tools.insert(0, "create_task")
+        if "提醒" in compact_question:
+            task_tools.append("set_reminder")
+        if "reminder" in compact_question:
+            task_tools.append("set_reminder")
+        if task_tools:
+            return tuple(dict.fromkeys(task_tools))
+
+    if _looks_like_missing_write_info_question(question):
+        task_tools = ["create_task"]
+        if "提醒" in compact_question or "reminder" in compact_question or "提醒" in confirmation_answer or "reminder" in confirmation_answer.lower():
+            task_tools.append("set_reminder")
+        return tuple(dict.fromkeys(task_tools))
+
+    return ()
+
+
+def _looks_like_missing_write_info_question(question: str) -> bool:
+    compact_question = str(question or "").lower().replace(" ", "")
+    if not compact_question:
+        return False
+    return any(
+        marker in compact_question
+        for marker in (
+            "哪天",
+            "几点",
+            "什么时候",
+            "请告诉我",
+            "请补充",
+            "whichdate",
+            "whatdate",
+            "whatday",
+            "whattime",
+            "when",
+            "date",
+            "time",
+        )
+    )
+
+
+def _build_confirmed_write_state_from_ask(
+    *,
+    tool_args: dict[str, Any],
+    ask_result: dict[str, Any],
+    confirmation_answer: str,
+) -> PendingConfirmation | None:
+    question = str(ask_result.get("question") or tool_args.get("question") or "")
+    data = ask_result.get("data") if ask_result.get("data") is not None else tool_args.get("data")
+    allowed_tool_names = _infer_confirmed_write_scope(
+        question=question,
+        data=data,
+        confirmation_answer=confirmation_answer,
+    )
+    if not allowed_tool_names:
+        return None
+
+    route = _route_for_db_write_tool(allowed_tool_names[0])
+    return _build_pending_confirmation(
+        route=route,
+        tool_name=allowed_tool_names[0],
+        question=question,
+        ask_type=str(ask_result.get("type") or tool_args.get("type") or "confirm"),
+        options=tuple(str(option) for option in (ask_result.get("options") or tool_args.get("options") or ())),
+        data=data if isinstance(data, dict) else None,
+        allowed_tool_names=allowed_tool_names,
+    )
+
+
+async def _execute_confirmed_db_write_plan(
+    *,
+    pending_confirmation: PendingConfirmation | None,
+    db_write_plan: DBWritePlan | None,
+    confirmation_answer: str,
+    db: AsyncSession,
+    user_id: str,
+) -> dict[str, Any]:
+    if pending_confirmation is None:
+        return {"error": "Missing pending confirmation state for database write."}
+    if db_write_plan is None:
+        return {"error": "Missing database write plan for confirmed write."}
+    if pending_confirmation.confirmation_id != db_write_plan.confirmation_id:
+        return {"error": "Confirmation state does not match database write plan."}
+    if pending_confirmation.route != db_write_plan.route:
+        return {"error": "Confirmation state does not match database write plan."}
+    if db_write_plan.tool_name not in _confirmed_tool_scope(pending_confirmation):
+        return {"error": "Confirmation state does not match database write plan."}
+    if not _is_write_authorized_answer(pending_confirmation, confirmation_answer):
+        return {"status": "cancelled", "message": "Write cancelled before database execution."}
+    return await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
+
+
 def _extract_review_override(answer: str) -> dict[str, Any] | None:
     marker = "review_override="
     marker_index = (answer or "").find(marker)
@@ -1700,13 +2242,18 @@ async def _run_schedule_import_shortcut(
         yield {"type": "done"}
         return
 
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": "review",
-        "question": f"以下是解析出的课表（共{len(courses)}条），请确认是否导入？",
-        "options": ["确认", "取消"],
-        "data": {"courses": courses, "count": len(courses)},
-    }
+    pending_confirmation, db_write_plan = _build_schedule_import_write_state(courses)
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，这次我先不导入。你后面想继续的话，重新确认一次就行。"
@@ -1716,9 +2263,15 @@ async def _run_schedule_import_shortcut(
         return
 
     step += 1
-    import_args = {"courses": courses}
+    import_args = dict(db_write_plan.args)
     yield {"type": "tool_call", "name": "bulk_import_courses", "args": import_args}
-    import_result = await execute_tool("bulk_import_courses", import_args, db, user.id)
+    import_result = await _execute_confirmed_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        db_write_plan=db_write_plan,
+        confirmation_answer=str(confirm_answer or ""),
+        db=db,
+        user_id=user.id,
+    )
     yield {"type": "tool_result", "name": "bulk_import_courses", "result": import_result}
     await _persist_local_tool_step(db, session_id, user.id, step, "bulk_import_courses", import_args, import_result)
 
@@ -1831,13 +2384,53 @@ async def _run_course_merge_shortcut(
     elif kind == "merge":
         question = "我准备把这些重复课程合并成每个时段 1 条记录。确认后我就直接处理。"
 
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": "review",
-        "question": question,
-        "options": ["确认", "取消"],
-        "data": review_data,
-    }
+    allowed_tool_names = tuple(
+        dict.fromkeys(
+            "update_course" if str(item.get("action") or "") == "update" else "delete_course"
+            for item in actions
+            if str(item.get("action") or "") in {"update", "delete"}
+        )
+    )
+    pending_confirmation = _build_pending_confirmation(
+        route=AgentRoute.COURSE_MAINTENANCE.value,
+        tool_name=allowed_tool_names[0] if allowed_tool_names else "update_course",
+        question=question,
+        ask_type="review",
+        data=review_data,
+        allowed_tool_names=allowed_tool_names,
+    )
+    first_db_write_plan: DBWritePlan | None = None
+    for item in actions:
+        action = str(item.get("action") or "")
+        course = item.get("course") if isinstance(item.get("course"), dict) else {}
+        course_id = str(course.get("id") or "")
+        if action == "update" and course_id:
+            first_db_write_plan = _build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="update_course",
+                args={"course_id": course_id, **dict(item.get("updates") or {})},
+                description="Confirmed course update.",
+            )
+            break
+        if action == "delete" and course_id:
+            first_db_write_plan = _build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="delete_course",
+                args={"course_id": course_id},
+                description="Confirmed course delete.",
+            )
+            break
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=first_db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，我先不改。你后面想继续的话，直接告诉我保留哪个课程名就行。"
@@ -1857,7 +2450,18 @@ async def _run_course_merge_shortcut(
         if action == "update" and course_id:
             update_args = {"course_id": course_id, **dict(item.get("updates") or {})}
             yield {"type": "tool_call", "name": "update_course", "args": update_args}
-            update_result = await execute_tool("update_course", update_args, db, user.id)
+            update_result = await _execute_confirmed_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                db_write_plan=_build_db_write_plan(
+                    pending_confirmation=pending_confirmation,
+                    tool_name="update_course",
+                    args=update_args,
+                    description="Confirmed course update.",
+                ),
+                confirmation_answer=str(confirm_answer or ""),
+                db=db,
+                user_id=user.id,
+            )
             yield {"type": "tool_result", "name": "update_course", "result": update_result}
             step += 1
             await _persist_local_tool_step(db, session_id, user.id, step, "update_course", update_args, update_result)
@@ -1870,7 +2474,18 @@ async def _run_course_merge_shortcut(
         if action == "delete" and course_id:
             delete_args = {"course_id": course_id}
             yield {"type": "tool_call", "name": "delete_course", "args": delete_args}
-            delete_result = await execute_tool("delete_course", delete_args, db, user.id)
+            delete_result = await _execute_confirmed_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                db_write_plan=_build_db_write_plan(
+                    pending_confirmation=pending_confirmation,
+                    tool_name="delete_course",
+                    args=delete_args,
+                    description="Confirmed course delete.",
+                ),
+                confirmation_answer=str(confirm_answer or ""),
+                db=db,
+                user_id=user.id,
+            )
             yield {"type": "tool_result", "name": "delete_course", "result": delete_result}
             step += 1
             await _persist_local_tool_step(db, session_id, user.id, step, "delete_course", delete_args, delete_result)
@@ -1943,18 +2558,36 @@ async def _run_missing_task_create_shortcut(
         else:
             reminder_text = f"提前{reminder_slot.advance_minutes}分钟提醒"
 
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": "confirm",
-        "question": "请确认是否创建这个任务。",
-        "options": ["确认", "取消"],
-        "data": {
+    pending_confirmation = _build_pending_confirmation(
+        route=AgentRoute.TOOL_WORKFLOW.value,
+        tool_name="create_task",
+        question="请确认是否创建这个任务。",
+        ask_type="confirm",
+        data={
             "title": title,
             "scheduled_date": schedule["scheduled_date"],
             "time": f"{schedule['start_time']}-{schedule['end_time']}",
             "reminder": reminder_text,
         },
-    }
+        allowed_tool_names=("create_task",),
+    )
+    db_write_plan = _build_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        tool_name="create_task",
+        args=create_args,
+        description="Confirmed missing-task create shortcut.",
+    )
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，我先不创建。你调整好时间后再告诉我。"
@@ -1964,7 +2597,13 @@ async def _run_missing_task_create_shortcut(
         return
 
     yield {"type": "tool_call", "name": "create_task", "args": create_args}
-    create_result = await execute_tool("create_task", create_args, db, user.id)
+    create_result = await _execute_confirmed_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        db_write_plan=db_write_plan,
+        confirmation_answer=str(confirm_answer or ""),
+        db=db,
+        user_id=user.id,
+    )
     yield {"type": "tool_result", "name": "create_task", "result": create_result}
     await _persist_local_tool_step(db, session_id, user.id, 1, "create_task", create_args, create_result)
 
@@ -2102,6 +2741,7 @@ async def _run_tonight_review_shortcut(
         session_id,
         db,
         step,
+        AgentRoute.STUDY_PLAN.value,
         _normalize_study_plan_tasks,
         "复习任务",
         "今晚复习计划已经生成，但里面没有可写入日程的完整任务时间。请调整后再试。",
@@ -2127,6 +2767,7 @@ async def _run_confirmed_plan_write(
     session_id: str,
     db: AsyncSession,
     start_step: int,
+    route: str,
     normalize_tasks: Callable[[Any], list[dict[str, Any]]],
     task_label: str,
     empty_text: str,
@@ -2141,13 +2782,35 @@ async def _run_confirmed_plan_write(
         yield {"type": "done"}
         return
 
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": "review",
-        "question": review_question.format(count=len(tasks)),
-        "options": ["确认", "取消"],
-        "data": _study_plan_review_data(tasks),
-    }
+    pending_confirmation = _build_pending_confirmation(
+        route=route,
+        tool_name="create_task",
+        question=review_question.format(count=len(tasks)),
+        ask_type="review",
+        data=_study_plan_review_data(tasks),
+        allowed_tool_names=("create_task",),
+    )
+    first_db_write_plan = _build_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        tool_name="create_task",
+        args=tasks[0],
+        description=f"Write confirmed {task_label}.",
+    )
+
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=first_db_write_plan,
+    )
+    if confirm_answer is None:
+        yield {"type": "done"}
+        return
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         yield {"type": "text", "message_id": message_id, "content": cancel_text}
@@ -2159,6 +2822,14 @@ async def _run_confirmed_plan_write(
     if review_override is not None:
         override_tasks = normalize_tasks(review_override.get("tasks"))
         tasks = override_tasks
+        pending_confirmation = _build_pending_confirmation(
+            route=route,
+            tool_name="create_task",
+            question=review_question.format(count=len(tasks)),
+            ask_type="review",
+            data=_study_plan_review_data(tasks),
+            allowed_tool_names=("create_task",),
+        )
         if not tasks:
             message_id = str(uuid.uuid4())
             text = f"你已经删除了全部{task_label}，这次没有写入日程。"
@@ -2183,7 +2854,18 @@ async def _run_confirmed_plan_write(
     for task_args in tasks:
         step += 1
         yield {"type": "tool_call", "name": "create_task", "args": task_args}
-        create_result = await execute_tool("create_task", task_args, db, user.id)
+        create_result = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            db_write_plan=_build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="create_task",
+                args=task_args,
+                description=f"Write confirmed {task_label}.",
+            ),
+            confirmation_answer=str(confirm_answer or ""),
+            db=db,
+            user_id=user.id,
+        )
         yield {"type": "tool_result", "name": "create_task", "result": create_result}
         await _persist_local_tool_step(
             db,
@@ -2230,7 +2912,18 @@ async def _run_confirmed_plan_write(
 
         step += 1
         yield {"type": "tool_call", "name": "create_task", "args": rescheduled_args}
-        retry_result = await execute_tool("create_task", rescheduled_args, db, user.id)
+        retry_result = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            db_write_plan=_build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="create_task",
+                args=rescheduled_args,
+                description=f"Write rescheduled confirmed {task_label}.",
+            ),
+            confirmation_answer=str(confirm_answer or ""),
+            db=db,
+            user_id=user.id,
+        )
         yield {"type": "tool_result", "name": "create_task", "result": retry_result}
         await _persist_local_tool_step(
             db,
@@ -2292,6 +2985,7 @@ def _run_confirmed_study_plan_write(
         session_id,
         db,
         start_step,
+        AgentRoute.STUDY_PLAN.value,
         _normalize_study_plan_tasks,
         "复习任务",
         "复习计划已经生成，但里面没有可写入日程的完整任务时间。请补充考试范围或每日可复习时间后再试。",
@@ -2313,12 +3007,38 @@ def _run_confirmed_work_plan_write(
         session_id,
         db,
         start_step,
+        AgentRoute.STUDY_PLAN.value,
         _normalize_work_plan_tasks,
         "作业任务",
         "作业计划已经生成，但里面没有可写入日程的完整任务时间。请补充截止日期、交付要求或每日可投入时间后再试。",
         "我已经拆出 {count} 条作业任务。确认后我会把它们写入你的日程。",
         "好的，我先不写入这些作业任务。你可以调整要求、工作量或空闲时间后再让我重新拆。",
     )
+
+
+async def run_review_override_plan_write(
+    confirm_answer: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    start_step: int = 0,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Write a submitted review payload when the live generator is gone."""
+
+    review_override = _extract_review_override(confirm_answer)
+    if review_override is None:
+        yield {
+            "type": "error",
+            "message": "当前没有待确认的问题，请先发送消息或重新触发操作。",
+        }
+        yield {"type": "done"}
+        return
+
+    yield {
+        "type": "error",
+        "message": "当前确认状态已失效，请重新发送消息生成新的计划确认卡片。",
+    }
+    yield {"type": "done"}
 
 
 def _work_plan_date_range(due_date: str) -> tuple[str, str]:
@@ -2329,6 +3049,18 @@ def _work_plan_date_range(due_date: str) -> tuple[str, str]:
     end = due - timedelta(days=1)
     if end < start:
         end = start
+    return start.isoformat(), end.isoformat()
+
+
+def _study_plan_date_range(exams: list[dict[str, Any]]) -> tuple[str, str]:
+    exam_dates = [
+        date.fromisoformat(str(exam["exam_date"]))
+        for exam in exams
+        if isinstance(exam, dict) and str(exam.get("exam_date") or "").strip()
+    ]
+    first_exam_date = min(exam_dates)
+    start = first_exam_date - timedelta(days=8)
+    end = first_exam_date - timedelta(days=1)
     return start.isoformat(), end.isoformat()
 
 
@@ -2564,13 +3296,35 @@ async def _run_plan_adjustment_shortcut(
         yield {"type": "done"}
         return
 
-    confirm_answer = yield {
-        "type": "ask_user",
-        "ask_type": "review",
-        "question": f"我找到 {len(updates)} 条需要压缩的「{query}」任务。确认后我会把它们调整到每天最多 {daily_limit} 分钟。",
-        "options": ["确认", "取消"],
-        "data": {"daily_limit_minutes": daily_limit, "tasks": updates, "count": len(updates)},
+    pending_confirmation = _build_pending_confirmation(
+        route=AgentRoute.STUDY_PLAN.value,
+        tool_name="update_task",
+        question=f"我找到 {len(updates)} 条需要压缩的「{query}」任务。确认后我会把它们调整到每天最多 {daily_limit} 分钟。",
+        ask_type="review",
+        data={"daily_limit_minutes": daily_limit, "tasks": updates, "count": len(updates)},
+        allowed_tool_names=("update_task",),
+    )
+    first_update_args = {
+        "task_id": updates[0]["task_id"],
+        "end_time": updates[0]["new_end_time"],
     }
+    first_db_write_plan = _build_db_write_plan(
+        pending_confirmation=pending_confirmation,
+        tool_name="update_task",
+        args=first_update_args,
+        description="Confirmed plan adjustment task update.",
+    )
+    confirm_answer = yield _with_shortcut_confirmation_state(
+        {
+            "type": "ask_user",
+            "ask_type": pending_confirmation.ask_type,
+            "question": pending_confirmation.question,
+            "options": list(pending_confirmation.options),
+            "data": pending_confirmation.data,
+        },
+        pending_confirmation=pending_confirmation,
+        db_write_plan=first_db_write_plan,
+    )
     if not _is_confirmed_answer(str(confirm_answer or "")):
         message_id = str(uuid.uuid4())
         text = "好的，我先不调整这些任务。"
@@ -2588,7 +3342,18 @@ async def _run_plan_adjustment_shortcut(
             "end_time": update["new_end_time"],
         }
         yield {"type": "tool_call", "name": "update_task", "args": update_args}
-        update_result = await execute_tool("update_task", update_args, db, user.id)
+        update_result = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            db_write_plan=_build_db_write_plan(
+                pending_confirmation=pending_confirmation,
+                tool_name="update_task",
+                args=update_args,
+                description="Confirmed plan adjustment task update.",
+            ),
+            confirmation_answer=str(confirm_answer or ""),
+            db=db,
+            user_id=user.id,
+        )
         yield {"type": "tool_result", "name": "update_task", "result": update_result}
         await _persist_local_tool_step(db, session_id, user.id, step, "update_task", update_args, update_result)
         if "error" in update_result:
@@ -2608,14 +3373,111 @@ async def _run_plan_adjustment_shortcut(
     yield {"type": "done"}
 
 
-async def run_agent_loop(
+_LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY = "_langgraph_pending_confirmation"
+_LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY = "_langgraph_db_write_plan"
+
+
+def _ask_user_event_tool_args(event: dict[str, Any]) -> dict[str, Any]:
+    args: dict[str, Any] = {
+        "question": str(event.get("question") or ""),
+        "type": str(event.get("ask_type") or "review"),
+    }
+    if event.get("options") is not None:
+        args["options"] = list(event.get("options") or [])
+    if event.get("data") is not None:
+        args["data"] = event.get("data")
+    return args
+
+
+def _strip_internal_shortcut_event_fields(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in event.items()
+        if key not in {_LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY, _LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY}
+    }
+
+
+def _with_shortcut_confirmation_state(
+    event: dict[str, Any],
+    *,
+    pending_confirmation: PendingConfirmation,
+    db_write_plan: DBWritePlan | None = None,
+) -> dict[str, Any]:
+    return {
+        **event,
+        _LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY: pending_confirmation,
+        _LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY: db_write_plan,
+    }
+
+
+async def _run_shortcut_with_langgraph_ask_state(
+    shortcut: AsyncGenerator[dict[str, Any], str | None],
+    *,
+    graph_state: dict[str, Any] | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    from app.agent import langgraph_loop as langgraph_runtime
+
+    active_state: dict[str, Any] = {
+        "messages": [],
+        "tool_history": [],
+        "preflight_reference_texts": [],
+        "preflight_user_texts": [],
+        "error_count": {},
+        "events": [],
+        "step": 0,
+        **dict(graph_state or {}),
+    }
+    try:
+        event = await shortcut.__anext__()
+        while True:
+            if event["type"] == "ask_user":
+                pending_confirmation = event.get(_LANGGRAPH_PENDING_CONFIRMATION_EVENT_KEY)
+                pending_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
+                )
+                db_write_plan = event.get(_LANGGRAPH_DB_WRITE_PLAN_EVENT_KEY)
+                db_write_plan = db_write_plan if isinstance(db_write_plan, DBWritePlan) else None
+                public_event = _strip_internal_shortcut_event_fields(event)
+                active_state = dict(
+                    langgraph_runtime.record_langgraph_ask_user_pause_state(
+                        active_state,
+                        tool_args=_ask_user_event_tool_args(public_event),
+                        ask_result=public_event,
+                        pending_confirmation=pending_confirmation,
+                        db_write_plan=db_write_plan,
+                    )
+                )
+                user_response = yield public_event
+                active_state = dict(
+                    langgraph_runtime.resume_langgraph_ask_user_state(
+                        active_state,
+                        user_response=str(user_response or "确认"),
+                    )
+                )
+                if pending_confirmation is not None:
+                    active_state["pending_confirmation"] = pending_confirmation
+                    active_state["pending_confirmation_answer"] = str(user_response or "")
+                if db_write_plan is not None:
+                    active_state["db_write_plan"] = db_write_plan
+                event = await shortcut.asend(user_response)
+            else:
+                yield _strip_internal_shortcut_event_fields(event)
+                event = await shortcut.__anext__()
+    except StopAsyncIteration:
+        return
+
+
+async def run_agent_action_loop(
     user_message: str,
     user: User,
     session_id: str,
     db: AsyncSession,
     llm_client: AsyncOpenAI,
+    runtime_hints: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], str | None]:
-    """Run the agent loop and yield frontend events."""
+    """Run the guarded action workflow loop and yield frontend events."""
     system_prompt = await build_system_prompt(user, db)
 
     history_result = await db.execute(
@@ -2633,11 +3495,23 @@ async def run_agent_loop(
     task_routing_hint = _build_task_routing_hint(user_message)
     if task_routing_hint:
         messages.append({"role": "system", "content": task_routing_hint})
+    for hint in runtime_hints or []:
+        if hint.strip():
+            messages.append({"role": "system", "content": hint})
 
     messages.append({"role": "user", "content": user_message})
     await _save_message(db, session_id, "user", user_message)
 
+    if _looks_like_current_public_info_request(user_message):
+        message_id = str(uuid.uuid4())
+        text = _current_public_info_unavailable_text()
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
     initial_study_context_text: str | None = None
+    initial_study_context: dict[str, Any] | None = None
     if _should_collect_study_context_locally(user_message):
         context_answer = yield {
             "type": "ask_user",
@@ -2670,22 +3544,33 @@ async def run_agent_loop(
         )
 
     if _should_handle_schedule_import_locally(user_message):
-        shortcut = _run_schedule_import_shortcut(user_message, user, session_id, db)
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        schedule_workflow = langgraph_runtime.run_langgraph_schedule_import_workflow(
+            user_message,
+            langgraph_runtime.GraphScheduleImportRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+            ),
+        )
         try:
-            event = await shortcut.__anext__()
+            event = await schedule_workflow.__anext__()
             while True:
                 if event["type"] == "ask_user":
                     user_response = yield event
-                    event = await shortcut.asend(user_response)
+                    event = await schedule_workflow.asend(user_response)
                 else:
                     yield event
-                    event = await shortcut.__anext__()
+                    event = await schedule_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return
 
     if _should_handle_tonight_review_locally(user_message):
-        shortcut = _run_tonight_review_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_tonight_review_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -2695,27 +3580,63 @@ async def run_agent_loop(
                 else:
                     yield event
                     event = await shortcut.__anext__()
+        except StopAsyncIteration:
+            pass
+        return
+
+    if _should_handle_study_plan_locally(user_message):
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        study_plan_workflow = langgraph_runtime.run_langgraph_study_plan_workflow(
+            user_message,
+            langgraph_runtime.GraphPlanWorkflowRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+            ),
+            study_context_override=initial_study_context,
+        )
+        try:
+            event = await study_plan_workflow.__anext__()
+            while True:
+                if event["type"] == "ask_user":
+                    user_response = yield event
+                    event = await study_plan_workflow.asend(user_response)
+                else:
+                    yield event
+                    event = await study_plan_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return
 
     if _should_handle_work_plan_locally(user_message):
-        shortcut = _run_work_plan_shortcut(user_message, user, session_id, db)
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        work_plan_workflow = langgraph_runtime.run_langgraph_work_plan_workflow(
+            user_message,
+            langgraph_runtime.GraphPlanWorkflowRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+            ),
+        )
         try:
-            event = await shortcut.__anext__()
+            event = await work_plan_workflow.__anext__()
             while True:
                 if event["type"] == "ask_user":
                     user_response = yield event
-                    event = await shortcut.asend(user_response)
+                    event = await work_plan_workflow.asend(user_response)
                 else:
                     yield event
-                    event = await shortcut.__anext__()
+                    event = await work_plan_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return
 
     if _should_handle_plan_adjustment_locally(user_message):
-        shortcut = _run_plan_adjustment_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_plan_adjustment_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -2730,7 +3651,9 @@ async def run_agent_loop(
         return
 
     if _should_handle_missing_task_create_locally(user_message):
-        shortcut = _run_missing_task_create_shortcut(user_message, user, session_id, db)
+        shortcut = _run_shortcut_with_langgraph_ask_state(
+            _run_missing_task_create_shortcut(user_message, user, session_id, db)
+        )
         try:
             event = await shortcut.__anext__()
             while True:
@@ -2745,16 +3668,26 @@ async def run_agent_loop(
         return
 
     if _should_handle_course_merge_locally(user_message, history_messages):
-        shortcut = _run_course_merge_shortcut(user_message, user, session_id, db, history_messages)
+        from app.agent import langgraph_loop as langgraph_runtime
+
+        course_workflow = langgraph_runtime.run_langgraph_course_maintenance_workflow(
+            user_message,
+            langgraph_runtime.GraphCourseMaintenanceRuntime(
+                db=db,
+                user=user,
+                session_id=session_id,
+                history_messages=history_messages,
+            ),
+        )
         try:
-            event = await shortcut.__anext__()
+            event = await course_workflow.__anext__()
             while True:
                 if event["type"] == "ask_user":
                     user_response = yield event
-                    event = await shortcut.asend(user_response)
+                    event = await course_workflow.asend(user_response)
                 else:
                     yield event
-                    event = await shortcut.__anext__()
+                    event = await course_workflow.__anext__()
         except StopAsyncIteration:
             pass
         return
@@ -2767,19 +3700,34 @@ async def run_agent_loop(
         preflight_user_texts.append(initial_study_context_text)
     error_count: dict[str, int] = {}
     last_free_slots_result: dict[str, Any] | None = None
+    pending_write_confirmation: PendingConfirmation | None = None
+    pending_write_confirmation_answer: str | None = None
     answer_kind: str | None = None
     answer_grounding: dict[str, Any] | None = None
     step = 0
+    graph_state: dict[str, Any] = {
+        "messages": messages,
+        "tool_history": tool_history,
+        "preflight_reference_texts": preflight_reference_texts,
+        "preflight_user_texts": preflight_user_texts,
+        "error_count": error_count,
+        "events": [],
+        "step": step,
+    }
 
     for iteration in range(MAX_ITERATIONS):
         check_max_loop_iterations(iteration, MAX_ITERATIONS)
         response: dict[str, Any] | None = None
         response_message_id = str(uuid.uuid4())
         streamed_deltas: list[str] = []
-        tool_choice = "required" if _should_require_task_tool_response(preflight_user_texts, tool_history) else "auto"
-        completion_kwargs: dict[str, Any] = {"tools": TOOL_DEFINITIONS}
-        if tool_choice != "auto":
-            completion_kwargs["tool_choice"] = tool_choice
+        streamed_deltas_emitted = False
+        use_text_only_stream = _should_use_text_only_stream(preflight_user_texts, tool_history)
+        completion_kwargs: dict[str, Any] = {}
+        if not use_text_only_stream:
+            tool_choice = "required" if _should_require_task_tool_response(preflight_user_texts, tool_history) else "auto"
+            completion_kwargs = {"tools": TOOL_DEFINITIONS}
+            if tool_choice != "auto":
+                completion_kwargs["tool_choice"] = tool_choice
         try:
             async for stream_event in chat_completion_stream(
                 llm_client,
@@ -2792,6 +3740,17 @@ async def run_agent_loop(
                     if not delta:
                         continue
                     streamed_deltas.append(delta)
+                    if use_text_only_stream:
+                        streamed_deltas_emitted = True
+                        yield _attach_answer_metadata(
+                            {
+                                "type": "text_delta",
+                                "message_id": response_message_id,
+                                "delta": delta,
+                            },
+                            answer_kind,
+                            answer_grounding,
+                        )
                     continue
 
                 if event_type == "response":
@@ -2835,41 +3794,73 @@ async def run_agent_loop(
                         ],
                     }
                 )
-                yield {"type": "tool_call", "name": "ask_user", "args": tool_args}
-                result = await execute_tool("ask_user", tool_args, db, user.id)
-                ask_type = _normalize_ask_type(result)
-                user_response = yield {**result, "type": "ask_user", "ask_type": ask_type}
+                from app.agent import langgraph_loop as langgraph_runtime
+
+                node_state = await langgraph_runtime.run_langgraph_tool_node(
+                    {
+                        **graph_state,
+                        "messages": messages,
+                        "pending_tool_call": {
+                            "id": tool_call_id,
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": json.dumps(tool_args, ensure_ascii=False),
+                            },
+                        },
+                    },
+                    langgraph_runtime.GraphToolNodeRuntime(
+                        db=db,
+                        user_id=user.id,
+                        session_id=session_id,
+                    ),
+                )
+                user_response: str | None = None
+                for node_event in node_state.get("events", []):
+                    if node_event.get("type") == "ask_user":
+                        user_response = yield node_event
+                    else:
+                        yield node_event
                 if user_response is None:
                     user_response = "确认"
-                question = str(result.get("question") or "")
-                if question and should_include_confirmed_question(user_response):
-                    preflight_reference_texts.append(question)
-                preflight_reference_texts.append(str(user_response))
-                preflight_user_texts.append(str(user_response))
-                tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": tool_result_content,
-                    }
+                result = node_state["last_tool_result"]
+                graph_state = dict(
+                    langgraph_runtime.resume_langgraph_ask_user_state(
+                        node_state,
+                        user_response=str(user_response),
+                    )
+                )
+                messages = list(graph_state.get("messages", messages))
+                preflight_reference_texts = list(graph_state.get("preflight_reference_texts", preflight_reference_texts))
+                preflight_user_texts = list(graph_state.get("preflight_user_texts", preflight_user_texts))
+                tool_history = list(graph_state.get("tool_history", tool_history))
+                pending_confirmation = graph_state.get("pending_confirmation")
+                pending_write_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
+                )
+                pending_write_confirmation_answer = (
+                    str(graph_state.get("pending_confirmation_answer") or "")
+                    if pending_write_confirmation is not None
+                    else None
                 )
                 step += 1
-                tool_history.append("ask_user")
                 await _log_step(db, user.id, session_id, step, "ask_user", tool_args, result)
                 continue
 
             if text:
-                for delta in streamed_deltas:
-                    yield _attach_answer_metadata(
-                        {
-                            "type": "text_delta",
-                            "message_id": response_message_id,
-                            "delta": delta,
-                        },
-                        answer_kind,
-                        answer_grounding,
-                    )
+                if not streamed_deltas_emitted:
+                    for delta in streamed_deltas:
+                        yield _attach_answer_metadata(
+                            {
+                                "type": "text_delta",
+                                "message_id": response_message_id,
+                                "delta": delta,
+                            },
+                            answer_kind,
+                            answer_grounding,
+                        )
                 yield _attach_answer_metadata(
                     {
                         "type": "text",
@@ -2894,37 +3885,6 @@ async def run_agent_loop(
                 tool_args = json.loads(tool_args_str)
             except json.JSONDecodeError:
                 tool_args = {}
-
-            try:
-                check_unknown_tool(tool_name, KNOWN_TOOLS)
-                if tool_name == "ask_user":
-                    check_consecutive_ask_user(tool_history + [tool_name])
-                else:
-                    check_consecutive_ask_user(tool_history)
-                check_max_retries(tool_name, error_count)
-            except GuardrailViolation as exc:
-                tool_result = {"error": exc.message, "suggestion": exc.suggestion}
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps(tool_result, ensure_ascii=False),
-                    }
-                )
-                if exc.user_visible:
-                    yield {"type": "error", "message": exc.message}
-                continue
-
-            preflight_error = task_tool_preflight_error(tool_name, preflight_user_texts)
-            if preflight_error is not None:
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps(preflight_error, ensure_ascii=False),
-                    }
-                )
-                continue
 
             if tool_name in {"create_study_plan", "create_work_plan"} and last_free_slots_result is not None:
                 available_slots = tool_args.get("available_slots")
@@ -2997,118 +3957,296 @@ async def run_agent_loop(
                     preflight_reference_texts.append(context_text)
                     preflight_user_texts.append(context_text)
 
-            schema_preflight_error = tool_schema_preflight_error(
-                tool_name,
-                tool_args,
-                TOOL_DEFINITIONS,
-            )
-            if schema_preflight_error is not None:
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps(schema_preflight_error, ensure_ascii=False),
-                    }
+            active_tool_state: dict[str, Any] = {
+                **graph_state,
+                "messages": messages,
+                "pending_tool_call": tool_call,
+                "tool_history": tool_history,
+                "preflight_reference_texts": preflight_reference_texts,
+                "preflight_user_texts": preflight_user_texts,
+                "error_count": error_count,
+                "events": [],
+                "step": step,
+                **(
+                    {"last_free_slots_result": last_free_slots_result}
+                    if last_free_slots_result is not None
+                    else {}
+                ),
+            }
+            if pending_write_confirmation is not None:
+                active_tool_state["pending_confirmation"] = pending_write_confirmation
+            if pending_write_confirmation_answer is not None:
+                active_tool_state["pending_confirmation_answer"] = pending_write_confirmation_answer
+
+            async def confirmed_write_executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
+                pending_confirmation = active_tool_state.get("pending_confirmation")
+                pending_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
                 )
+                confirmation_answer = str(active_tool_state.get("pending_confirmation_answer") or "")
+                confirmed_args = (
+                    _restore_confirmed_task_reminder_arg(
+                        tool_name=name,
+                        args=args,
+                        pending_confirmation=pending_confirmation,
+                        confirmation_answer=confirmation_answer,
+                    )
+                    if pending_confirmation is not None
+                    else args
+                )
+                db_write_plan = (
+                    _build_db_write_plan(
+                        pending_confirmation=pending_confirmation,
+                        tool_name=name,
+                        args=confirmed_args,
+                        description=f"Confirmed generic {name} write.",
+                    )
+                    if pending_confirmation is not None
+                    else None
+                )
+                if db_write_plan is not None:
+                    active_tool_state["db_write_plan"] = db_write_plan
+                return await _execute_confirmed_db_write_plan(
+                    pending_confirmation=pending_confirmation,
+                    db_write_plan=db_write_plan,
+                    confirmation_answer=confirmation_answer,
+                    db=db,
+                    user_id=user.id,
+                )
+
+            from app.agent import langgraph_loop as langgraph_runtime
+
+            node_state = await langgraph_runtime.run_langgraph_tool_node(
+                active_tool_state,
+                langgraph_runtime.GraphToolNodeRuntime(
+                    db=db,
+                    user_id=user.id,
+                    session_id=session_id,
+                    confirmed_write_executor=confirmed_write_executor,
+                    known_tools=KNOWN_TOOLS,
+                    tool_definitions=TOOL_DEFINITIONS,
+                ),
+            )
+            if "db_write_plan" in active_tool_state:
+                node_state["db_write_plan"] = active_tool_state["db_write_plan"]
+            if "pending_confirmation" in active_tool_state:
+                node_state["pending_confirmation"] = active_tool_state["pending_confirmation"]
+            if "pending_confirmation_answer" in active_tool_state:
+                node_state["pending_confirmation_answer"] = active_tool_state["pending_confirmation_answer"]
+
+            messages = list(node_state.get("messages", messages))
+            tool_history = list(node_state.get("tool_history", tool_history))
+            error_count = dict(node_state.get("error_count", error_count))
+            step = int(node_state.get("step", step))
+            if "last_free_slots_result" in node_state:
+                last_free_slots_result = node_state["last_free_slots_result"]
+
+            pending_tool_call = node_state.get("pending_tool_call") or tool_call
+            if isinstance(pending_tool_call, dict):
+                pending_function = pending_tool_call.get("function")
+                if isinstance(pending_function, dict):
+                    tool_name = str(pending_function.get("name") or tool_name)
+                    tool_args_str = str(pending_function.get("arguments") or tool_args_str)
+                    try:
+                        parsed_tool_args = json.loads(tool_args_str)
+                    except json.JSONDecodeError:
+                        parsed_tool_args = {}
+                    if isinstance(parsed_tool_args, dict):
+                        tool_args = parsed_tool_args
+
+            user_response: str | None = None
+            saw_ask_user = False
+            for node_event in node_state.get("events", []):
+                if node_event.get("type") == "ask_user":
+                    saw_ask_user = True
+                    user_response = yield node_event
+                else:
+                    yield node_event
+
+            if "last_tool_result" not in node_state:
                 continue
 
-            tool_args, preflight_changed = apply_tool_preflight(
-                tool_name,
-                tool_args,
-                preflight_reference_texts,
-            )
-            if preflight_changed:
-                tool_call["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
-
-            yield {"type": "tool_call", "name": tool_name, "args": tool_args}
-
-            if tool_name == "ask_user":
-                result = await execute_tool(tool_name, tool_args, db, user.id)
-                ask_type = _normalize_ask_type(result)
-                user_response = yield {**result, "type": "ask_user", "ask_type": ask_type}
+            result = node_state["last_tool_result"]
+            grounding = _build_rag_grounding(tool_name, result)
+            if grounding is not None:
+                answer_kind = "rag"
+                answer_grounding = grounding
+            if tool_name == "ask_user" or saw_ask_user:
                 if user_response is None:
                     user_response = "确认"
-                question = str(result.get("question") or "")
-                if question and should_include_confirmed_question(user_response):
-                    preflight_reference_texts.append(question)
-                preflight_reference_texts.append(str(user_response))
-                preflight_user_texts.append(str(user_response))
-                tool_result_content = json.dumps({"user_response": user_response}, ensure_ascii=False)
-            else:
-                result = await execute_tool(tool_name, tool_args, db, user.id)
-                tool_result_content = compress_tool_result(tool_name, result)
-                if "error" in result:
-                    error_count[tool_name] = error_count.get(tool_name, 0) + 1
-                elif tool_name == "get_free_slots" and isinstance(result.get("slots"), list):
-                    last_free_slots_result = result
-                grounding = _build_rag_grounding(tool_name, result)
-                if grounding is not None:
-                    answer_kind = "rag"
-                    answer_grounding = grounding
-                yield {"type": "tool_result", "name": tool_name, "result": result}
-                await _save_message(
-                    db,
-                    session_id,
-                    "assistant",
-                    _to_persisted_tool_summary(tool_name, tool_result_content),
-                    is_compressed=True,
+                graph_state = dict(
+                    langgraph_runtime.resume_langgraph_ask_user_state(
+                        node_state,
+                        user_response=str(user_response),
+                    )
                 )
+                messages = list(graph_state.get("messages", messages))
+                preflight_reference_texts = list(
+                    graph_state.get("preflight_reference_texts", preflight_reference_texts)
+                )
+                preflight_user_texts = list(graph_state.get("preflight_user_texts", preflight_user_texts))
+                pending_confirmation = graph_state.get("pending_confirmation")
+                pending_write_confirmation = (
+                    pending_confirmation
+                    if isinstance(pending_confirmation, PendingConfirmation)
+                    else None
+                )
+                pending_write_confirmation_answer = (
+                    str(graph_state.get("pending_confirmation_answer") or "")
+                    if pending_write_confirmation is not None
+                    else None
+                )
+                step += 1
+                graph_state["step"] = step
+                resume_state = dict(graph_state.get("resume_state") or {})
+                resume_state["step"] = step
+                graph_state["resume_state"] = resume_state
+                await _log_step(db, user.id, session_id, step, tool_name, tool_args, result)
+                continue
 
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": tool_result_content,
-                }
-            )
-
-            step += 1
-            tool_history.append(tool_name)
-            await _log_step(db, user.id, session_id, step, tool_name, tool_args, result)
+            graph_state = dict(node_state)
 
             if tool_name == "create_study_plan" and "error" not in result:
-                shortcut = _run_confirmed_study_plan_write(
+                plan_workflow = langgraph_runtime.run_langgraph_plan_review_write_workflow(
                     result.get("tasks"),
-                    user,
-                    session_id,
-                    db,
-                    step,
+                    langgraph_runtime.GraphPlanWorkflowRuntime(
+                        db=db,
+                        user=user,
+                        session_id=session_id,
+                    ),
+                    plan_kind="study",
+                    start_step=step,
                 )
                 try:
-                    event = await shortcut.__anext__()
+                    event = await plan_workflow.__anext__()
                     while True:
                         if event["type"] == "ask_user":
                             user_response = yield event
-                            event = await shortcut.asend(user_response)
+                            event = await plan_workflow.asend(user_response)
                         else:
                             yield event
-                            event = await shortcut.__anext__()
+                            event = await plan_workflow.__anext__()
                 except StopAsyncIteration:
                     pass
                 return
 
             if tool_name == "create_work_plan" and "error" not in result:
-                shortcut = _run_confirmed_work_plan_write(
+                plan_workflow = langgraph_runtime.run_langgraph_plan_review_write_workflow(
                     result.get("tasks"),
-                    user,
-                    session_id,
-                    db,
-                    step,
+                    langgraph_runtime.GraphPlanWorkflowRuntime(
+                        db=db,
+                        user=user,
+                        session_id=session_id,
+                    ),
+                    plan_kind="work",
+                    start_step=step,
                 )
                 try:
-                    event = await shortcut.__anext__()
+                    event = await plan_workflow.__anext__()
                     while True:
                         if event["type"] == "ask_user":
                             user_response = yield event
-                            event = await shortcut.asend(user_response)
+                            event = await plan_workflow.asend(user_response)
                         else:
                             yield event
-                            event = await shortcut.__anext__()
+                            event = await plan_workflow.__anext__()
                 except StopAsyncIteration:
                     pass
                 return
 
     yield {"type": "error", "message": "Agent loop reached the maximum number of iterations."}
+    yield {"type": "done"}
+
+
+async def run_agent_loop(
+    user_message: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    llm_client: AsyncOpenAI,
+    runtime_hints: list[str] | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Legacy-compatible entrypoint for the guarded action workflow loop."""
+
+    inner_loop = run_agent_action_loop(
+        user_message,
+        user,
+        session_id,
+        db,
+        llm_client,
+        runtime_hints=runtime_hints,
+    )
+    try:
+        event = await inner_loop.__anext__()
+        while True:
+            if event.get("type") == "ask_user":
+                user_response = yield event
+                event = await inner_loop.asend(user_response)
+            else:
+                yield event
+                event = await inner_loop.__anext__()
+    except StopAsyncIteration:
+        pass
+
+
+async def run_agent_text_loop(
+    user_message: str,
+    user: User,
+    session_id: str,
+    db: AsyncSession,
+    llm_client: AsyncOpenAI,
+    runtime_hints: list[str] | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Run a text-only answer stream without exposing agent tools."""
+
+    system_prompt = await build_system_prompt(user, db)
+    history_result = await db.execute(
+        select(ConversationMessage)
+        .where(ConversationMessage.session_id == session_id)
+        .order_by(ConversationMessage.timestamp)
+    )
+    history_messages = history_result.scalars().all()
+    messages = await _build_initial_messages(system_prompt, history_messages, llm_client)
+    for hint in runtime_hints or []:
+        if hint.strip():
+            messages.append({"role": "system", "content": hint})
+    messages.append({"role": "user", "content": user_message})
+    await _save_message(db, session_id, "user", user_message)
+
+    response: dict[str, Any] | None = None
+    response_message_id = str(uuid.uuid4())
+    streamed_deltas: list[str] = []
+    try:
+        async for stream_event in chat_completion_stream(llm_client, messages):
+            event_type = stream_event.get("type")
+            if event_type == "content_delta":
+                delta = str(stream_event.get("delta") or "")
+                if not delta:
+                    continue
+                streamed_deltas.append(delta)
+                yield {
+                    "type": "text_delta",
+                    "message_id": response_message_id,
+                    "delta": delta,
+                }
+                continue
+            if event_type == "response":
+                response = stream_event.get("response")
+    except Exception:
+        if streamed_deltas:
+            raise
+        response = await chat_completion(llm_client, messages)
+        response_message_id = str(uuid.uuid4())
+
+    if response is None:
+        raise RuntimeError("chat completion stream finished without a response payload")
+
+    text = response.get("content", "") or "".join(streamed_deltas)
+    if text:
+        yield {"type": "text", "message_id": response_message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
     yield {"type": "done"}
 
 

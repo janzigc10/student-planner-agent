@@ -1,0 +1,497 @@
+{
+  "total_queries": 300,
+  "queries_per_case": 50,
+  "scenario_count": 6,
+  "top_k": 5,
+  "source_hits": 300,
+  "source_recall_at_k": 1.0,
+  "top1_source_hits": 280,
+  "top1_source_hit_rate": 0.9333,
+  "strict_passes": 276,
+  "strict_pass_rate": 0.92,
+  "build_ms": 120769.25,
+  "query_embedding_ms": 10306.27,
+  "ranking_ms": 3017.19,
+  "chunk_count": 2472,
+  "embedding_provider": "dashscope",
+  "embedding_model": "text-embedding-v4",
+  "embedding_configured_provider": "dashscope",
+  "embedding_configured_model": "text-embedding-v4",
+  "embedding_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "embedding_batch_size": "10",
+  "embedding_fallback_reason": "",
+  "vector_store_provider": "chroma",
+  "vector_store_requested_provider": "chroma",
+  "vector_store_effective_provider": "chroma",
+  "vector_store_fallback_reason": "",
+  "vector_store_path": "D:\\tmp\\student-planner-langgraph-final\\student-planner\\data\\rag\\chroma",
+  "vector_store_hits": "0",
+  "vector_store_misses": "2472",
+  "scenarios": [
+    {
+      "name": "modern_chinese_history_wusi",
+      "label": "中国近现代史：五四运动",
+      "query_count": 50,
+      "expected_sources": [
+        "public/维基百科-五四运动.md",
+        "public/维基百科-新文化运动.md",
+        "public/维基百科-巴黎和会.md",
+        "public/维基百科-马克思主义中国化.md",
+        "中国近现代史复习大纲.md"
+      ],
+      "source_hits": 50,
+      "source_recall_at_k": 1.0,
+      "top1_source_hits": 49,
+      "top1_source_hit_rate": 0.98,
+      "strict_passes": 36,
+      "strict_pass_rate": 0.72,
+      "source_failure_samples": [],
+      "strict_failure_samples": [
+        {
+          "query": "帮我复习这个考点：五四运动的历史意义和爱国学生运动",
+          "top_sources": [
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md"
+          ],
+          "top_scores": [
+            0.6658,
+            0.6618,
+            0.6455,
+            0.642,
+            0.6337
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        },
+        {
+          "query": "帮我复习这个考点：新文化运动到五四运动的背景",
+          "top_sources": [
+            "public/维基百科-五四运动.md",
+            "public/维基百科-新文化运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-新文化运动.md",
+            "public/维基百科-新文化运动.md"
+          ],
+          "top_scores": [
+            0.7428,
+            0.6557,
+            0.6408,
+            0.6362,
+            0.6342
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        },
+        {
+          "query": "帮我复习这个考点：巴黎和会外交失败为什么引发五四运动",
+          "top_sources": [
+            "public/维基百科-五四运动.md",
+            "public/维基百科-巴黎和会.md",
+            "public/维基百科-巴黎和会.md",
+            "public/维基百科-巴黎和会.md",
+            "public/维基百科-五四运动.md"
+          ],
+          "top_scores": [
+            0.6651,
+            0.6603,
+            0.6485,
+            0.6304,
+            0.6277
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        },
+        {
+          "query": "帮我复习这个考点：五四运动为什么不是普通学生运动",
+          "top_sources": [
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md"
+          ],
+          "top_scores": [
+            0.6999,
+            0.658,
+            0.6508,
+            0.6492,
+            0.6305
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        },
+        {
+          "query": "期末简答题怎么回答：马克思主义传播和五四运动关系",
+          "top_sources": [
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "public/维基百科-马克思主义中国化.md",
+            "public/维基百科-五四运动.md",
+            "思想政治理论复习大纲.md"
+          ],
+          "top_scores": [
+            0.5887,
+            0.5833,
+            0.5813,
+            0.5729,
+            0.5721
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        },
+        {
+          "query": "期末简答题怎么回答：五四运动的历史意义和爱国学生运动",
+          "top_sources": [
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md"
+          ],
+          "top_scores": [
+            0.6223,
+            0.5995,
+            0.5928,
+            0.5768,
+            0.5745
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        },
+        {
+          "query": "期末简答题怎么回答：巴黎和会外交失败为什么引发五四运动",
+          "top_sources": [
+            "public/维基百科-五四运动.md",
+            "public/维基百科-巴黎和会.md",
+            "public/维基百科-巴黎和会.md",
+            "public/维基百科-巴黎和会.md",
+            "public/维基百科-五四运动.md"
+          ],
+          "top_scores": [
+            0.6293,
+            0.6166,
+            0.6114,
+            0.6041,
+            0.6011
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        },
+        {
+          "query": "期末简答题怎么回答：五四运动为什么不是普通学生运动",
+          "top_sources": [
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md",
+            "public/维基百科-五四运动.md"
+          ],
+          "top_scores": [
+            0.6419,
+            0.6347,
+            0.6107,
+            0.5977,
+            0.5851
+          ],
+          "term_hits": [
+            "五四运动"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "politics_democracy",
+      "label": "思想政治理论：全过程人民民主",
+      "query_count": 50,
+      "expected_sources": [
+        "public/维基百科-全过程人民民主.md",
+        "思想政治理论复习大纲.md"
+      ],
+      "source_hits": 50,
+      "source_recall_at_k": 1.0,
+      "top1_source_hits": 49,
+      "top1_source_hit_rate": 0.98,
+      "strict_passes": 50,
+      "strict_pass_rate": 1.0,
+      "source_failure_samples": [],
+      "strict_failure_samples": []
+    },
+    {
+      "name": "world_history_cold_war",
+      "label": "世界现代史：冷战格局",
+      "query_count": 50,
+      "expected_sources": [
+        "public/维基百科-冷战.md",
+        "public/维基百科-杜鲁门主义.md",
+        "public/维基百科-马歇尔计划.md",
+        "public/维基百科-北大西洋公约组织.md",
+        "public/维基百科-华沙条约组织.md",
+        "public/维基百科-古巴导弹危机.md",
+        "public/维基百科-柏林墙.md",
+        "public/维基百科-苏联解体.md",
+        "世界现代史专题案例.md"
+      ],
+      "source_hits": 50,
+      "source_recall_at_k": 1.0,
+      "top1_source_hits": 46,
+      "top1_source_hit_rate": 0.92,
+      "strict_passes": 48,
+      "strict_pass_rate": 0.96,
+      "source_failure_samples": [],
+      "strict_failure_samples": [
+        {
+          "query": "帮我复习这个考点：美国遏制战略和苏联回应",
+          "top_sources": [
+            "public/维基百科-抗美援朝.md",
+            "public/维基百科-古巴导弹危机.md",
+            "public/维基百科-古巴导弹危机.md",
+            "public/维基百科-冷战.md",
+            "public/维基百科-古巴导弹危机.md"
+          ],
+          "top_scores": [
+            0.6909,
+            0.6249,
+            0.6247,
+            0.6149,
+            0.6118
+          ],
+          "term_hits": [
+            "北约"
+          ]
+        },
+        {
+          "query": "期末简答题怎么回答：美国遏制战略和苏联回应",
+          "top_sources": [
+            "public/维基百科-抗美援朝.md",
+            "public/维基百科-抗美援朝.md",
+            "public/维基百科-古巴导弹危机.md",
+            "public/维基百科-古巴导弹危机.md",
+            "public/维基百科-马歇尔计划.md"
+          ],
+          "top_scores": [
+            0.6168,
+            0.5682,
+            0.5632,
+            0.5479,
+            0.5445
+          ],
+          "term_hits": [
+            "马歇尔计划"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "world_history_marshall_plan",
+      "label": "世界现代史：马歇尔计划",
+      "query_count": 50,
+      "expected_sources": [
+        "public/维基百科-马歇尔计划.md",
+        "public/维基百科-欧洲一体化.md",
+        "public/维基百科-欧洲联盟.md",
+        "世界现代史专题案例.md"
+      ],
+      "source_hits": 50,
+      "source_recall_at_k": 1.0,
+      "top1_source_hits": 45,
+      "top1_source_hit_rate": 0.9,
+      "strict_passes": 50,
+      "strict_pass_rate": 1.0,
+      "source_failure_samples": [],
+      "strict_failure_samples": []
+    },
+    {
+      "name": "politics_constitution",
+      "label": "思想政治理论：宪法与国家机构",
+      "query_count": 50,
+      "expected_sources": [
+        "public/维基百科-中华人民共和国宪法.md",
+        "public/维基百科-人民代表大会制度.md",
+        "public/维基百科-中国人民政治协商会议.md",
+        "public/维基百科-依法治国.md",
+        "思想政治理论复习大纲.md"
+      ],
+      "source_hits": 50,
+      "source_recall_at_k": 1.0,
+      "top1_source_hits": 50,
+      "top1_source_hit_rate": 1.0,
+      "strict_passes": 42,
+      "strict_pass_rate": 0.84,
+      "source_failure_samples": [],
+      "strict_failure_samples": [
+        {
+          "query": "期末简答题怎么回答：宪法中的公民基本权利和义务",
+          "top_sources": [
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "public/维基百科-中华人民共和国宪法.md",
+            "public/维基百科-依法治国.md",
+            "public/维基百科-依法治国.md"
+          ],
+          "top_scores": [
+            0.5168,
+            0.515,
+            0.5113,
+            0.5103,
+            0.5073
+          ],
+          "term_hits": []
+        },
+        {
+          "query": "如果老师问原因和意义，应该怎么解释：宪法中的公民基本权利和义务",
+          "top_sources": [
+            "public/维基百科-依法治国.md",
+            "public/维基百科-依法治国.md",
+            "public/维基百科-国共内战.md",
+            "public/维基百科-依法治国.md",
+            "public/维基百科-中华人民共和国宪法.md"
+          ],
+          "top_scores": [
+            0.5606,
+            0.5602,
+            0.5598,
+            0.5593,
+            0.5568
+          ],
+          "term_hits": []
+        },
+        {
+          "query": "我做错题复盘时要抓哪些关键词：宪法如何规定国家机构体系",
+          "top_sources": [
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "中国近现代史复习大纲.md",
+            "世界现代史专题案例.md"
+          ],
+          "top_scores": [
+            0.6049,
+            0.6017,
+            0.5486,
+            0.5482,
+            0.5471
+          ],
+          "term_hits": []
+        },
+        {
+          "query": "我做错题复盘时要抓哪些关键词：宪法中的公民基本权利和义务",
+          "top_sources": [
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "中国近现代史复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md"
+          ],
+          "top_scores": [
+            0.6232,
+            0.6177,
+            0.5919,
+            0.5574,
+            0.5388
+          ],
+          "term_hits": []
+        },
+        {
+          "query": "我做错题复盘时要抓哪些关键词：宪法和国家根本制度之间的关系",
+          "top_sources": [
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "中国近现代史复习大纲.md",
+            "public/维基百科-依法治国.md"
+          ],
+          "top_scores": [
+            0.607,
+            0.6035,
+            0.5861,
+            0.5663,
+            0.5532
+          ],
+          "term_hits": []
+        },
+        {
+          "query": "我做错题复盘时要抓哪些关键词：宪法修改和宪法监督怎么理解",
+          "top_sources": [
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "中国近现代史复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md"
+          ],
+          "top_scores": [
+            0.5808,
+            0.5793,
+            0.5419,
+            0.5411,
+            0.5357
+          ],
+          "term_hits": []
+        },
+        {
+          "query": "我做错题复盘时要抓哪些关键词：中华人民共和国宪法为什么是根本法",
+          "top_sources": [
+            "public/维基百科-中华人民共和国宪法.md",
+            "思想政治理论复习大纲.md",
+            "public/维基百科-依法治国.md",
+            "思想政治理论复习大纲.md",
+            "中国近现代史复习大纲.md"
+          ],
+          "top_scores": [
+            0.5856,
+            0.5853,
+            0.5787,
+            0.563,
+            0.5605
+          ],
+          "term_hits": [
+            "中华人民共和国宪法"
+          ]
+        },
+        {
+          "query": "我做错题复盘时要抓哪些关键词：宪法序言总纲国家机构怎么复习",
+          "top_sources": [
+            "思想政治理论复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "中国近现代史复习大纲.md",
+            "思想政治理论复习大纲.md",
+            "public/维基百科-中华人民共和国宪法.md"
+          ],
+          "top_scores": [
+            0.6141,
+            0.6053,
+            0.5935,
+            0.5627,
+            0.5563
+          ],
+          "term_hits": []
+        }
+      ]
+    },
+    {
+      "name": "machine_learning_report",
+      "label": "机器学习课程报告",
+      "query_count": 50,
+      "expected_sources": [
+        "机器学习报告要求.md"
+      ],
+      "source_hits": 50,
+      "source_recall_at_k": 1.0,
+      "top1_source_hits": 41,
+      "top1_source_hit_rate": 0.82,
+      "strict_passes": 50,
+      "strict_pass_rate": 1.0,
+      "source_failure_samples": [],
+      "strict_failure_samples": []
+    }
+  ]
+}

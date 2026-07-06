@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_max_tokens: int = 4096
     llm_temperature: float = 0.3
+    agent_runtime: str = "langgraph"
+    rag_corpus_dir: str = "data/rag"
+    rag_embedding_provider: str = "dashscope"
+    rag_embedding_model: str = "text-embedding-v4"
+    rag_embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    rag_embedding_api_key: str = ""
+    rag_embedding_batch_size: int = 10
+    rag_vector_store_provider: str = "chroma"
+    rag_vector_store_dir: str = "data/rag/chroma"
     vision_llm_api_key: str = ""
     vision_llm_base_url: str = ""
     vision_llm_model: str = "qwen-vl-plus"

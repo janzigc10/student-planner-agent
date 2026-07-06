@@ -30,6 +30,8 @@ export default defineConfig({
       env: {
         ...process.env,
         SP_DATABASE_URL: databaseUrl,
+        SP_AGENT_RUNTIME: 'langgraph',
+        SP_RAG_CORPUS_DIR: 'data/rag',
         PYTHONIOENCODING: 'utf-8',
       },
     },

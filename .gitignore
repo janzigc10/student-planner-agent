@@ -11,6 +11,7 @@ student-planner/agent_loop_e2e*.db
 student-planner/agent_loop_e2e*.db-*
 student-planner/.env
 student-planner/.env.local
+student-planner/.venv-native/
 student-planner/frontend/.env
 student-planner/frontend/.env.local
 student-planner/frontend/node_modules/

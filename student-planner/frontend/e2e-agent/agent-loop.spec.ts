@@ -87,6 +87,15 @@ function scenarioUsername(scenario: string) {
   return `agent_e2e_${scenario}_${stamp}`
 }
 
+function isoDateFromToday(daysFromToday: number) {
+  const value = new Date()
+  value.setDate(value.getDate() + daysFromToday)
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 async function installWebSocketRecorder(page: Page) {
   await page.addInitScript(() => {
     type RecordedEvent = { direction: 'client' | 'server'; at: string; payload: unknown }
@@ -320,7 +329,7 @@ async function driveUntilDbInvariant(
   predicate: (snapshot: DbSnapshot) => boolean,
 ) {
   let responseIndex = 0
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 16; attempt += 1) {
     const current = snapshot(username)
     if (predicate(current)) {
       return current
@@ -330,7 +339,7 @@ async function driveUntilDbInvariant(
     if (answered) {
       responseIndex += 1
       try {
-        return await waitForSnapshot(username, predicate, { timeout: 10_000, interval: 500 })
+        return await waitForSnapshot(username, predicate, { timeout: 15_000, interval: 500 })
       } catch {
         // The answer may have led to another prompt instead of the final DB state.
       }
@@ -338,7 +347,28 @@ async function driveUntilDbInvariant(
     }
     await page.waitForTimeout(2_000)
   }
-  return waitForSnapshot(username, predicate)
+
+  const finalStart = Date.now()
+  let last = snapshot(username)
+  while (Date.now() - finalStart < 120_000) {
+    last = snapshot(username)
+    if (predicate(last)) {
+      return last
+    }
+    const answer = responses[Math.min(responseIndex, responses.length - 1)] ?? '确认'
+    const answered = await answerVisibleAsk(page, answer, 5_000)
+    if (answered) {
+      responseIndex += 1
+      try {
+        return await waitForSnapshot(username, predicate, { timeout: 15_000, interval: 500 })
+      } catch {
+        // Keep driving visible confirmation cards until the invariant is true.
+      }
+      continue
+    }
+    await page.waitForTimeout(2_000)
+  }
+  throw new Error(`Timed out waiting for DB invariant. Last snapshot: ${JSON.stringify(last, null, 2)}`)
 }
 
 async function waitForLatestReviewPlanTask(page: Page, timeout = 120_000): Promise<ReviewPlanTask> {
@@ -462,8 +492,99 @@ async function writeEvidence(
   testInfo.attachments.push({ name: `${scenario} evidence`, path: evidencePath, contentType: 'application/json' })
 }
 
+async function writeImmediateEvidence(
+  page: Page,
+  testInfo: TestInfo,
+  scenario: string,
+  username: string,
+  assertions: Record<string, unknown>,
+) {
+  fs.mkdirSync(outputDir, { recursive: true })
+  const safeTitle = testInfo.title.replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '')
+  const baseName = `agent-loop-e2e-${scenario}-${safeTitle}`
+  const screenshotPath = path.join(outputDir, `${baseName}.png`)
+  await page.screenshot({ path: screenshotPath, fullPage: true })
+  const websocketEvents = await readWebSocketRecorder(page)
+  const evidencePath = path.join(outputDir, `${baseName}.json`)
+  fs.writeFileSync(
+    evidencePath,
+    JSON.stringify(
+      {
+        scenario,
+        username,
+        assertions,
+        db: snapshot(username),
+        websocketEvents,
+        screenshotPath,
+        capturedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+  testInfo.attachments.push({ name: `${scenario} evidence`, path: evidencePath, contentType: 'application/json' })
+}
+
 test.describe('Agent Loop E2E', () => {
   test.describe.configure({ timeout: 240_000 })
+
+  test('emits LangGraph RAG retrieval events before model delegation', async ({ page }, testInfo) => {
+    const username = scenarioUsername('langgraph-rag')
+    cleanupUser(username)
+    await installWebSocketRecorder(page)
+    await registerAndLogin(page, username)
+
+    await sendMessage(page, '下周四有大学英语3考试，帮我做一个复习计划，范围 Unit1-6，听力和写作薄弱。')
+
+    const ragToolResult = await waitForWebSocketEvent(page, (event): event is {
+      direction?: unknown
+      payload?: {
+        type?: unknown
+        name?: unknown
+        result?: {
+          count?: unknown
+          sources?: unknown
+          uses_langgraph?: unknown
+          uses_langchain_tools?: unknown
+        }
+      }
+    } => {
+      const payload = (event as { direction?: unknown; payload?: unknown }).payload as
+        | {
+            type?: unknown
+            name?: unknown
+            result?: {
+              count?: unknown
+              sources?: unknown
+              uses_langgraph?: unknown
+              uses_langchain_tools?: unknown
+            }
+          }
+        | undefined
+      return (
+        (event as { direction?: unknown }).direction === 'server' &&
+        payload?.type === 'tool_result' &&
+        payload.name === 'rag_retrieve_study_materials' &&
+        typeof payload.result?.count === 'number' &&
+        payload.result.count >= 1 &&
+        Array.isArray(payload.result.sources) &&
+        payload.result.sources.length >= 1 &&
+        payload.result.uses_langgraph === true &&
+        payload.result.uses_langchain_tools === true
+      )
+    })
+
+    expect(ragToolResult).toBeTruthy()
+    expect(ragToolResult?.payload?.result?.sources).toContain('大学英语3复习资料.md')
+
+    await writeImmediateEvidence(page, testInfo, 'langgraph-rag-smoke', username, {
+      ragSource: '大学英语3复习资料.md',
+      usesLangGraph: ragToolResult?.payload?.result?.uses_langgraph,
+      usesLangChainTools: ragToolResult?.payload?.result?.uses_langchain_tools,
+      retrievedCount: ragToolResult?.payload?.result?.count,
+    })
+  })
 
   test('creates a task with an integrated reminder', async ({ page }, testInfo) => {
     const username = scenarioUsername('create')
@@ -729,9 +850,11 @@ test.describe('Agent Loop E2E', () => {
     await installWebSocketRecorder(page)
     await registerAndLogin(page, username)
 
-    const studyContextAnswer = '范围 Unit1-6，听力和写作薄弱，目标80分，每天最多2小时。'
-    await sendMessage(page, '下周四（2026-06-11）有大学英语3考试，帮我做一个详细复习计划。')
-    const dbSnapshot = await driveUntilDbInvariant(page, username, [studyContextAnswer, '确认', '确认'], (state) => {
+    await sendMessage(
+      page,
+      '2026-07-02（周四）有大学英语3考试，范围 Unit1-6，听力和写作薄弱，目标80分，每天最多2小时。请帮我做一个详细复习计划。',
+    )
+    const dbSnapshot = await driveUntilDbInvariant(page, username, ['确认', '确认', '确认', '确认'], (state) => {
       const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
       const englishTasks = state.tasks.filter((task) => {
         const haystack = `${task.title}\n${task.description ?? ''}`
@@ -749,8 +872,8 @@ test.describe('Agent Loop E2E', () => {
         contextualTasks.length >= 2 &&
         englishTasks.every((task) => {
           return (
-            task.scheduled_date >= '2026-06-02' &&
-            task.scheduled_date <= '2026-06-10' &&
+            task.scheduled_date >= '2026-06-13' &&
+            task.scheduled_date <= '2026-07-01' &&
             /^([01]\d|2[0-3]):[0-5]\d$/.test(task.start_time) &&
             /^([01]\d|2[0-3]):[0-5]\d$/.test(task.end_time)
           )
@@ -770,7 +893,7 @@ test.describe('Agent Loop E2E', () => {
     expect(englishTasks.length).toBeGreaterThanOrEqual(2)
     expect(contextualTasks.length).toBeGreaterThanOrEqual(2)
     expect(
-      englishTasks.every((task) => task.scheduled_date >= '2026-06-02' && task.scheduled_date <= '2026-06-10'),
+      englishTasks.every((task) => task.scheduled_date >= '2026-06-13' && task.scheduled_date <= '2026-07-01'),
     ).toBe(true)
     const planWriteResult = await waitForWebSocketEvent(page, (event): event is {
       direction?: unknown
@@ -794,7 +917,7 @@ test.describe('Agent Loop E2E', () => {
       contextualTaskIds: contextualTasks.map((task) => task.id),
       studyContextHints: ['Unit1-6', '听力', '写作', '目标80分', '每天最多2小时'],
       toolSequence: toolNames,
-      expectedExamDate: '2026-06-11',
+      expectedExamDate: '2026-07-02',
       structuredResultEvent: planWriteResult,
     })
   })
@@ -806,7 +929,7 @@ test.describe('Agent Loop E2E', () => {
     await registerAndLogin(page, username)
 
     const workContextAnswer = '需要5页PDF，包括实验结果和参考文献，现在还没开始，每天最多2小时。'
-    await sendMessage(page, '2026-06-12 要交机器学习报告，帮我拆成任务。')
+    await sendMessage(page, '2026-07-03 要交机器学习报告，帮我拆成任务。')
     const dbSnapshot = await driveUntilDbInvariant(page, username, [workContextAnswer, '确认', '确认'], (state) => {
       const toolNames = state.agent_logs.map((log) => String(log.tool_called ?? ''))
       const reportTasks = state.tasks.filter((task) => {
@@ -824,7 +947,7 @@ test.describe('Agent Loop E2E', () => {
         reportTasks.length >= 3 &&
         stagedTasks.length >= 3 &&
         reportTasks.every((task) => {
-          return task.scheduled_date <= '2026-06-11' && taskDurationMinutes(task) <= 120
+          return task.scheduled_date <= '2026-07-02' && taskDurationMinutes(task) <= 120
         })
       )
     })
@@ -835,14 +958,14 @@ test.describe('Agent Loop E2E', () => {
     expect(toolNames).toContain('create_work_plan')
     expect(toolNames).toContain('create_task')
     expect(reportTasks.length).toBeGreaterThanOrEqual(3)
-    expect(reportTasks.every((task) => task.scheduled_date <= '2026-06-11')).toBe(true)
+    expect(reportTasks.every((task) => task.scheduled_date <= '2026-07-02')).toBe(true)
     expect(reportTasks.every((task) => taskDurationMinutes(task) <= 120)).toBe(true)
     await writeEvidence(page, testInfo, 'work-plan-confirmed-write', username, dbSnapshot, {
       taskCount: reportTasks.length,
       taskIds: reportTasks.map((task) => task.id),
       workContextHints: ['5页PDF', '实验结果', '参考文献', '每天最多2小时'],
       toolSequence: toolNames,
-      expectedDueDate: '2026-06-12',
+      expectedDueDate: '2026-07-03',
     })
   })
 
@@ -853,7 +976,7 @@ test.describe('Agent Loop E2E', () => {
     await registerAndLogin(page, username)
 
     const workContextAnswer = '需要5页PDF，包括实验结果和参考文献，现在还没开始，每天最多2小时。'
-    await sendMessage(page, '2026-06-12 要交机器学习报告，帮我拆成任务。')
+    await sendMessage(page, '2026-07-03 要交机器学习报告，帮我拆成任务。')
     await expect.poll(() => waitForAskPrompt(page, 1_000), { timeout: 30_000 }).toBe(true)
     expect(await answerVisibleAsk(page, workContextAnswer)).toBe(true)
 
@@ -957,15 +1080,17 @@ test.describe('Agent Loop E2E', () => {
     cleanupUser(username)
     await installWebSocketRecorder(page)
     await registerAndLogin(page, username)
+    const firstPlanDate = isoDateFromToday(14)
+    const secondPlanDate = isoDateFromToday(15)
     const firstTask = (await createTaskFromBrowser(page, {
       title: '机器学习报告 - 完成初稿',
-      scheduled_date: '2026-06-09',
+      scheduled_date: firstPlanDate,
       start_time: '09:00',
       end_time: '11:00',
     })) as { id: string }
     const secondTask = (await createTaskFromBrowser(page, {
       title: '机器学习报告 - 修改完善',
-      scheduled_date: '2026-06-10',
+      scheduled_date: secondPlanDate,
       start_time: '14:00',
       end_time: '16:00',
     })) as { id: string }

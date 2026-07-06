@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,10 +13,28 @@ from app.services.schedule_upload_cache import store_schedule_upload
 from tests.conftest import TestSession
 
 
+FIRST_STREAM_DELTA_TIMEOUT_SECONDS = 0.3
+
+
 def stream_response_chunks(*, response: dict, deltas: list[str] | None = None):
     async def _generator():
         for delta in deltas or []:
             yield {"type": "content_delta", "delta": delta}
+        yield {"type": "response", "response": response}
+
+    return _generator()
+
+
+def gated_stream_response_chunks(
+    *,
+    response: dict,
+    allow_response: asyncio.Event,
+    deltas: list[str] | None = None,
+):
+    async def _generator():
+        for delta in deltas or []:
+            yield {"type": "content_delta", "delta": delta}
+        await allow_response.wait()
         yield {"type": "response", "response": response}
 
     return _generator()
@@ -87,6 +106,34 @@ async def test_simple_text_response(setup_db):
             assert any(event["type"] == "done" for event in events)
             text_event = next(event for event in events if event["type"] == "text")
             assert text_event["content"] == "Hello there."
+
+
+@pytest.mark.asyncio
+async def test_current_public_event_request_does_not_call_llm_or_claim_web(setup_db):
+    mock_client = AsyncMock()
+
+    with patch(
+        "app.agent.loop.chat_completion_stream",
+        side_effect=AssertionError("Current public event questions should not reach the LLM"),
+    ), patch(
+        "app.agent.loop.chat_completion",
+        side_effect=AssertionError("Current public event questions should not reach the LLM fallback"),
+    ):
+        async with TestSession() as db:
+            user = User(id="u-current-events", username="current-events", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            events = []
+            generator = run_agent_loop("中国最新的大事件有什么", user, "session-current-events", db, mock_client)
+            async for event in generator:
+                events.append(event)
+
+            assert [event["type"] for event in events] == ["text", "done"]
+            text = events[0]["content"]
+            assert "没有联网检索" in text
+            assert "不能可靠回答" in text
+            assert "公开权威" not in text
 
 
 @pytest.mark.asyncio
@@ -290,6 +337,97 @@ async def test_streamed_text_emits_delta_before_final_text(setup_db):
             final_text_index = next(i for i, event in enumerate(events) if event["type"] == "text")
             assert first_delta_index < final_text_index
             assert events[final_text_index]["content"] == "Streaming works."
+
+
+@pytest.mark.asyncio
+async def test_plain_chat_streams_delta_before_response_finishes(setup_db):
+    mock_client = AsyncMock()
+    allow_response = asyncio.Event()
+
+    with patch("app.agent.loop.chat_completion_stream") as mock_chat_completion_stream:
+        mock_chat_completion_stream.return_value = gated_stream_response_chunks(
+            response={"role": "assistant", "content": "你好，我在。"},
+            allow_response=allow_response,
+            deltas=["你好，"],
+        )
+
+        async with TestSession() as db:
+            user = User(id="u2b-live", username="test2b-live", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            generator = run_agent_loop("你好", user, "session-2b-live", db, mock_client)
+            first_event_task = asyncio.create_task(generator.__anext__())
+            done, _ = await asyncio.wait(
+                {first_event_task},
+                timeout=FIRST_STREAM_DELTA_TIMEOUT_SECONDS,
+            )
+            if not done:
+                allow_response.set()
+                await first_event_task
+                pytest.fail("text_delta should be emitted before the final response payload arrives")
+
+            first_event = first_event_task.result()
+            assert first_event["type"] == "text_delta"
+            assert first_event["delta"] == "你好，"
+
+            allow_response.set()
+            events = [first_event]
+            async for event in generator:
+                events.append(event)
+
+            final_text = next(event for event in events if event["type"] == "text")
+            assert final_text["message_id"] == first_event["message_id"]
+            assert final_text["content"] == "你好，我在。"
+
+
+@pytest.mark.asyncio
+async def test_rag_runtime_hint_streams_delta_before_response_finishes(setup_db):
+    mock_client = AsyncMock()
+    allow_response = asyncio.Event()
+
+    with patch("app.agent.loop.chat_completion_stream") as mock_chat_completion_stream:
+        mock_chat_completion_stream.return_value = gated_stream_response_chunks(
+            response={"role": "assistant", "content": "改革开放始于 1978 年。"},
+            allow_response=allow_response,
+            deltas=["改革开放"],
+        )
+
+        async with TestSession() as db:
+            user = User(id="u2b-rag-live", username="test2b-rag-live", hashed_password="x")
+            db.add(user)
+            await db.commit()
+
+            generator = run_agent_loop(
+                "改革开放是什么时候开始的",
+                user,
+                "session-2b-rag-live",
+                db,
+                mock_client,
+                runtime_hints=["RAG 检索上下文：改革开放始于 1978 年。"],
+            )
+            first_event_task = asyncio.create_task(generator.__anext__())
+            done, _ = await asyncio.wait(
+                {first_event_task},
+                timeout=FIRST_STREAM_DELTA_TIMEOUT_SECONDS,
+            )
+            if not done:
+                allow_response.set()
+                await first_event_task
+                pytest.fail("RAG text_delta should be emitted before the final response payload arrives")
+
+            first_event = first_event_task.result()
+            assert first_event["type"] == "text_delta"
+            assert first_event["delta"] == "改革开放"
+
+            allow_response.set()
+            events = [first_event]
+            async for event in generator:
+                events.append(event)
+
+            final_text = next(event for event in events if event["type"] == "text")
+            assert final_text["message_id"] == first_event["message_id"]
+            assert final_text["content"] == "改革开放始于 1978 年。"
 
 
 @pytest.mark.asyncio

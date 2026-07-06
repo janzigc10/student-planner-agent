@@ -4,12 +4,28 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 
+_RAG_ANSWER_FALLBACK_MODEL = "qwen-plus"
+
+
+def _has_real_key(value: str) -> bool:
+    stripped = value.strip()
+    return bool(stripped) and stripped not in {"sk-placeholder", "placeholder", "changeme"}
+
+
+def _runtime_llm_config() -> tuple[str, str, str]:
+    if _has_real_key(settings.llm_api_key):
+        return settings.llm_api_key, settings.llm_base_url, settings.llm_model
+    if _has_real_key(settings.rag_embedding_api_key):
+        return settings.rag_embedding_api_key, settings.rag_embedding_base_url, _RAG_ANSWER_FALLBACK_MODEL
+    return settings.llm_api_key, settings.llm_base_url, settings.llm_model
+
 
 def create_llm_client() -> AsyncOpenAI:
     """Create an OpenAI-compatible async client for provider-switched backends."""
+    api_key, base_url, _ = _runtime_llm_config()
     return AsyncOpenAI(
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
+        api_key=api_key,
+        base_url=base_url,
     )
 
 
@@ -20,8 +36,9 @@ async def chat_completion(
     tool_choice: str = "auto",
 ) -> dict[str, Any]:
     """Call the LLM and normalize the response into a serializable dict."""
+    _, _, model = _runtime_llm_config()
     kwargs: dict[str, Any] = {
-        "model": settings.llm_model,
+        "model": model,
         "messages": messages,
         "max_tokens": settings.llm_max_tokens,
         "temperature": settings.llm_temperature,
@@ -57,8 +74,9 @@ async def chat_completion_stream(
     tool_choice: str = "auto",
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Stream chat completion chunks and emit a normalized final response."""
+    _, _, model = _runtime_llm_config()
     kwargs: dict[str, Any] = {
-        "model": settings.llm_model,
+        "model": model,
         "messages": messages,
         "max_tokens": settings.llm_max_tokens,
         "temperature": settings.llm_temperature,

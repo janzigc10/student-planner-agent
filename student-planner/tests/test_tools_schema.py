@@ -59,8 +59,13 @@ def test_update_task_contract_exposes_task_reminder_cancellation():
 
 def test_create_study_plan_contract_exposes_study_context():
     tool = _tool_by_name("create_study_plan")
+    exam_schema = tool["function"]["parameters"]["properties"]["exams"]["items"]
     study_context = tool["function"]["parameters"]["properties"]["study_context"]
 
+    assert "scope" in exam_schema["properties"]
+    assert "weak_areas" in exam_schema["properties"]
+    assert "scope" not in exam_schema["required"]
+    assert "weak_areas" not in exam_schema["required"]
     assert "study-quality context" in study_context["description"]
     assert "exam_scope" in study_context["properties"]
     assert "weak_areas" in study_context["properties"]
@@ -96,6 +101,8 @@ def test_agent_task_rules_allow_default_study_context_for_simple_plans():
     assert "using_defaults" in TASK_TOOL_RULES
     assert "简单要求安排复习" in TASK_TOOL_RULES
     assert "详细" in TASK_TOOL_RULES
+    assert "纯知识问答" in TASK_TOOL_RULES
+    assert "不要调用 `ask_user`" in TASK_TOOL_RULES
 
 
 def test_agent_task_rules_require_work_context_before_work_planning():
@@ -109,3 +116,20 @@ def test_response_format_rules_keep_plain_replies_compact():
     assert "1-3 个短段落" in RESPONSE_FORMAT_RULES
     assert "Markdown 表格" in RESPONSE_FORMAT_RULES
     assert "ask_user" in RESPONSE_FORMAT_RULES
+    assert "<br>" in RESPONSE_FORMAT_RULES
+    assert "纯知识问答" in RESPONSE_FORMAT_RULES
+
+
+def test_response_format_rules_reject_unsourced_current_news_answers():
+    assert "没有联网检索" in RESPONSE_FORMAT_RULES
+    assert "新闻搜索" in RESPONSE_FORMAT_RULES
+    assert "不要凭模型知识编造" in RESPONSE_FORMAT_RULES
+    assert "公开权威来源" in RESPONSE_FORMAT_RULES
+
+
+def test_ask_user_contract_excludes_pure_informational_qa():
+    description = _tool_by_name("ask_user")["function"]["description"]
+
+    assert "blocking confirmation" in description
+    assert "pure informational Q&A" in description
+    assert "exam-review answers" in description

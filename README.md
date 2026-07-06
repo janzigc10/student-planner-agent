@@ -6,6 +6,7 @@
 
 - 聊天式规划助手：支持通过自然语言查看课表、安排任务、生成复习计划、设置提醒。
 - ReAct 风格 Agent 工具编排：助手不是只输出文本，而是会在对话中选择工具、读取工具结果、继续决策，并通过确认卡控制写入动作。
+- 期末作业框架版：在稳定 Agent 闭环外新增 LangChain / LangGraph / RAG 运行时，满足课程对框架和检索增强的要求。
 - 课表导入链路：支持 Excel 课表导入，也支持课表截图识别后的结构化确认导入。
 - 移动端 PWA：提供适合手机使用的聊天、日历、课程与通知体验。
 - 提醒系统：支持 Web Push 推送与服务端定时调度。
@@ -43,10 +44,40 @@
 
 项目中也有一个具体的复习计划生成工具 `create_study_plan`，但它只负责根据考试和空闲时间生成候选计划；真正写入日程仍然需要用户确认后逐条调用 `create_task`。因此更准确的项目表述是：**基于 ReAct 思路的工具调用 Agent，围绕学生日程场景做了确认、校验、落库和提醒闭环**。
 
+## LangGraph / RAG 期末提交版
+
+本分支保留原有稳定 Agent 业务闭环，同时新增一层可开关的 LangGraph 运行时：
+
+```text
+WebSocket chat
+-> LangGraph StateGraph(load_context -> retrieve_study_materials -> compose_runtime_hints)
+-> 本地 RAG 资料检索
+-> LangChain tool schema adapter
+-> 原 ReAct/function-calling Agent loop
+-> ask_user 确认后确定性 create_task 落库
+```
+
+- 运行时开关：`.env` 中设置 `SP_AGENT_RUNTIME=langgraph`。
+- RAG 资料库：`student-planner/data/rag/`，当前包含大学英语、机器学习报告、自建历史/政治复习资料，以及 `data/rag/public/` 下 74 份中文维基百科公开条目；切分参数为 `chunk_size=520 / chunk_overlap=150`，当前共 `2472` 个 chunks。向量层支持阿里云百炼 DashScope `text-embedding-v4`，按每批 10 条 chunk 调用；默认使用 Chroma 持久化向量库 `data/rag/chroma`，避免每次进程重启后重新 embed 全库。若运行环境检测到 Chroma native upsert 不可用，会自动退到同目录下的 SQLite 持久化文件。未配置 Key 或请求异常时退回本地 hash embedding。
+- LangChain 接入：`app/agent/langchain_tools.py` 把现有业务工具转换为 LangChain `bind_tools` 兼容 schema。
+- LangGraph 接入：`app/agent/langgraph_loop.py` 使用 `StateGraph` 编排 RAG 检索和运行时提示，并正确透传 `ask_user` 的用户确认答案。
+- 稳定性策略：旧 `run_agent_loop` 没有被重写；LangGraph 只做外层编排，最终写入仍走原有工具校验、review 卡和确定性落库链路。
+
+最新验证结果：
+
+- 后端核心回归：`54 passed`
+- 前端 `typecheck`：PASS
+- 前端生产构建：PASS
+- 真实百炼 Embedding smoke：`embedding_provider=dashscope`，`embedding_model=text-embedding-v4`，`fallback_reason=none`
+- 扩展公开语料导入：`scripts/import_public_rag_sources.py --preset expanded --limit 80 --max-chars 18000 --skip-existing`，实际导入 `74/80` 个公开条目，失败项记录在 `student-planner/data/rag/public/PUBLIC_SOURCES.json`。
+- 大语料 RAG quality：`300 queries / 6 scenarios / 50 each`，`Recall@5=100%`，`Top1 source hit=93.33%`，严格术语通过率 `92.00%`，`chunk_count=2472`，`chunk_overlap=150`，`embedding_provider=dashscope`，`vector_store_provider=chroma`，首次构建 `vector_store_hits=0 / misses=2472`。构建后清进程缓存复查为 `vector_store_hits=2472 / misses=0`。汇总报告位于 `student-planner/data/rag/RAG_QUALITY_300.json`，完整 300 条明细位于 `student-planner/data/rag/RAG_QUALITY_300_DETAILS.json`，可读召回样例位于 `student-planner/data/rag/RAG_QUALITY_SAMPLE_QA.md`，最终回答 result 样例位于 `student-planner/data/rag/RAG_RESULT_SAMPLE_ANSWERS.md`
+- 浏览器 RAG smoke：`1 passed`，证据位于 `output/playwright/agent-loop-e2e-langgraph-rag-smoke-emits-LangGraph-RAG-retrieval-events-before-model-delegation.json`
+- 真实模型 + 浏览器复习计划写入 E2E：`1 passed`，`plan_write.created_count=19 / failed_count=0`
+
 ## 技术栈
 
 - Backend: FastAPI, SQLAlchemy Async, Alembic, APScheduler
-- Agent: OpenAI-compatible LLM client, ReAct-style tool calling loop, guardrails, schema preflight
+- Agent: LangChain, LangGraph, RAG, Alibaba Cloud Bailian/DashScope embedding, OpenAI-compatible LLM client, ReAct-style tool calling loop, guardrails, schema preflight
 - Frontend: React 18, TypeScript, Zustand, Vite, vite-plugin-pwa
 - Testing: pytest, Vitest, Playwright
 

@@ -8,6 +8,39 @@ from app.models.user import User
 from tests.conftest import TestSession
 
 
+def test_chat_error_event_classifies_openai_authentication_error():
+    from app.routers.chat import _chat_error_event
+
+    class AuthenticationError(Exception):
+        pass
+
+    AuthenticationError.__module__ = "openai"
+
+    event = _chat_error_event(AuthenticationError("invalid api key"))
+
+    assert event == {
+        "type": "error",
+        "code": "llm_provider_unavailable",
+        "recoverable": True,
+        "message": "模型服务暂时连接不上，刚才的操作还没有执行。请稍后重试，或检查当前网络/模型服务配置。",
+    }
+
+
+def test_chat_error_event_classifies_provider_bad_request():
+    from app.routers.chat import _chat_error_event
+
+    class BadRequestError(Exception):
+        pass
+
+    BadRequestError.__module__ = "openai"
+
+    event = _chat_error_event(BadRequestError("data_inspection_failed"))
+
+    assert event["type"] == "error"
+    assert event["code"] == "llm_provider_unavailable"
+    assert event["recoverable"] is True
+
+
 @pytest.mark.asyncio
 async def test_ws_auth_required(client):
     """WebSocket route should be registered."""
@@ -52,7 +85,7 @@ async def test_ws_returns_error_event_when_agent_loop_raises(setup_db):
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=failing_agent_loop),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=failing_agent_loop),
         patch("app.routers.chat.end_session", new_callable=AsyncMock),
     ):
         client = TestClient(app, raise_server_exceptions=False)
@@ -93,7 +126,7 @@ async def test_ws_returns_recoverable_provider_error_when_agent_loop_network_fai
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=failing_agent_loop),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=failing_agent_loop),
         patch("app.routers.chat.end_session", new_callable=AsyncMock),
     ):
         client = TestClient(app, raise_server_exceptions=False)
@@ -144,7 +177,7 @@ async def test_ws_disconnect_while_waiting_for_ask_user_answer_is_graceful(setup
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=ask_then_wait),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=ask_then_wait),
         patch("app.routers.chat.end_session", new_callable=AsyncMock) as mock_end_session,
     ):
         client = TestClient(app)
@@ -184,7 +217,7 @@ async def test_ws_returns_error_for_orphan_answer_payload(setup_db):
     with (
         patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
         patch("app.routers.chat.get_db", side_effect=override_get_db),
-        patch("app.routers.chat.run_agent_loop", side_effect=done_only_agent_loop),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=done_only_agent_loop),
         patch("app.routers.chat.end_session", new_callable=AsyncMock),
     ):
         client = TestClient(app)

@@ -21,6 +21,12 @@ dependencies = [
     "pywebpush>=2.0.0",
     "py-vapid>=1.9.0",
     "openai>=1.0.0",
+    "langchain>=1.0.0",
+    "langchain-core>=1.0.0",
+    "langchain-openai>=1.0.0",
+    "langchain-text-splitters>=1.0.0",
+    "langgraph>=1.0.0",
+    "chromadb>=1.0,<1.6",
 ]
 
 [project.optional-dependencies]
