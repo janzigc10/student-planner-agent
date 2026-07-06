@@ -8,6 +8,7 @@ from app.agent.loop import _build_course_routing_hint, run_agent_loop
 from app.models.conversation_message import ConversationMessage
 from app.models.course import Course
 from app.models.user import User
+from app.services.memory_service import create_memory
 from app.services.schedule_upload_cache import store_schedule_upload
 from tests.conftest import TestSession
 
@@ -259,6 +260,57 @@ async def test_tool_call_then_text(setup_db):
             assert "text_delta" in types
             assert "text" in types
             assert "done" in types
+
+
+@pytest.mark.asyncio
+async def test_recall_memory_text_response_includes_rag_metadata(setup_db):
+    mock_client = AsyncMock()
+    call_count = 0
+
+    def mock_chat_completion_stream(client, messages, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_memory",
+                            "type": "function",
+                            "function": {"name": "recall_memory", "arguments": '{"query":"高数"}'},
+                        }
+                    ],
+                }
+            )
+        return stream_response_chunks(
+            response={"role": "assistant", "content": "我记得你更适合晚上复习高数。"},
+            deltas=["我记得你", "更适合晚上复习高数。"],
+        )
+
+    with patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream):
+        async with TestSession() as db:
+            user = User(id="u-rag", username="rag", hashed_password="x")
+            db.add(user)
+            await db.commit()
+            await create_memory(db, user.id, "preference", "高数复习优先安排在晚上")
+
+            events = []
+            generator = run_agent_loop("我高数一般什么时候复习更好？", user, "session-rag", db, mock_client)
+            async for event in generator:
+                events.append(event)
+
+            text_delta = next(event for event in events if event["type"] == "text_delta")
+            text_event = next(event for event in events if event["type"] == "text")
+
+            assert text_delta["answer_kind"] == "rag"
+            assert text_event["answer_kind"] == "rag"
+            assert text_event["grounding"]["kind"] == "memory"
+            assert text_event["grounding"]["label"] == "基于长期记忆"
+            assert text_event["grounding"]["items"] == [
+                {"label": "偏好", "text": "高数复习优先安排在晚上"}
+            ]
 
 
 @pytest.mark.asyncio

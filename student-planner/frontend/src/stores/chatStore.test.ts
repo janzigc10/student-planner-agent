@@ -182,6 +182,35 @@ describe('chat event reducer', () => {
     expect(streamedMessages[0]?.content).toBe('Hello world!')
   })
 
+  it('keeps RAG answer metadata across streamed and final text events', () => {
+    let state = createInitialChatState()
+    const grounding = {
+      kind: 'memory' as const,
+      label: '基于长期记忆',
+      items: [{ label: '偏好', text: '高数复习优先安排在晚上' }],
+    }
+
+    state = reduceChatEvent(state, {
+      type: 'text_delta',
+      message_id: 'rag-stream',
+      delta: '我记得',
+      answer_kind: 'rag',
+      grounding,
+    })
+    state = reduceChatEvent(state, {
+      type: 'text',
+      message_id: 'rag-stream',
+      content: '我记得你更适合晚上复习高数。',
+    })
+
+    expect(state.messages.at(-1)).toMatchObject({
+      id: 'rag-stream',
+      answerKind: 'rag',
+      grounding,
+      content: '我记得你更适合晚上复习高数。',
+    })
+  })
+
   it('merges structured result and final text events with the same message id', () => {
     let state = createInitialChatState()
 

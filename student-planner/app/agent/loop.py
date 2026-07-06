@@ -28,6 +28,12 @@ from app.services.schedule_upload_cache import get_schedule_upload
 KNOWN_TOOLS = {tool["function"]["name"] for tool in TOOL_DEFINITIONS}
 MAX_ITERATIONS = 20
 VALID_ASK_TYPES = {"confirm", "select", "review"}
+MEMORY_CATEGORY_LABELS = {
+    "preference": "偏好",
+    "habit": "习惯",
+    "decision": "决策",
+    "knowledge": "知识",
+}
 _SCHEDULE_IMPORT_KEYWORDS = (
     "上传",
     "文件",
@@ -430,6 +436,51 @@ def _to_persisted_tool_summary(tool_name: str, tool_result_content: str) -> str:
     if tool_result_content.startswith("[TOOL_SUMMARY:"):
         return tool_result_content
     return f"[TOOL_SUMMARY:{tool_name}:v1] {tool_result_content}"
+
+
+def _memory_category_label(category: Any) -> str:
+    return MEMORY_CATEGORY_LABELS.get(str(category), "记忆")
+
+
+def _build_rag_grounding(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any] | None:
+    if tool_name != "recall_memory" or "error" in tool_result:
+        return None
+
+    raw_memories = tool_result.get("memories")
+    memories = raw_memories if isinstance(raw_memories, list) else []
+    items: list[dict[str, str]] = []
+    for memory in memories[:3]:
+        if not isinstance(memory, dict):
+            continue
+        content = str(memory.get("content") or "").strip()
+        if not content:
+            continue
+        items.append(
+            {
+                "label": _memory_category_label(memory.get("category")),
+                "text": content,
+            }
+        )
+
+    return {
+        "kind": "memory",
+        "label": "基于长期记忆",
+        "empty_label": "没有命中相关长期记忆",
+        "items": items,
+        "count": len(memories),
+    }
+
+
+def _attach_answer_metadata(
+    event: dict[str, Any],
+    answer_kind: str | None,
+    grounding: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if answer_kind is not None:
+        event["answer_kind"] = answer_kind
+    if grounding is not None:
+        event["grounding"] = grounding
+    return event
 
 
 async def _persist_local_tool_step(
@@ -3626,6 +3677,8 @@ async def run_agent_action_loop(
     last_free_slots_result: dict[str, Any] | None = None
     pending_write_confirmation: PendingConfirmation | None = None
     pending_write_confirmation_answer: str | None = None
+    answer_kind: str | None = None
+    answer_grounding: dict[str, Any] | None = None
     step = 0
     graph_state: dict[str, Any] = {
         "messages": messages,
@@ -3664,11 +3717,15 @@ async def run_agent_action_loop(
                     streamed_deltas.append(delta)
                     if use_text_only_stream:
                         streamed_deltas_emitted = True
-                        yield {
-                            "type": "text_delta",
-                            "message_id": response_message_id,
-                            "delta": delta,
-                        }
+                        yield _attach_answer_metadata(
+                            {
+                                "type": "text_delta",
+                                "message_id": response_message_id,
+                                "delta": delta,
+                            },
+                            answer_kind,
+                            answer_grounding,
+                        )
                     continue
 
                 if event_type == "response":
@@ -3770,16 +3827,24 @@ async def run_agent_action_loop(
             if text:
                 if not streamed_deltas_emitted:
                     for delta in streamed_deltas:
-                        yield {
-                            "type": "text_delta",
-                            "message_id": response_message_id,
-                            "delta": delta,
-                        }
-                yield {
-                    "type": "text",
-                    "message_id": response_message_id,
-                    "content": text,
-                }
+                        yield _attach_answer_metadata(
+                            {
+                                "type": "text_delta",
+                                "message_id": response_message_id,
+                                "delta": delta,
+                            },
+                            answer_kind,
+                            answer_grounding,
+                        )
+                yield _attach_answer_metadata(
+                    {
+                        "type": "text",
+                        "message_id": response_message_id,
+                        "content": text,
+                    },
+                    answer_kind,
+                    answer_grounding,
+                )
                 await _save_message(db, session_id, "assistant", text)
             yield {"type": "done"}
             return
@@ -3968,6 +4033,10 @@ async def run_agent_action_loop(
                 continue
 
             result = node_state["last_tool_result"]
+            grounding = _build_rag_grounding(tool_name, result)
+            if grounding is not None:
+                answer_kind = "rag"
+                answer_grounding = grounding
             if tool_name == "ask_user" or saw_ask_user:
                 if user_response is None:
                     user_response = "确认"
