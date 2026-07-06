@@ -1806,6 +1806,31 @@ def _build_db_write_plan(
     )
 
 
+def _restore_confirmed_task_reminder_arg(
+    *,
+    tool_name: str,
+    args: dict[str, Any],
+    pending_confirmation: PendingConfirmation,
+    confirmation_answer: str,
+) -> dict[str, Any]:
+    if tool_name not in {"create_task", "update_task"}:
+        return args
+    if args.get("reminder_advance_minutes") is not None:
+        return args
+    if not isinstance(pending_confirmation.data, dict):
+        return args
+    if "reminder_advance_minutes" not in pending_confirmation.data:
+        return args
+
+    answer_slot = extract_reminder_slot([confirmation_answer])
+    if answer_slot is not None and answer_slot.advance_minutes is None:
+        return args
+
+    restored = dict(args)
+    restored["reminder_advance_minutes"] = pending_confirmation.data.get("reminder_advance_minutes")
+    return restored
+
+
 def _confirmed_tool_scope(pending_confirmation: PendingConfirmation) -> tuple[str, ...]:
     if pending_confirmation.allowed_tool_names:
         return pending_confirmation.allowed_tool_names
@@ -3960,11 +3985,22 @@ async def run_agent_action_loop(
                     if isinstance(pending_confirmation, PendingConfirmation)
                     else None
                 )
+                confirmation_answer = str(active_tool_state.get("pending_confirmation_answer") or "")
+                confirmed_args = (
+                    _restore_confirmed_task_reminder_arg(
+                        tool_name=name,
+                        args=args,
+                        pending_confirmation=pending_confirmation,
+                        confirmation_answer=confirmation_answer,
+                    )
+                    if pending_confirmation is not None
+                    else args
+                )
                 db_write_plan = (
                     _build_db_write_plan(
                         pending_confirmation=pending_confirmation,
                         tool_name=name,
-                        args=args,
+                        args=confirmed_args,
                         description=f"Confirmed generic {name} write.",
                     )
                     if pending_confirmation is not None
@@ -3975,7 +4011,7 @@ async def run_agent_action_loop(
                 return await _execute_confirmed_db_write_plan(
                     pending_confirmation=pending_confirmation,
                     db_write_plan=db_write_plan,
-                    confirmation_answer=str(active_tool_state.get("pending_confirmation_answer") or ""),
+                    confirmation_answer=confirmation_answer,
                     db=db,
                     user_id=user.id,
                 )

@@ -87,6 +87,15 @@ function scenarioUsername(scenario: string) {
   return `agent_e2e_${scenario}_${stamp}`
 }
 
+function isoDateFromToday(daysFromToday: number) {
+  const value = new Date()
+  value.setDate(value.getDate() + daysFromToday)
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 async function installWebSocketRecorder(page: Page) {
   await page.addInitScript(() => {
     type RecordedEvent = { direction: 'client' | 'server'; at: string; payload: unknown }
@@ -1071,15 +1080,17 @@ test.describe('Agent Loop E2E', () => {
     cleanupUser(username)
     await installWebSocketRecorder(page)
     await registerAndLogin(page, username)
+    const firstPlanDate = isoDateFromToday(14)
+    const secondPlanDate = isoDateFromToday(15)
     const firstTask = (await createTaskFromBrowser(page, {
       title: '机器学习报告 - 完成初稿',
-      scheduled_date: '2026-06-09',
+      scheduled_date: firstPlanDate,
       start_time: '09:00',
       end_time: '11:00',
     })) as { id: string }
     const secondTask = (await createTaskFromBrowser(page, {
       title: '机器学习报告 - 修改完善',
-      scheduled_date: '2026-06-10',
+      scheduled_date: secondPlanDate,
       start_time: '14:00',
       end_time: '16:00',
     })) as { id: string }

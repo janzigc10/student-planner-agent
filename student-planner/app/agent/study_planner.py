@@ -405,7 +405,7 @@ async def generate_study_plan(
         [{"role": "user", "content": prompt}],
     )
 
-    content = response.get("content", "").strip()
+    content = str(response.get("content") or "").strip()
     if content.startswith("```"):
         lines = content.split("\n")
         content = "\n".join(lines[1:-1])

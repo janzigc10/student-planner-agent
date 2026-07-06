@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.agent.contracts import AgentRoute, DBWritePlan, PendingConfirmation
-from app.agent.loop import _execute_confirmed_db_write_plan
+from app.agent.loop import _execute_confirmed_db_write_plan, _restore_confirmed_task_reminder_arg
 from app.models.course import Course
 from app.models.reminder import Reminder
 from app.models.task import Task
@@ -18,6 +18,7 @@ def _pending(
     route: str = AgentRoute.TOOL_WORKFLOW.value,
     tool_name: str = "create_task",
     allowed_tool_names: list[str] | None = None,
+    data: dict | None = None,
 ) -> PendingConfirmation:
     return PendingConfirmation(
         confirmation_id=confirmation_id,
@@ -26,6 +27,7 @@ def _pending(
         ask_type="confirm",
         question="确认写入吗？",
         options=("确认", "取消"),
+        data=data,
         allowed_tool_names=tuple(allowed_tool_names or ()),
     )
 
@@ -50,6 +52,25 @@ def _plan(
         },
         description="protected write",
     )
+
+
+def test_confirmed_task_write_restores_reminder_from_pending_confirmation():
+    pending = _pending(data={"reminder_advance_minutes": 30})
+
+    restored = _restore_confirmed_task_reminder_arg(
+        tool_name="create_task",
+        args={
+            "title": "review",
+            "scheduled_date": "2099-06-01",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "reminder_advance_minutes": None,
+        },
+        pending_confirmation=pending,
+        confirmation_answer="ok",
+    )
+
+    assert restored["reminder_advance_minutes"] == 30
 
 
 @pytest.mark.asyncio

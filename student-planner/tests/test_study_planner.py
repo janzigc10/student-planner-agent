@@ -46,6 +46,29 @@ async def test_generate_study_plan_invalid_json():
 
 
 @pytest.mark.asyncio
+async def test_generate_study_plan_treats_null_model_content_as_empty_text():
+    with patch("app.agent.study_planner.chat_completion") as mock_chat_completion:
+        mock_chat_completion.return_value = {"content": None}
+
+        result = await generate_study_plan(
+            exams=[{"course_name": "English 3", "exam_date": "2099-06-04"}],
+            available_slots={
+                "slots": [
+                    {
+                        "date": "2099-06-01",
+                        "free_periods": [{"start": "09:00", "end": "10:00", "duration_minutes": 60}],
+                    }
+                ]
+            },
+            study_context={"raw_notes": "unit 1-3", "using_defaults": True},
+            llm_client=AsyncMock(),
+        )
+
+    assert result
+    assert any("English 3" in task["title"] for task in result)
+
+
+@pytest.mark.asyncio
 async def test_generate_study_plan_falls_back_when_json_invalid_with_slots():
     with patch("app.agent.study_planner.chat_completion") as mock_chat_completion:
         mock_chat_completion.return_value = {"content": "这不是JSON"}
