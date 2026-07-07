@@ -573,25 +573,17 @@ async def test_prepare_langgraph_state_routes_rag_insufficient_inside_graph(monk
 async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(monkeypatch):
     monkeypatch.setattr(
         "app.agent.langgraph_loop.build_rag_context",
-        lambda _: {
-            "hits": [],
-            "context": "",
-            "evidence_sufficient": False,
-            "evidence_count": 0,
-            "evidence_reason": "no_relevant_local_evidence",
-        },
+        lambda _: (_ for _ in ()).throw(AssertionError("ordinary study plan should not retrieve RAG")),
     )
 
     state = await prepare_langgraph_state("下周四有大学英语3考试，帮我安排一下")
 
     assert state["route"] == "study_plan"
-    assert state["should_retrieve"] is True
+    assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
     assert state["runtime_hints"] == []
     assert state["graph_nodes"] == [
         "route",
-        "retrieve_rag",
-        "compose_runtime_hints",
         "study_plan",
         "plan_generate",
         "plan_review_write",
@@ -604,6 +596,24 @@ async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(m
 async def test_prepare_langgraph_state_routes_assignment_breakdown_to_plan_not_rag_gate(monkeypatch):
     monkeypatch.setattr(
         "app.agent.langgraph_loop.build_rag_context",
+        lambda _: (_ for _ in ()).throw(AssertionError("ordinary assignment breakdown should not retrieve RAG")),
+    )
+
+    state = await prepare_langgraph_state("2026-07-03 要交机器学习报告，帮我拆成任务。")
+
+    assert state["route"] == "study_plan"
+    assert state["should_retrieve"] is False
+    assert state["should_gate_rag_answer"] is False
+    assert "rag_insufficient" not in state["graph_nodes"]
+    assert "study_plan" in state["graph_nodes"]
+    assert "plan_generate" in state["graph_nodes"]
+    assert "plan_review_write" in state["graph_nodes"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_uses_rag_side_channel_for_material_backed_plan(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
         lambda _: {
             "hits": [],
             "context": "",
@@ -613,15 +623,21 @@ async def test_prepare_langgraph_state_routes_assignment_breakdown_to_plan_not_r
         },
     )
 
-    state = await prepare_langgraph_state("2026-07-03 要交机器学习报告，帮我拆成任务。")
+    state = await prepare_langgraph_state("根据老师发的实验要求，给我生成实验报告写作计划")
 
     assert state["route"] == "study_plan"
     assert state["should_retrieve"] is True
     assert state["should_gate_rag_answer"] is False
+    assert state["graph_nodes"] == [
+        "route",
+        "retrieve_rag",
+        "compose_runtime_hints",
+        "study_plan",
+        "plan_generate",
+        "plan_review_write",
+        "confirmed_write",
+    ]
     assert "rag_insufficient" not in state["graph_nodes"]
-    assert "study_plan" in state["graph_nodes"]
-    assert "plan_generate" in state["graph_nodes"]
-    assert "plan_review_write" in state["graph_nodes"]
 
 
 @pytest.mark.asyncio
@@ -650,24 +666,16 @@ async def test_prepare_langgraph_state_routes_schedule_import_to_native_action_n
 async def test_prepare_langgraph_state_keeps_reminder_route_non_gating_with_rag_side_channel(monkeypatch):
     monkeypatch.setattr(
         "app.agent.langgraph_loop.build_rag_context",
-        lambda _: {
-            "hits": [],
-            "context": "",
-            "evidence_sufficient": False,
-            "evidence_count": 0,
-            "evidence_reason": "no_relevant_local_evidence",
-        },
+        lambda _: (_ for _ in ()).throw(AssertionError("ordinary reminder should not retrieve RAG")),
     )
 
     state = await prepare_langgraph_state("明天下午3点提醒我复习线代")
 
     assert state["route"] == "tool_workflow"
-    assert state["should_retrieve"] is True
+    assert state["should_retrieve"] is False
     assert state["should_gate_rag_answer"] is False
     assert state["graph_nodes"] == [
         "route",
-        "retrieve_rag",
-        "compose_runtime_hints",
         "tool_workflow",
         "task_tool_node",
         "ask_user_pause",
@@ -971,21 +979,15 @@ async def test_langgraph_agent_loop_blocks_rag_qa_when_evidence_is_insufficient(
 
 
 @pytest.mark.asyncio
-async def test_langgraph_agent_loop_blocks_topic_only_rag_candidate_without_question_word(setup_db):
-    insufficient_rag = {
-        "query": "冷战格局形成过程",
-        "hits": [],
-        "context": "",
-        "evidence_sufficient": False,
-        "evidence_count": 0,
-        "evidence_reason": "no_relevant_local_evidence",
-    }
-
+async def test_langgraph_agent_loop_keeps_topic_only_fragment_out_of_rag_gate(setup_db):
     with (
-        patch("app.agent.langgraph_loop.build_rag_context", return_value=insufficient_rag),
+        patch(
+            "app.agent.langgraph_loop.build_rag_context",
+            side_effect=AssertionError("Topic-only fragments should not retrieve RAG"),
+        ),
         patch(
             "app.agent.langgraph_loop.run_agent_loop",
-            side_effect=AssertionError("Topic-only RAG candidates should still be evidence gated"),
+            side_effect=AssertionError("Topic-only fragments should not delegate to run_agent_loop"),
             create=True,
         ),
     ):
@@ -1004,9 +1006,7 @@ async def test_langgraph_agent_loop_blocks_topic_only_rag_candidate_without_ques
             ):
                 events.append(event)
 
-    assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
-    assert events[1]["result"]["evidence_sufficient"] is False
-    assert events[2]["content"] == "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
+    assert [event["type"] for event in events] == ["done"]
 
 
 @pytest.mark.asyncio
@@ -1126,8 +1126,7 @@ async def test_langgraph_agent_loop_keeps_task_planning_path_when_rag_evidence_i
             ):
                 events.append(event)
 
-    assert [event["type"] for event in events] == ["tool_call", "tool_result", "done"]
-    assert events[1]["result"]["evidence_sufficient"] is False
+    assert [event["type"] for event in events] == ["done"]
     assert captured["runtime_hints"] == []
 
 
@@ -1171,8 +1170,7 @@ async def test_langgraph_agent_loop_keeps_arrangement_workflow_when_rag_evidence
             ):
                 events.append(event)
 
-    assert [event["type"] for event in events] == ["tool_call", "tool_result", "done"]
-    assert events[1]["result"]["evidence_sufficient"] is False
+    assert [event["type"] for event in events] == ["done"]
     assert captured["runtime_hints"] == []
 
 

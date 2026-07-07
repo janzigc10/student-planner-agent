@@ -50,9 +50,9 @@ def test_router_contract_keeps_exam_arrangement_on_study_plan_path():
     )
 
     assert decision.route == AgentRoute.STUDY_PLAN
-    assert decision.should_retrieve is True
+    assert decision.should_retrieve is False
     assert decision.should_gate_rag_answer is False
-    assert decision.retrieval_mode == "local_rag_context"
+    assert decision.retrieval_mode == "none"
 
 
 def test_router_contract_keeps_assignment_breakdown_on_work_plan_path():
@@ -62,9 +62,9 @@ def test_router_contract_keeps_assignment_breakdown_on_work_plan_path():
     )
 
     assert decision.route == AgentRoute.STUDY_PLAN
-    assert decision.should_retrieve is True
+    assert decision.should_retrieve is False
     assert decision.should_gate_rag_answer is False
-    assert decision.retrieval_mode == "local_rag_context"
+    assert decision.retrieval_mode == "none"
 
 
 def test_router_contract_matches_current_langgraph_retrieval_side_channel():
@@ -74,8 +74,29 @@ def test_router_contract_matches_current_langgraph_retrieval_side_channel():
     state = _route_node({"user_message": message, "runtime_hints": [], "graph_nodes": []})
 
     assert decision.route == AgentRoute.STUDY_PLAN
-    assert decision.should_retrieve == state["should_retrieve"] is True
+    assert decision.should_retrieve == state["should_retrieve"] is False
     assert decision.should_gate_rag_answer == state["should_gate_rag_answer"] is False
+
+
+def test_router_contract_uses_rag_only_as_side_channel_for_material_backed_actions():
+    decision = decide_agent_route(
+        "根据老师发的实验要求，给我生成实验报告写作计划",
+        rag_result={"evidence_sufficient": False},
+    )
+
+    assert decision.route == AgentRoute.STUDY_PLAN
+    assert decision.should_retrieve is True
+    assert decision.should_gate_rag_answer is False
+    assert decision.retrieval_mode == "local_rag_context"
+
+    arrangement = decide_agent_route(
+        "结合近现代史复习大纲，帮我做一个三天复习安排",
+        rag_result={"evidence_sufficient": False},
+    )
+
+    assert arrangement.route == AgentRoute.STUDY_PLAN
+    assert arrangement.should_retrieve is True
+    assert arrangement.should_gate_rag_answer is False
 
 
 def test_router_contract_matches_current_langgraph_rag_answer_gate_flags():
