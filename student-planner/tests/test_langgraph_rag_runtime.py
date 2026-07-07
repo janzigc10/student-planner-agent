@@ -71,6 +71,42 @@ def test_local_rag_retrieves_course_materials(tmp_path):
     assert result["corpus_dir"] == str(tmp_path)
     assert result["chunk_size"] == 520
     assert result["chunk_overlap"] == 150
+    assert result["retrieval_mode"] == "hybrid_vector_bm25"
+    assert result["reranker_provider"] == "local-feature-rerank"
+    assert result["hits"][0]["retrieval_sources"]
+    assert "rerank_score" in result["hits"][0]
+
+
+def test_hybrid_retrieval_uses_bm25_to_rescue_exact_entity_match(tmp_path):
+    (tmp_path / "a_semantic_but_wrong.md").write_text(
+        "冷战时期国际格局发生变化，欧洲政治经济秩序重组。",
+        encoding="utf-8",
+    )
+    (tmp_path / "b_exact_entities.md").write_text(
+        "北约成立于1949年，华约成立于1955年，二者是冷战时期两大军事政治集团。",
+        encoding="utf-8",
+    )
+
+    class MisleadingEmbeddings:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            vectors = []
+            for text in texts:
+                if "北约" in text and "华约" in text:
+                    vectors.append([0.0, 1.0])
+                else:
+                    vectors.append([1.0, 0.0])
+            return vectors
+
+        def embed_query(self, text: str) -> list[float]:
+            return [1.0, 0.0]
+
+    retriever = LocalRAGRetriever(tmp_path, embeddings=MisleadingEmbeddings())
+    hits = retriever.retrieve("北约和华约有什么区别", top_k=2)
+
+    assert hits[0]["metadata"]["source"] == "b_exact_entities.md"
+    assert set(hits[0]["retrieval_sources"]) == {"vector", "bm25"}
+    assert hits[0]["bm25_score"] > 0
+    assert hits[0]["rerank_score"] == hits[0]["score"]
 
 
 def test_dashscope_embedding_config_falls_back_without_api_key(monkeypatch):

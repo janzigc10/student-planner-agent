@@ -58,6 +58,11 @@ RAG_CHUNK_SIZE = 520
 RAG_CHUNK_OVERLAP = 150
 RAG_CONTEXT_EXCERPT_CHARS = 260
 RAG_EVIDENCE_CANDIDATE_K = 10
+RAG_VECTOR_CANDIDATE_K = 20
+RAG_BM25_CANDIDATE_K = 20
+RAG_RRF_K = 60
+BM25_K1 = 1.5
+BM25_B = 0.75
 RAG_MIN_EVIDENCE_SCORE = 0.08
 RAG_MIN_EVIDENCE_COVERAGE = 0.7
 RAG_MIN_EVIDENCE_SEGMENT_COVERAGE = 0.6
@@ -326,6 +331,25 @@ def _is_evidence_hit(query: str, hit: dict[str, Any]) -> bool:
     if _longest_unmatched_query_run(query, content) > RAG_MAX_EVIDENCE_UNMATCHED_RUN:
         return False
     return _has_strong_evidence_term(matched_terms) or len(matched_terms) >= 2
+
+
+def _document_identity(content: str, metadata: dict[str, Any]) -> str:
+    vector_id = metadata.get("vector_id")
+    if vector_id:
+        return str(vector_id)
+    source = str(metadata.get("source") or "")
+    chunk_index = metadata.get("chunk_index")
+    if chunk_index is not None:
+        return f"{source}:{chunk_index}"
+    digest = hashlib.sha256(str(content or "").encode("utf-8")).hexdigest()
+    return f"{source}:{digest}"
+
+
+def _normalize_score(value: float, *, lower: float = 0.0, upper: float = 1.0) -> float:
+    if upper <= lower:
+        return 0.0
+    normalized = (value - lower) / (upper - lower)
+    return max(0.0, min(1.0, normalized))
 
 
 class OpenAICompatibleEmbeddings(Embeddings):
@@ -753,9 +777,23 @@ class LocalRAGRetriever:
                 "embedding_fallback_reason": "",
             }
         self.documents = split_documents(load_documents(self.corpus_dir))
+        self._document_tokens = [_tokenize(text) for text in self._document_texts()]
+        self._bm25_doc_freqs = self._build_bm25_doc_freqs()
+        self._bm25_avg_doc_len = (
+            sum(len(tokens) for tokens in self._document_tokens) / len(self._document_tokens)
+            if self._document_tokens
+            else 0.0
+        )
         self.corpus_key = self._build_corpus_key()
         self.vectors = self._embed_documents()
         self._update_vector_store_info()
+
+    def _build_bm25_doc_freqs(self) -> dict[str, int]:
+        doc_freqs: dict[str, int] = {}
+        for tokens in self._document_tokens:
+            for token in set(tokens):
+                doc_freqs[token] = doc_freqs.get(token, 0) + 1
+        return doc_freqs
 
     def _build_vector_store(self) -> ChromaVectorStore | SQLiteVectorStore | None:
         provider = self.vector_store_requested_provider
@@ -937,42 +975,199 @@ class LocalRAGRetriever:
     def retrieve(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
         if not query.strip() or not self.documents:
             return []
+        vector_top_k = max(top_k, RAG_VECTOR_CANDIDATE_K)
+        bm25_top_k = max(top_k, RAG_BM25_CANDIDATE_K)
         try:
             query_vector = self.embeddings.embed_query(query)
         except Exception as exc:
             self._fallback_to_hash(f"query_embedding_failed:{exc.__class__.__name__}")
             self.vectors = self._embed_documents()
             query_vector = self.embeddings.embed_query(query)
-        return self.retrieve_by_vector(query_vector, top_k=top_k)
+        vector_hits = self.retrieve_by_vector(query_vector, top_k=vector_top_k)
+        bm25_hits = self.retrieve_by_bm25(query, top_k=bm25_top_k)
+        return self._hybrid_rerank(query, vector_hits=vector_hits, bm25_hits=bm25_hits, top_k=top_k)
 
     def retrieve_by_vector(self, query_vector: list[float], top_k: int = 3) -> list[dict[str, Any]]:
         if isinstance(self.vector_store, ChromaVectorStore):
-            return self.vector_store.query(
+            hits = self.vector_store.query(
                 query_vector=query_vector,
                 top_k=top_k,
                 corpus_key=self.corpus_key,
             )
+            for rank, hit in enumerate(hits, 1):
+                hit["vector_rank"] = rank
+                hit["vector_score"] = float(hit.get("score") or 0.0)
+                hit["retrieval_sources"] = ["vector"]
+            return hits
         if not self.vectors:
             return []
         scored = [
-            (_cosine(query_vector, vector), document)
-            for document, vector in zip(self.documents, self.vectors, strict=False)
+            (_cosine(query_vector, vector), index, document)
+            for index, (document, vector) in enumerate(zip(self.documents, self.vectors, strict=False))
         ]
         scored.sort(key=lambda item: item[0], reverse=True)
 
         hits: list[dict[str, Any]] = []
-        for score, document in scored[:top_k]:
+        for rank, (score, index, document) in enumerate(scored[:top_k], 1):
             content = str(getattr(document, "page_content", "")).strip()
             if not content:
                 continue
+            metadata = dict(getattr(document, "metadata", {}) or {})
+            metadata.setdefault("chunk_index", index)
             hits.append(
                 {
                     "score": round(float(score), 4),
+                    "vector_score": round(float(score), 4),
+                    "vector_rank": rank,
+                    "retrieval_sources": ["vector"],
                     "content": content,
-                    "metadata": dict(getattr(document, "metadata", {}) or {}),
+                    "metadata": metadata,
                 }
             )
         return hits
+
+    def retrieve_by_bm25(self, query: str, top_k: int = 20) -> list[dict[str, Any]]:
+        query_tokens = _tokenize(query)
+        if not query_tokens or not self._document_tokens:
+            return []
+        scored: list[tuple[float, int, Any]] = []
+        for index, (document, doc_tokens) in enumerate(zip(self.documents, self._document_tokens, strict=False)):
+            score = self._bm25_score(query_tokens, doc_tokens)
+            if score <= 0:
+                continue
+            scored.append((score, index, document))
+        scored.sort(key=lambda item: item[0], reverse=True)
+
+        hits: list[dict[str, Any]] = []
+        for rank, (score, index, document) in enumerate(scored[:top_k], 1):
+            content = str(getattr(document, "page_content", "")).strip()
+            if not content:
+                continue
+            metadata = dict(getattr(document, "metadata", {}) or {})
+            metadata.setdefault("chunk_index", index)
+            hits.append(
+                {
+                    "score": round(float(score), 4),
+                    "bm25_score": round(float(score), 4),
+                    "bm25_rank": rank,
+                    "retrieval_sources": ["bm25"],
+                    "content": content,
+                    "metadata": metadata,
+                }
+            )
+        return hits
+
+    def _bm25_score(self, query_tokens: Sequence[str], doc_tokens: Sequence[str]) -> float:
+        if not doc_tokens or not self._bm25_avg_doc_len:
+            return 0.0
+        doc_len = len(doc_tokens)
+        term_counts: dict[str, int] = {}
+        for token in doc_tokens:
+            term_counts[token] = term_counts.get(token, 0) + 1
+        score = 0.0
+        total_docs = len(self._document_tokens)
+        for token in set(query_tokens):
+            freq = term_counts.get(token, 0)
+            if freq <= 0:
+                continue
+            doc_freq = self._bm25_doc_freqs.get(token, 0)
+            idf = math.log(1.0 + (total_docs - doc_freq + 0.5) / (doc_freq + 0.5))
+            denominator = freq + BM25_K1 * (1.0 - BM25_B + BM25_B * doc_len / self._bm25_avg_doc_len)
+            score += idf * (freq * (BM25_K1 + 1.0)) / denominator
+        return score
+
+    def _hybrid_rerank(
+        self,
+        query: str,
+        *,
+        vector_hits: list[dict[str, Any]],
+        bm25_hits: list[dict[str, Any]],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        candidates: dict[str, dict[str, Any]] = {}
+
+        def add_hit(hit: dict[str, Any], *, source: str, rank: int) -> None:
+            content = str(hit.get("content") or "")
+            metadata = dict(hit.get("metadata") or {})
+            identity = _document_identity(content, metadata)
+            candidate = candidates.setdefault(
+                identity,
+                {
+                    "content": content,
+                    "metadata": metadata,
+                    "retrieval_sources": [],
+                    "vector_score": 0.0,
+                    "bm25_score": 0.0,
+                    "vector_rank": None,
+                    "bm25_rank": None,
+                    "hybrid_score": 0.0,
+                },
+            )
+            if source not in candidate["retrieval_sources"]:
+                candidate["retrieval_sources"].append(source)
+            candidate["hybrid_score"] += 1.0 / (RAG_RRF_K + rank)
+            if source == "vector":
+                candidate["vector_rank"] = rank
+                candidate["vector_score"] = float(hit.get("vector_score", hit.get("score") or 0.0) or 0.0)
+            if source == "bm25":
+                candidate["bm25_rank"] = rank
+                candidate["bm25_score"] = float(hit.get("bm25_score", hit.get("score") or 0.0) or 0.0)
+
+        for rank, hit in enumerate(vector_hits, 1):
+            add_hit(hit, source="vector", rank=rank)
+        for rank, hit in enumerate(bm25_hits, 1):
+            add_hit(hit, source="bm25", rank=rank)
+
+        if not candidates:
+            return []
+
+        max_hybrid_score = max(float(hit["hybrid_score"]) for hit in candidates.values()) or 1.0
+        max_bm25_score = max(float(hit["bm25_score"]) for hit in candidates.values()) or 1.0
+        reranked: list[dict[str, Any]] = []
+        for hit in candidates.values():
+            vector_norm = _normalize_score(float(hit["vector_score"]), lower=-1.0, upper=1.0)
+            bm25_norm = _normalize_score(float(hit["bm25_score"]), upper=max_bm25_score)
+            hybrid_norm = _normalize_score(float(hit["hybrid_score"]), upper=max_hybrid_score)
+            content = str(hit.get("content") or "")
+            anchor_coverage = _evidence_anchor_coverage(query, content)
+            segment_coverage = _evidence_segment_coverage(query, content)
+            query_coverage = _evidence_query_coverage(query, content)
+            matched_terms = _matched_evidence_terms(query, content)
+            exact_term_coverage = min(1.0, len(matched_terms) / max(1, len(_salient_query_terms(query))))
+            rerank_score = (
+                0.28 * hybrid_norm
+                + 0.20 * vector_norm
+                + 0.20 * bm25_norm
+                + 0.14 * anchor_coverage
+                + 0.10 * segment_coverage
+                + 0.08 * exact_term_coverage
+            )
+            hit.update(
+                {
+                    "score": round(rerank_score, 4),
+                    "rerank_score": round(rerank_score, 4),
+                    "hybrid_score": round(float(hit["hybrid_score"]), 6),
+                    "vector_score": round(float(hit["vector_score"]), 4),
+                    "bm25_score": round(float(hit["bm25_score"]), 4),
+                    "anchor_coverage": round(anchor_coverage, 4),
+                    "segment_coverage": round(segment_coverage, 4),
+                    "query_coverage": round(query_coverage, 4),
+                    "exact_term_coverage": round(exact_term_coverage, 4),
+                    "matched_terms": matched_terms,
+                }
+            )
+            reranked.append(hit)
+
+        reranked.sort(
+            key=lambda hit: (
+                float(hit.get("rerank_score") or 0.0),
+                float(hit.get("hybrid_score") or 0.0),
+                float(hit.get("bm25_score") or 0.0),
+                float(hit.get("vector_score") or 0.0),
+            ),
+            reverse=True,
+        )
+        return reranked[:top_k]
 
 
 def build_rag_context(query: str, *, corpus_dir: str | Path | None = None, top_k: int = 3) -> dict[str, Any]:
@@ -1038,8 +1233,13 @@ def build_rag_context(query: str, *, corpus_dir: str | Path | None = None, top_k
         "query": query,
         "corpus_dir": str(retriever.corpus_dir),
         "document_count": len(retriever.documents),
+        "retrieval_mode": "hybrid_vector_bm25",
+        "reranker_provider": "local-feature-rerank",
         "requested_top_k": top_k,
         "candidate_top_k": candidate_top_k,
+        "vector_candidate_top_k": max(candidate_top_k, RAG_VECTOR_CANDIDATE_K),
+        "bm25_candidate_top_k": max(candidate_top_k, RAG_BM25_CANDIDATE_K),
+        "rrf_k": RAG_RRF_K,
         "hits": hits,
         "candidate_hits": candidate_hits,
         "evidence_hits": evidence_hits,
