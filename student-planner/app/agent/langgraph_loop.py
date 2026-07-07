@@ -16,6 +16,7 @@ from app.agent.contracts import (
     CONFIRMATION_REQUIRED_TOOLS,
     DBWritePlan,
     PendingConfirmation,
+    RouteDecision,
     decide_agent_route,
 )
 from app.agent.guardrails import (
@@ -25,6 +26,7 @@ from app.agent.guardrails import (
     check_unknown_tool,
 )
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
+from app.agent.intent_router import decide_agent_route_hybrid
 from app.agent.loop import (
     _current_public_info_unavailable_text,
     _build_confirmed_write_state_from_ask,
@@ -2070,6 +2072,16 @@ UNSUPPORTED_ROUTE_NODE = "unsupported_route"
 def _route_node(state: PlannerGraphState) -> PlannerGraphState:
     message = state.get("user_message", "")
     decision = decide_agent_route(message)
+    return _apply_route_decision(state, decision)
+
+
+async def _hybrid_route_node(state: PlannerGraphState) -> PlannerGraphState:
+    message = state.get("user_message", "")
+    decision = await decide_agent_route_hybrid(message)
+    return _apply_route_decision(state, decision)
+
+
+def _apply_route_decision(state: PlannerGraphState, decision: RouteDecision) -> PlannerGraphState:
     return {
         **state,
         "route": decision.route.value,
@@ -2096,6 +2108,20 @@ def _no_web_node(state: PlannerGraphState) -> PlannerGraphState:
 def _retrieve_rag_node(state: PlannerGraphState) -> PlannerGraphState:
     rag_result = build_rag_context(str(state.get("user_message") or ""))
     decision = decide_agent_route(str(state.get("user_message") or ""), rag_result=rag_result)
+    return _apply_retrieve_decision(state, rag_result, decision)
+
+
+async def _hybrid_retrieve_rag_node(state: PlannerGraphState) -> PlannerGraphState:
+    rag_result = build_rag_context(str(state.get("user_message") or ""))
+    decision = await decide_agent_route_hybrid(str(state.get("user_message") or ""), rag_result=rag_result)
+    return _apply_retrieve_decision(state, rag_result, decision)
+
+
+def _apply_retrieve_decision(
+    state: PlannerGraphState,
+    rag_result: dict[str, Any],
+    decision: RouteDecision,
+) -> PlannerGraphState:
     return {
         **state,
         "route": decision.route.value,
@@ -2295,9 +2321,9 @@ def _build_graph():
     if StateGraph is None:
         return None
     graph = StateGraph(PlannerGraphState)
-    graph.add_node("route", _route_node)
+    graph.add_node("route", _hybrid_route_node)
     graph.add_node("no_web", _no_web_node)
-    graph.add_node("retrieve_rag", _retrieve_rag_node)
+    graph.add_node("retrieve_rag", _hybrid_retrieve_rag_node)
     graph.add_node("compose_runtime_hints", _compose_hints_node)
     graph.add_node("rag_insufficient", _rag_insufficient_node)
     graph.add_node(AgentRoute.TOOL_WORKFLOW.value, _tool_workflow_node)
@@ -2421,7 +2447,7 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
     if compiled_graph is not None:
         return await compiled_graph.ainvoke(initial_state)
 
-    state = _route_node(initial_state)
+    state = await _hybrid_route_node(initial_state)
     route_target = _route_from_route_node(state)
     if route_target == "no_web":
         return _no_web_node(state)
@@ -2437,7 +2463,7 @@ async def prepare_langgraph_state(user_message: str) -> PlannerGraphState:
         return _plain_chat_node(state)
     if route_target == UNSUPPORTED_ROUTE_NODE:
         return _unsupported_route_node(state)
-    state = _retrieve_rag_node(state)
+    state = await _hybrid_retrieve_rag_node(state)
     if _route_after_retrieve_node(state) == "rag_insufficient":
         return _rag_insufficient_node(state)
     state = _compose_hints_node(state)

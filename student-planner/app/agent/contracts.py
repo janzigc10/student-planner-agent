@@ -33,6 +33,75 @@ class RouteDecision:
     expected_next_step: str = "delegate_to_agent_loop"
 
 
+MATERIAL_REFERENCE_MARKERS = (
+    "根据",
+    "按照",
+    "参考",
+    "结合",
+    "基于",
+    "上传",
+    "资料",
+    "材料",
+    "大纲",
+    "课件",
+    "讲义",
+    "老师发",
+    "实验要求",
+    "报告要求",
+    "课程要求",
+    "unit",
+    "Unit",
+    "知识库",
+)
+
+QUESTION_INTENT_MARKERS = (
+    "是什么",
+    "为什么",
+    "怎么理解",
+    "解释",
+    "说明",
+    "总结",
+    "梳理",
+    "区别",
+    "关系",
+    "共同点",
+    "主要目的",
+    "怎么形成",
+    "怎么写",
+    "怎么回答",
+    "有哪些",
+    "什么意思",
+)
+
+CURRENT_INFO_TIME_MARKERS = (
+    "今天",
+    "现在",
+    "当前",
+    "最新",
+    "实时",
+    "明天",
+    "昨天",
+    "今年",
+    "此刻",
+    "刚刚",
+)
+
+CURRENT_INFO_OBJECT_MARKERS = (
+    "天气",
+    "股价",
+    "汇率",
+    "价格",
+    "api价格",
+    "总统",
+    "主席",
+    "总理",
+    "新闻",
+    "赛程",
+    "比分",
+    "利率",
+)
+
+
 @dataclass(frozen=True)
 class PendingConfirmation:
     confirmation_id: str
@@ -311,6 +380,10 @@ _COURSE_MAINTENANCE_OBJECTS = ("课程", "课表", "两门课")
 def decide_agent_route(user_message: str, rag_result: dict[str, Any] | None = None) -> RouteDecision:
     """Classify the agent path without executing tools or calling an LLM."""
 
+    hard_decision = decide_hard_agent_route(user_message, rag_result=rag_result)
+    if hard_decision is not None:
+        return hard_decision
+
     message = str(user_message or "")
     compact = message.strip().lower().replace(" ", "")
     if not compact:
@@ -385,6 +458,142 @@ def decide_agent_route(user_message: str, rag_result: dict[str, Any] | None = No
     return RouteDecision(AgentRoute.PLAIN_CHAT, "no_agent_tool_or_rag_route")
 
 
+def decide_hard_agent_route(user_message: str, rag_result: dict[str, Any] | None = None) -> RouteDecision | None:
+    """Return only high-confidence deterministic routes.
+
+    This layer intentionally avoids broad RAG keyword matching.  Ambiguous
+    semantic cases are left to the hybrid LLM classifier.
+    """
+
+    message = str(user_message or "")
+    compact = message.strip().lower().replace(" ", "")
+    if not compact:
+        return RouteDecision(AgentRoute.PLAIN_CHAT, "empty_message")
+
+    if _looks_like_no_web_request(message) or _looks_like_current_info_request(compact):
+        return RouteDecision(
+            AgentRoute.NO_WEB,
+            "hard_current_public_information_guard",
+            expected_next_step="return_no_web_text",
+        )
+
+    if _looks_like_schedule_import(compact):
+        return RouteDecision(
+            AgentRoute.SCHEDULE_IMPORT,
+            "hard_schedule_upload_or_import",
+            should_retrieve=False,
+            retrieval_mode="none",
+            expected_next_step="run_schedule_import_shortcut",
+        )
+
+    if _looks_like_course_maintenance(compact):
+        return RouteDecision(
+            AgentRoute.COURSE_MAINTENANCE,
+            "hard_course_write_or_merge",
+            should_retrieve=False,
+            retrieval_mode="none",
+            expected_next_step="route_to_course_tool_workflow",
+        )
+
+    if _looks_like_explicit_study_plan(compact):
+        should_retrieve = _looks_like_material_reference(compact)
+        return RouteDecision(
+            AgentRoute.STUDY_PLAN,
+            "hard_explicit_study_or_work_plan",
+            should_retrieve=should_retrieve,
+            retrieval_mode="local_rag_context" if should_retrieve else "none",
+            expected_next_step="collect_context_then_plan",
+        )
+
+    if _looks_like_tool_workflow(compact):
+        should_retrieve = _looks_like_material_reference(compact)
+        return RouteDecision(
+            AgentRoute.TOOL_WORKFLOW,
+            "hard_task_reminder_or_schedule_tool_workflow",
+            should_retrieve=should_retrieve,
+            retrieval_mode="local_rag_context" if should_retrieve else "none",
+            expected_next_step="delegate_to_tool_loop",
+        )
+
+    if _looks_like_explicit_rag_question(compact):
+        return resolve_route_policy(
+            AgentRoute.RAG_QA,
+            "hard_explicit_knowledge_question",
+            rag_result=rag_result,
+            use_rag=True,
+        )
+
+    return None
+
+
+def resolve_route_policy(
+    route: AgentRoute,
+    reason: str,
+    *,
+    rag_result: dict[str, Any] | None = None,
+    use_rag: bool | None = None,
+    confidence: float | None = None,
+) -> RouteDecision:
+    """Derive safety-sensitive routing flags from the selected primary route."""
+
+    if route == AgentRoute.RAG_QA:
+        evidence_sufficient = bool((rag_result or {}).get("evidence_sufficient"))
+        if rag_result is not None and not evidence_sufficient:
+            return RouteDecision(
+                AgentRoute.RAG_INSUFFICIENT,
+                reason,
+                should_retrieve=True,
+                should_gate_rag_answer=True,
+                retrieval_mode="local_rag_context",
+                expected_next_step="return_rag_insufficient_text",
+            )
+        return RouteDecision(
+            AgentRoute.RAG_QA,
+            reason,
+            should_retrieve=True,
+            should_gate_rag_answer=True,
+            retrieval_mode="local_rag_context",
+            expected_next_step="retrieve_then_answer_with_local_context",
+        )
+
+    if route == AgentRoute.NO_WEB:
+        return RouteDecision(route, reason, expected_next_step="return_no_web_text")
+
+    if route == AgentRoute.SCHEDULE_IMPORT:
+        return RouteDecision(route, reason, expected_next_step="run_schedule_import_shortcut")
+
+    if route == AgentRoute.COURSE_MAINTENANCE:
+        return RouteDecision(route, reason, expected_next_step="route_to_course_tool_workflow")
+
+    if route == AgentRoute.STUDY_PLAN:
+        should_retrieve = bool(use_rag)
+        return RouteDecision(
+            route,
+            reason,
+            should_retrieve=should_retrieve,
+            should_gate_rag_answer=False,
+            retrieval_mode="local_rag_context" if should_retrieve else "none",
+            expected_next_step="collect_context_then_plan",
+        )
+
+    if route == AgentRoute.TOOL_WORKFLOW:
+        should_retrieve = bool(use_rag)
+        return RouteDecision(
+            route,
+            reason,
+            should_retrieve=should_retrieve,
+            should_gate_rag_answer=False,
+            retrieval_mode="local_rag_context" if should_retrieve else "none",
+            expected_next_step="delegate_to_tool_loop",
+        )
+
+    return RouteDecision(
+        AgentRoute.PLAIN_CHAT,
+        reason if route == AgentRoute.PLAIN_CHAT else f"{reason}_resolved_to_plain_chat",
+        expected_next_step="delegate_to_text_loop",
+    )
+
+
 def _looks_like_no_web_request(message: str) -> bool:
     from app.agent.loop import _looks_like_current_public_info_request
 
@@ -397,6 +606,32 @@ def _looks_like_rag_tool_workflow(compact: str) -> bool:
     return any(action in compact for action in _TOOL_ACTION_MARKERS) and any(
         target in compact for target in _TOOL_OBJECT_MARKERS
     )
+
+
+def _looks_like_material_reference(compact: str) -> bool:
+    return any(marker.lower() in compact for marker in MATERIAL_REFERENCE_MARKERS)
+
+
+def _looks_like_current_info_request(compact: str) -> bool:
+    return any(marker in compact for marker in CURRENT_INFO_TIME_MARKERS) and any(
+        marker in compact for marker in CURRENT_INFO_OBJECT_MARKERS
+    )
+
+
+def _looks_like_explicit_study_plan(compact: str) -> bool:
+    if any(marker in compact for marker in ("复习计划", "学习计划", "备考计划", "作业计划", "写作计划", "复习安排")):
+        return True
+    return any(target in compact for target in ("考试", "作业", "报告", "大作业", "项目", "论文", "期末")) and any(
+        marker in compact for marker in ("安排", "规划", "计划", "拆成", "拆解", "分解", "准备")
+    )
+
+
+def _looks_like_explicit_rag_question(compact: str) -> bool:
+    if not any(marker in compact for marker in QUESTION_INTENT_MARKERS):
+        return False
+    if _looks_like_rag_tool_workflow(compact):
+        return False
+    return True
 
 
 def _looks_like_schedule_import(compact: str) -> bool:

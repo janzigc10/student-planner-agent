@@ -518,7 +518,6 @@ async def test_langgraph_native_study_plan_confirmed_write_does_not_delegate(set
             tasks = list(task_result.scalars().all())
 
     assert [event["name"] for event in events if event["type"] == "tool_call"] == [
-        "rag_retrieve_study_materials",
         "get_free_slots",
         "create_study_plan",
         "create_task",
