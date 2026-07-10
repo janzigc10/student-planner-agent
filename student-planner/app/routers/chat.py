@@ -15,6 +15,21 @@ from app.models.user import User
 
 router = APIRouter(tags=["chat"])
 
+CHAT_MAX_MESSAGE_CHARS = 8000
+CHAT_MAX_MESSAGE_BYTES = 32000
+
+
+def _chat_input_limit_error(value: str) -> dict[str, object] | None:
+    text = str(value or "")
+    if len(text) > CHAT_MAX_MESSAGE_CHARS or len(text.encode("utf-8")) > CHAT_MAX_MESSAGE_BYTES:
+        return {
+            "type": "error",
+            "code": "input_too_long",
+            "recoverable": False,
+            "message": "Message is too long. Please shorten it and try again.",
+        }
+    return None
+
 LLM_PROVIDER_UNAVAILABLE_CODE = "llm_provider_unavailable"
 LLM_PROVIDER_UNAVAILABLE_MESSAGE = (
     "模型服务暂时连接不上，刚才的操作还没有执行。"
@@ -133,6 +148,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
         while True:
             data = await websocket.receive_json()
             user_message = str(data.get("message") or "").strip()
+            input_error = _chat_input_limit_error(user_message)
+            if input_error is not None:
+                await websocket.send_json(input_error)
+                continue
             if not user_message:
                 orphan_answer = str(data.get("answer") or "").strip()
                 if orphan_answer:
@@ -185,6 +204,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
                                     or user_response.get("message")
                                     or ""
                                 ).strip()
+                                answer_error = _chat_input_limit_error(user_answer)
+                                if answer_error is not None:
+                                    await websocket.send_json(answer_error)
+                                    continue
                                 if user_answer:
                                     break
                                 await websocket.send_json(

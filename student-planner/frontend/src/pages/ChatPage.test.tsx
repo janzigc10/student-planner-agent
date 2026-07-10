@@ -806,7 +806,7 @@ describe('ChatPage attachment drafting', () => {
         content: '我记得你更适合晚上复习高数，可以优先安排 19:00 后的整块时间。',
         answer_kind: 'rag',
         grounding: {
-          kind: 'memory',
+          kind: 'rag',
           label: '基于长期记忆',
           items: [{ label: '偏好', text: '高数复习优先安排在晚上' }],
         },

@@ -1,4 +1,5 @@
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -7,6 +8,7 @@ from sqlalchemy import select
 
 from app.agent import langgraph_loop as langgraph_runtime
 from app.agent import rag as rag_module
+from app.agent.contracts import AgentRoute, RouteDecision
 from app.agent.langchain_tools import langchain_assignment_tool_names, langchain_tool_schemas
 from app.agent.langgraph_loop import (
     get_langgraph_router_shell_mermaid,
@@ -569,6 +571,27 @@ async def test_prepare_langgraph_state_routes_no_web_inside_graph(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "最近学的中国近现代史怎么总结？",
+        "现在政治经济学是什么意思？",
+    ],
+)
+async def test_prepare_langgraph_state_keeps_course_knowledge_out_of_no_web(message, monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _query: {"evidence_sufficient": True, "hits": []},
+    )
+
+    state = await prepare_langgraph_state(message)
+
+    assert state["route"] == "rag_qa"
+    assert state.get("terminal_response") != "no_web"
+    assert "retrieve_rag" in state["graph_nodes"]
+
+
+@pytest.mark.asyncio
 async def test_prepare_langgraph_state_adds_rag_runtime_hint():
     state = await prepare_langgraph_state("改革开放是什么时候开始的")
 
@@ -621,9 +644,6 @@ async def test_prepare_langgraph_state_routes_study_plan_to_native_action_node(m
     assert state["graph_nodes"] == [
         "route",
         "study_plan",
-        "plan_generate",
-        "plan_review_write",
-        "confirmed_write",
     ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -642,8 +662,8 @@ async def test_prepare_langgraph_state_routes_assignment_breakdown_to_plan_not_r
     assert state["should_gate_rag_answer"] is False
     assert "rag_insufficient" not in state["graph_nodes"]
     assert "study_plan" in state["graph_nodes"]
-    assert "plan_generate" in state["graph_nodes"]
-    assert "plan_review_write" in state["graph_nodes"]
+    assert "plan_generate" not in state["graph_nodes"]
+    assert "plan_review_write" not in state["graph_nodes"]
 
 
 @pytest.mark.asyncio
@@ -669,9 +689,6 @@ async def test_prepare_langgraph_state_uses_rag_side_channel_for_material_backed
         "retrieve_rag",
         "compose_runtime_hints",
         "study_plan",
-        "plan_generate",
-        "plan_review_write",
-        "confirmed_write",
     ]
     assert "rag_insufficient" not in state["graph_nodes"]
 
@@ -691,9 +708,6 @@ async def test_prepare_langgraph_state_routes_schedule_import_to_native_action_n
     assert state["graph_nodes"] == [
         "route",
         "schedule_import",
-        "schedule_parse",
-        "ask_user_pause",
-        "confirmed_write",
     ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -713,9 +727,6 @@ async def test_prepare_langgraph_state_keeps_reminder_route_non_gating_with_rag_
     assert state["graph_nodes"] == [
         "route",
         "tool_workflow",
-        "task_tool_node",
-        "ask_user_pause",
-        "confirmed_write",
     ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -735,9 +746,6 @@ async def test_prepare_langgraph_state_routes_task_update_reminder_to_native_act
     assert state["graph_nodes"] == [
         "route",
         "tool_workflow",
-        "task_tool_node",
-        "ask_user_pause",
-        "confirmed_write",
     ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -757,9 +765,6 @@ async def test_prepare_langgraph_state_routes_course_maintenance_to_native_actio
     assert state["graph_nodes"] == [
         "route",
         "course_maintenance",
-        "course_disambiguate",
-        "ask_user_pause",
-        "confirmed_write",
     ]
     assert "delegate_legacy_loop" not in state["graph_nodes"]
 
@@ -931,6 +936,9 @@ async def test_langgraph_agent_loop_emits_rag_events_and_answers_without_legacy_
     assert events[2]["type"] == "text"
     assert "rag_qa" in events[2]["graph_nodes"]
     assert "delegate_legacy_loop" not in events[2]["graph_nodes"]
+    assert events[2]["answer_kind"] == "rag"
+    assert events[2]["grounding"]["kind"] == "rag"
+    assert events[2]["grounding"]["items"]
     assert events[2]["content"] == "改革开放始于 1978 年。"
     assert events[-1]["type"] == "done"
 
@@ -1330,3 +1338,75 @@ async def test_review_override_fallback_without_pending_confirmation_does_not_wr
     assert [event["type"] for event in events] == ["error", "done"]
     assert "确认状态已失效" in events[0]["message"]
     assert list(tasks) == []
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_does_not_prefill_future_action_nodes(monkeypatch):
+    async def fake_route(_message: str, rag_result=None):
+        return RouteDecision(
+            route=AgentRoute.STUDY_PLAN,
+            reason="study plan action",
+            should_retrieve=False,
+            should_gate_rag_answer=False,
+        )
+
+    monkeypatch.setattr("app.agent.langgraph_loop.decide_agent_route_hybrid", fake_route)
+
+    state = await prepare_langgraph_state("下周四有大学英语3考试，帮我安排复习")
+
+    assert state["route"] == AgentRoute.STUDY_PLAN.value
+    assert "study_plan" in state["graph_nodes"]
+    assert "plan_generate" not in state["graph_nodes"]
+    assert "plan_review_write" not in state["graph_nodes"]
+    assert "ask_user_pause" not in state["graph_nodes"]
+    assert "confirmed_write" not in state["graph_nodes"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_classifies_once_before_rag_retrieval(monkeypatch):
+    calls = []
+
+    async def fake_route(_message: str, rag_result=None):
+        calls.append(rag_result)
+        return RouteDecision(
+            route=AgentRoute.RAG_QA,
+            reason="local material question",
+            should_retrieve=True,
+            should_gate_rag_answer=True,
+            retrieval_mode="local_rag_context",
+        )
+
+    monkeypatch.setattr("app.agent.langgraph_loop.decide_agent_route_hybrid", fake_route)
+    monkeypatch.setattr(
+        "app.agent.langgraph_loop.build_rag_context",
+        lambda _query: {
+            "hits": [{"metadata": {"source": "notes.md"}}],
+            "context": "local evidence",
+            "evidence_sufficient": True,
+            "evidence_count": 1,
+        },
+    )
+
+    state = await prepare_langgraph_state("改革开放是什么时候开始的")
+
+    assert len(calls) == 1
+    assert calls[0] is None
+    assert state["route"] == AgentRoute.RAG_QA.value
+    assert state["rag_result"]["evidence_sufficient"] is True
+
+
+def test_rag_corpus_key_and_vector_ids_ignore_checkout_root_and_mtime(tmp_path, monkeypatch):
+    root_a = tmp_path / "checkout-a" / "corpus"
+    root_b = tmp_path / "checkout-b" / "corpus"
+    root_a.mkdir(parents=True)
+    root_b.mkdir(parents=True)
+    content = "改革开放 中国近现代史 课程资料"
+    (root_a / "history.md").write_text(content, encoding="utf-8")
+    (root_b / "history.md").write_text(content, encoding="utf-8")
+    monkeypatch.setattr(settings, "rag_vector_store_provider", "none")
+    first = LocalRAGRetriever(root_a, embeddings=rag_module.HashEmbeddings(dimensions=32))
+    second = LocalRAGRetriever(root_b, embeddings=rag_module.HashEmbeddings(dimensions=32))
+
+    os.utime(root_b / "history.md", (1, 1))
+    third = LocalRAGRetriever(root_b, embeddings=rag_module.HashEmbeddings(dimensions=32))
+
+    assert first.corpus_key == second.corpus_key == third.corpus_key
+    assert first._document_vector_ids() == second._document_vector_ids() == third._document_vector_ids()

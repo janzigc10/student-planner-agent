@@ -23,7 +23,9 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / ".venv-native" / "Scripts" / "python.exe"
+PYTHON = Path(os.environ.get("STUDENT_PLANNER_PYTHON") or (ROOT / ".venv-native" / "Scripts" / "python.exe"))
+if not PYTHON.exists():
+    PYTHON = Path(sys.executable)
 APP_PORT = 8001
 BASE_URL = f"http://127.0.0.1:{APP_PORT}"
 WS_URL = f"ws://127.0.0.1:{APP_PORT}/ws/chat"

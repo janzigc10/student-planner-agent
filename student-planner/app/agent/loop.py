@@ -7,7 +7,16 @@ from typing import Any, AsyncGenerator, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.contracts import AgentRoute, CONFIRMATION_REQUIRED_TOOLS, DBWritePlan, PendingConfirmation
+from app.agent.contracts import (
+    AgentRoute,
+    CONFIRMATION_REQUIRED_TOOLS,
+    DBWritePlan,
+    PendingConfirmation,
+    claim_write_ticket,
+    confirmation_matches_write_plan,
+    finish_write_ticket,
+    looks_like_current_public_info_request,
+)
 from app.agent.guardrails import check_max_loop_iterations
 from app.agent.llm_client import AsyncOpenAI, chat_completion, chat_completion_stream
 from app.agent.prompt import build_system_prompt
@@ -16,7 +25,7 @@ from app.agent.tool_preflight import (
     looks_like_task_update_intent,
     should_include_confirmed_question,
 )
-from app.agent.tool_executor import execute_tool
+from app.agent.tool_executor import execute_tool, execute_tool_batch
 from app.agent.tools import TOOL_DEFINITIONS
 from app.models.agent_log import AgentLog
 from app.models.conversation_message import ConversationMessage
@@ -244,43 +253,6 @@ _TOOL_INTENT_KEYWORDS = (
     "删除",
     "完成",
 )
-_CURRENT_INFO_TIME_MARKERS = (
-    "最新",
-    "最近",
-    "近期",
-    "刚刚",
-    "刚发生",
-    "刚发布",
-    "今天",
-    "现在",
-    "目前",
-    "本周",
-    "这个月",
-    "今年",
-    "2026",
-    "发生了什么",
-)
-_PUBLIC_NEWS_DOMAIN_MARKERS = (
-    "新闻",
-    "大事",
-    "大事件",
-    "时事",
-    "热点",
-    "国家大事",
-    "国家级",
-    "国内",
-    "国际",
-    "世界",
-    "中国",
-    "社会",
-    "政策",
-    "法律",
-    "科技",
-    "航天",
-    "经济",
-    "政治",
-)
-
 _SCHEDULE_FILE_ID_RE = re.compile(r"file_id\s*=\s*([a-zA-Z0-9\-]+)")
 _SCHEDULE_PERIOD_ENTRY_RE = re.compile(
     r"(?P<period>\d{1,2}\s*[-~～—–]\s*\d{1,2})\s*(?:节|节次)?\s*[:：]?\s*"
@@ -680,18 +652,7 @@ def _should_use_text_only_stream(user_texts: list[str], tool_history: list[str])
 
 
 def _looks_like_current_public_info_request(user_message: str) -> bool:
-    compact_text = str(user_message or "").lower().replace(" ", "")
-    if not compact_text:
-        return False
-
-    mentions_current_window = _has_compact_keyword(compact_text, _CURRENT_INFO_TIME_MARKERS)
-    mentions_public_news = _has_compact_keyword(compact_text, _PUBLIC_NEWS_DOMAIN_MARKERS)
-    if not mentions_current_window or not mentions_public_news:
-        return False
-
-    if _looks_like_tool_intent([user_message]) or looks_like_task_update_intent([user_message]):
-        return False
-    return True
+    return looks_like_current_public_info_request(user_message)
 
 
 def _current_public_info_unavailable_text() -> str:
@@ -1749,6 +1710,7 @@ def _build_schedule_import_write_state(
         question=question,
         options=("确认", "取消"),
         data=data,
+        planned_args=({"courses": courses},),
     )
     db_write_plan = DBWritePlan(
         confirmation_id=confirmation_id,
@@ -1777,6 +1739,7 @@ def _build_pending_confirmation(
     options: tuple[str, ...] = ("确认", "取消"),
     data: dict[str, Any] | None = None,
     allowed_tool_names: tuple[str, ...] | None = None,
+    planned_args: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
 ) -> PendingConfirmation:
     return PendingConfirmation(
         confirmation_id=f"{route}:{uuid.uuid4().hex}",
@@ -1787,6 +1750,7 @@ def _build_pending_confirmation(
         options=options,
         data=data,
         allowed_tool_names=allowed_tool_names or (),
+        planned_args=tuple(dict(item) for item in (planned_args or ())),
     )
 
 
@@ -1984,6 +1948,7 @@ async def _execute_confirmed_db_write_plan(
     confirmation_answer: str,
     db: AsyncSession,
     user_id: str,
+    allow_derived_reschedule: bool = False,
 ) -> dict[str, Any]:
     if pending_confirmation is None:
         return {"error": "Missing pending confirmation state for database write."}
@@ -1995,9 +1960,72 @@ async def _execute_confirmed_db_write_plan(
         return {"error": "Confirmation state does not match database write plan."}
     if db_write_plan.tool_name not in _confirmed_tool_scope(pending_confirmation):
         return {"error": "Confirmation state does not match database write plan."}
+    if not allow_derived_reschedule and not confirmation_matches_write_plan(pending_confirmation, db_write_plan):
+        return {"error": "Confirmation state does not match database write plan."}
     if not _is_write_authorized_answer(pending_confirmation, confirmation_answer):
         return {"status": "cancelled", "message": "Write cancelled before database execution."}
-    return await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
+    if not claim_write_ticket(user_id, db_write_plan):
+        return {"error": "Confirmation ticket has already been consumed."}
+    try:
+        result = await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
+    except Exception:
+        finish_write_ticket(user_id, db_write_plan, succeeded=False)
+        raise
+    finish_write_ticket(user_id, db_write_plan, succeeded="error" not in result)
+    return result
+
+
+async def _execute_confirmed_db_write_batch(
+    *,
+    pending_confirmation: PendingConfirmation | None,
+    db_write_plans: list[DBWritePlan],
+    confirmation_answer: str,
+    db: AsyncSession,
+    user_id: str,
+) -> dict[str, Any]:
+    """Validate and execute a group of confirmed writes as one DB transaction."""
+
+    if pending_confirmation is None:
+        return {"status": "rolled_back", "error": "Missing pending confirmation state for database write.", "results": []}
+    if not _is_write_authorized_answer(pending_confirmation, confirmation_answer):
+        return {"status": "cancelled", "results": []}
+
+    for plan in db_write_plans:
+        if (
+            pending_confirmation.confirmation_id != plan.confirmation_id
+            or pending_confirmation.route != plan.route
+            or plan.tool_name not in _confirmed_tool_scope(pending_confirmation)
+            or not confirmation_matches_write_plan(pending_confirmation, plan)
+        ):
+            return {
+                "status": "rolled_back",
+                "error": "Confirmation state does not match database write plan.",
+                "results": [],
+            }
+
+    claimed: list[DBWritePlan] = []
+    for plan in db_write_plans:
+        if not claim_write_ticket(user_id, plan):
+            for claimed_plan in claimed:
+                finish_write_ticket(user_id, claimed_plan, succeeded=False)
+            return {
+                "status": "rolled_back",
+                "error": "Confirmation ticket has already been consumed.",
+                "results": [],
+            }
+        claimed.append(plan)
+
+    batch = await execute_tool_batch(
+        [(plan.tool_name, dict(plan.args)) for plan in db_write_plans],
+        db,
+        user_id,
+    )
+    succeeded = batch.get("status") == "committed" and all(
+        "error" not in result for result in batch.get("results", [])
+    )
+    for plan in claimed:
+        finish_write_ticket(user_id, plan, succeeded=succeeded)
+    return batch
 
 
 def _extract_review_override(answer: str) -> dict[str, Any] | None:
@@ -2391,6 +2419,15 @@ async def _run_course_merge_shortcut(
             if str(item.get("action") or "") in {"update", "delete"}
         )
     )
+    planned_tool_args: list[dict[str, Any]] = []
+    for item in actions:
+        action = str(item.get("action") or "")
+        course = item.get("course") if isinstance(item.get("course"), dict) else {}
+        course_id = str(course.get("id") or "")
+        if action == "update" and course_id:
+            planned_tool_args.append({"course_id": course_id, **dict(item.get("updates") or {})})
+        elif action == "delete" and course_id:
+            planned_tool_args.append({"course_id": course_id})
     pending_confirmation = _build_pending_confirmation(
         route=AgentRoute.COURSE_MAINTENANCE.value,
         tool_name=allowed_tool_names[0] if allowed_tool_names else "update_course",
@@ -2398,6 +2435,7 @@ async def _run_course_merge_shortcut(
         ask_type="review",
         data=review_data,
         allowed_tool_names=allowed_tool_names,
+        planned_args=planned_tool_args,
     )
     first_db_write_plan: DBWritePlan | None = None
     for item in actions:
@@ -2570,6 +2608,7 @@ async def _run_missing_task_create_shortcut(
             "reminder": reminder_text,
         },
         allowed_tool_names=("create_task",),
+        planned_args=[create_args],
     )
     db_write_plan = _build_db_write_plan(
         pending_confirmation=pending_confirmation,
@@ -2789,6 +2828,7 @@ async def _run_confirmed_plan_write(
         ask_type="review",
         data=_study_plan_review_data(tasks),
         allowed_tool_names=("create_task",),
+        planned_args=tasks,
     )
     first_db_write_plan = _build_db_write_plan(
         pending_confirmation=pending_confirmation,
@@ -2829,6 +2869,7 @@ async def _run_confirmed_plan_write(
             ask_type="review",
             data=_study_plan_review_data(tasks),
             allowed_tool_names=("create_task",),
+            planned_args=tasks,
         )
         if not tasks:
             message_id = str(uuid.uuid4())
@@ -2851,6 +2892,67 @@ async def _run_confirmed_plan_write(
     created_results: list[dict[str, Any]] = []
     failed_results: list[dict[str, Any]] = []
     rescheduled_results: list[dict[str, Any]] = []
+    batch_plans = [
+        _build_db_write_plan(
+            pending_confirmation=pending_confirmation,
+            tool_name="create_task",
+            args=task_args,
+            description=f"Write confirmed {task_label}.",
+        )
+        for task_args in tasks
+    ]
+    batch_result = await _execute_confirmed_db_write_batch(
+        pending_confirmation=pending_confirmation,
+        db_write_plans=batch_plans,
+        confirmation_answer=str(confirm_answer or ""),
+        db=db,
+        user_id=user.id,
+    )
+    batch_results = list(batch_result.get("results") or [])
+    batch_has_conflict = any(
+        "Time conflict" in str(result.get("error") or "")
+        for result in batch_results
+        if isinstance(result, dict)
+    )
+    if batch_result.get("status") == "committed" or (batch_results and not batch_has_conflict):
+        step = start_step
+        for task_args, create_result in zip(tasks, batch_results):
+            step += 1
+            yield {"type": "tool_call", "name": "create_task", "args": task_args}
+            yield {"type": "tool_result", "name": "create_task", "result": create_result}
+            await _persist_local_tool_step(
+                db,
+                session_id,
+                user.id,
+                step,
+                "create_task",
+                task_args,
+                create_result,
+            )
+            if "error" not in create_result:
+                created_results.append(create_result)
+            else:
+                failed_results.append(create_result)
+        message_id = str(uuid.uuid4())
+        if failed_results and created_results:
+            text = f"已写入 {len(created_results)} 条{task_label}；另有 {len(failed_results)} 条因为时间冲突或参数问题未写入。"
+        elif failed_results:
+            text = f"这些{task_label}暂时没有写入成功，主要原因是时间冲突或参数不完整。请调整后再试。"
+        else:
+            text = f"已把 {len(created_results)} 条{task_label}写入日程。"
+        yield _build_plan_write_result_event(
+            message_id=message_id,
+            text=text,
+            task_label=task_label,
+            created_count=len(created_results),
+            failed_count=len(failed_results),
+            rescheduled_count=len(rescheduled_results),
+        )
+        yield {"type": "text", "message_id": message_id, "content": text}
+        await _save_message(db, session_id, "assistant", text)
+        yield {"type": "done"}
+        return
+
     for task_args in tasks:
         step += 1
         yield {"type": "tool_call", "name": "create_task", "args": task_args}
@@ -2923,6 +3025,7 @@ async def _run_confirmed_plan_write(
             confirmation_answer=str(confirm_answer or ""),
             db=db,
             user_id=user.id,
+            allow_derived_reschedule=True,
         )
         yield {"type": "tool_result", "name": "create_task", "result": retry_result}
         await _persist_local_tool_step(
@@ -3303,6 +3406,10 @@ async def _run_plan_adjustment_shortcut(
         ask_type="review",
         data={"daily_limit_minutes": daily_limit, "tasks": updates, "count": len(updates)},
         allowed_tool_names=("update_task",),
+        planned_args=[
+            {"task_id": update["task_id"], "end_time": update["new_end_time"]}
+            for update in updates
+        ],
     )
     first_update_args = {
         "task_id": updates[0]["task_id"],

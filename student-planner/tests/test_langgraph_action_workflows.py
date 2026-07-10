@@ -316,9 +316,9 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
     prompt = "17.00提醒我去做饭"
     state = await prepare_langgraph_state(prompt)
     assert_native_action_graph(state, "tool_workflow")
-    assert "task_tool_node" in state["graph_nodes"]
-    assert "ask_user_pause" in state["graph_nodes"]
-    assert "confirmed_write" in state["graph_nodes"]
+    assert "task_tool_node" not in state["graph_nodes"]
+    assert "ask_user_pause" not in state["graph_nodes"]
+    assert "confirmed_write" not in state["graph_nodes"]
 
     async def spy_run_langgraph_tool_node(state, runtime):
         tool_node_inputs.append(dict(state))
@@ -486,9 +486,9 @@ async def test_langgraph_native_study_plan_confirmed_write_does_not_delegate(set
         return next_state
 
     assert_native_action_graph(state, "study_plan")
-    assert "plan_generate" in state["graph_nodes"]
-    assert "plan_review_write" in state["graph_nodes"]
-    assert "confirmed_write" in state["graph_nodes"]
+    assert "plan_generate" not in state["graph_nodes"]
+    assert "plan_review_write" not in state["graph_nodes"]
+    assert "confirmed_write" not in state["graph_nodes"]
 
     with (
         patch("app.agent.loop.chat_completion_stream", side_effect=mock_chat_completion_stream),
@@ -564,9 +564,9 @@ async def test_langgraph_native_work_plan_confirmed_write_does_not_delegate(setu
     prompt = "2099-06-12 要交机器学习报告，帮我做作业计划。"
     state = await prepare_langgraph_state(prompt)
     assert_native_action_graph(state, "study_plan")
-    assert "plan_generate" in state["graph_nodes"]
-    assert "plan_review_write" in state["graph_nodes"]
-    assert "confirmed_write" in state["graph_nodes"]
+    assert "plan_generate" not in state["graph_nodes"]
+    assert "plan_review_write" not in state["graph_nodes"]
+    assert "confirmed_write" not in state["graph_nodes"]
 
     async def spy_plan_step(state, runtime, *, node_name):
         next_state = await original_plan_step(state, runtime, node_name=node_name)
@@ -759,9 +759,9 @@ async def test_langgraph_native_schedule_import_confirmed_write_does_not_delegat
             prompt = prompt_template.format(file_id=file_id)
             state = await prepare_langgraph_state(prompt)
             assert_native_action_graph(state, "schedule_import")
-            assert "schedule_parse" in state["graph_nodes"]
-            assert "ask_user_pause" in state["graph_nodes"]
-            assert "confirmed_write" in state["graph_nodes"]
+            assert "schedule_parse" not in state["graph_nodes"]
+            assert "ask_user_pause" not in state["graph_nodes"]
+            assert "confirmed_write" not in state["graph_nodes"]
 
             events = await collect_events(
                 run_langgraph_agent_loop(prompt, user, "session-lg-schedule", db, AsyncMock()),
@@ -807,9 +807,9 @@ async def test_langgraph_native_course_maintenance_confirmed_write_does_not_dele
     prompt = "把自然语言处理课程改名为 NLP"
     state = await prepare_langgraph_state(prompt)
     assert_native_action_graph(state, "course_maintenance")
-    assert "course_disambiguate" in state["graph_nodes"]
-    assert "ask_user_pause" in state["graph_nodes"]
-    assert "confirmed_write" in state["graph_nodes"]
+    assert "course_disambiguate" not in state["graph_nodes"]
+    assert "ask_user_pause" not in state["graph_nodes"]
+    assert "confirmed_write" not in state["graph_nodes"]
 
     with patch(
         "app.agent.langgraph_loop.run_agent_loop",

@@ -32,6 +32,8 @@ async def execute_tool(
     arguments: dict[str, Any],
     db: AsyncSession,
     user_id: str,
+    *,
+    commit: bool = True,
 ) -> dict[str, Any]:
     """Dispatch a tool call to the appropriate handler."""
     handler = TOOL_HANDLERS.get(tool_name)
@@ -39,9 +41,32 @@ async def execute_tool(
         return {"error": f"Unknown tool: {tool_name}"}
 
     try:
-        return await handler(db=db, user_id=user_id, **arguments)
+        return await handler(db=db, user_id=user_id, _commit=commit, **arguments)
     except Exception as exc:
+        await db.rollback()
         return {"error": str(exc)}
+
+
+async def execute_tool_batch(
+    calls: list[tuple[str, dict[str, Any]]],
+    db: AsyncSession,
+    user_id: str,
+) -> dict[str, Any]:
+    """Run a preflighted write batch and commit it once, or rollback all rows."""
+
+    results: list[dict[str, Any]] = []
+    try:
+        for tool_name, arguments in calls:
+            result = await execute_tool(tool_name, arguments, db, user_id, commit=False)
+            results.append(result)
+            if "error" in result:
+                await db.rollback()
+                return {"status": "rolled_back", "results": results}
+        await db.commit()
+        return {"status": "committed", "results": results}
+    except Exception as exc:
+        await db.rollback()
+        return {"status": "rolled_back", "results": results, "error": str(exc)}
 
 
 async def _list_courses(db: AsyncSession, user_id: str, **kwargs) -> dict[str, Any]:
@@ -94,15 +119,18 @@ def _normalize_course_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-async def _add_course(db: AsyncSession, user_id: str, **kwargs) -> dict[str, Any]:
+async def _add_course(db: AsyncSession, user_id: str, _commit: bool = True, **kwargs) -> dict[str, Any]:
     course = Course(user_id=user_id, **_normalize_course_payload(kwargs))
     db.add(course)
-    await db.commit()
-    await db.refresh(course)
+    if _commit:
+        await db.commit()
+        await db.refresh(course)
+    else:
+        await db.flush()
     return {"id": course.id, "name": course.name, "status": "created"}
 
 
-async def _update_course(db: AsyncSession, user_id: str, course_id: str, **kwargs) -> dict[str, Any]:
+async def _update_course(db: AsyncSession, user_id: str, course_id: str, _commit: bool = True, **kwargs) -> dict[str, Any]:
     result = await db.execute(
         select(Course).where(Course.id == course_id, Course.user_id == user_id)
     )
@@ -136,12 +164,15 @@ async def _update_course(db: AsyncSession, user_id: str, course_id: str, **kwarg
     course.week_pattern = normalized["week_pattern"]
     course.week_text = normalized["week_text"]
 
-    await db.commit()
-    await db.refresh(course)
+    if _commit:
+        await db.commit()
+        await db.refresh(course)
+    else:
+        await db.flush()
     return {"id": course.id, "name": course.name, "status": "updated"}
 
 
-async def _delete_course(db: AsyncSession, user_id: str, course_id: str, **kwargs) -> dict[str, Any]:
+async def _delete_course(db: AsyncSession, user_id: str, course_id: str, _commit: bool = True, **kwargs) -> dict[str, Any]:
     result = await db.execute(
         select(Course).where(Course.id == course_id, Course.user_id == user_id)
     )
@@ -150,7 +181,8 @@ async def _delete_course(db: AsyncSession, user_id: str, course_id: str, **kwarg
         return {"error": "Course not found"}
 
     await db.delete(course)
-    await db.commit()
+    if _commit:
+        await db.commit()
     return {"status": "deleted", "name": course.name}
 
 
@@ -479,6 +511,7 @@ async def _create_task(
     end_time: str,
     description: str | None = None,
     reminder_advance_minutes: int | None = None,
+    _commit: bool = True,
     **kwargs,
 ) -> dict[str, Any]:
     reminder_minutes = _normalize_reminder_advance_minutes(reminder_advance_minutes)
@@ -507,8 +540,9 @@ async def _create_task(
     reminders: list[Reminder] = []
     if reminder_minutes is not None:
         reminders = await _sync_task_reminders(db, user_id, task, reminder_minutes)
-    await db.commit()
-    await db.refresh(task)
+    if _commit:
+        await db.commit()
+        await db.refresh(task)
     task_summary = _task_payload(task)
     return {
         **task_summary,
@@ -518,7 +552,7 @@ async def _create_task(
     }
 
 
-async def _update_task(db: AsyncSession, user_id: str, task_id: str, **kwargs) -> dict[str, Any]:
+async def _update_task(db: AsyncSession, user_id: str, task_id: str, _commit: bool = True, **kwargs) -> dict[str, Any]:
     result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
     task = result.scalar_one_or_none()
     if task is None:
@@ -559,8 +593,9 @@ async def _update_task(db: AsyncSession, user_id: str, task_id: str, **kwargs) -
     else:
         reminders = await _list_task_reminders(db, user_id, task.id)
 
-    await db.commit()
-    await db.refresh(task)
+    if _commit:
+        await db.commit()
+        await db.refresh(task)
     task_summary = _task_payload(task)
     return {
         **task_summary,
@@ -570,14 +605,15 @@ async def _update_task(db: AsyncSession, user_id: str, task_id: str, **kwargs) -
     }
 
 
-async def _complete_task(db: AsyncSession, user_id: str, task_id: str, **kwargs) -> dict[str, Any]:
+async def _complete_task(db: AsyncSession, user_id: str, task_id: str, _commit: bool = True, **kwargs) -> dict[str, Any]:
     result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
     task = result.scalar_one_or_none()
     if task is None:
         return {"error": "Task not found"}
 
     task.status = "completed"
-    await db.commit()
+    if _commit:
+        await db.commit()
     return {"id": task.id, "title": task.title, "status": "completed"}
 
 
@@ -1015,6 +1051,7 @@ async def _bulk_import_courses(
     db: AsyncSession,
     user_id: str,
     courses: list[dict[str, Any]],
+    _commit: bool = True,
     **kwargs,
 ) -> dict[str, Any]:
     created: list[str] = []
@@ -1028,6 +1065,7 @@ async def _bulk_import_courses(
         end_time = course_data.get("end_time")
         if not start_time or not end_time:
             period = course_data.get("period")
+            await db.rollback()
             return {
                 "error": f"课程 {course_data.get('name', '未命名课程')} 缺少具体时间，请先补充节次时间（period={period}）。"
             }
@@ -1073,7 +1111,8 @@ async def _bulk_import_courses(
             reminders_created += 1
         created.append(course_data["name"])
 
-    await db.commit()
+    if _commit:
+        await db.commit()
     return {
         "status": "imported",
         "count": len(created),

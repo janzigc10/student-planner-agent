@@ -60,6 +60,50 @@ async def test_ws_auth_required(client):
 
 
 @pytest.mark.asyncio
+async def test_ws_rejects_oversized_utf8_message_before_agent_loop(setup_db):
+    from app.main import create_app
+    from app.routers.chat import CHAT_MAX_MESSAGE_CHARS
+
+    app = create_app()
+
+    async def override_get_db():
+        async with TestSession() as session:
+            yield session
+
+    async with TestSession() as session:
+        user = User(username="ws-limit-user", hashed_password="x")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+    async def should_not_run(*args, **kwargs):
+        raise AssertionError("oversized input must be rejected before the agent loop")
+        yield {}
+
+    token = create_access_token(user_id)
+    with (
+        patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
+        patch("app.routers.chat.get_db", side_effect=override_get_db),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=should_not_run),
+        patch("app.routers.chat.end_session", new_callable=AsyncMock),
+    ):
+        client = TestClient(app, raise_server_exceptions=False)
+        with client.websocket_connect("/ws/chat") as websocket:
+            websocket.send_json({"token": token})
+            assert websocket.receive_json()["type"] == "connected"
+            websocket.send_json({"message": "中" * (CHAT_MAX_MESSAGE_CHARS + 1)})
+            event = websocket.receive_json()
+
+    assert event == {
+        "type": "error",
+        "code": "input_too_long",
+        "recoverable": False,
+        "message": "Message is too long. Please shorten it and try again.",
+    }
+
+
+@pytest.mark.asyncio
 async def test_ws_returns_error_event_when_agent_loop_raises(setup_db):
     from app.main import create_app
 

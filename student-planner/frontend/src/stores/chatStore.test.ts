@@ -185,7 +185,7 @@ describe('chat event reducer', () => {
   it('keeps RAG answer metadata across streamed and final text events', () => {
     let state = createInitialChatState()
     const grounding = {
-      kind: 'memory' as const,
+      kind: 'rag' as const,
       label: '基于长期记忆',
       items: [{ label: '偏好', text: '高数复习优先安排在晚上' }],
     }

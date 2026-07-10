@@ -46,7 +46,7 @@ export interface ChatGroundingItem {
 }
 
 export interface ChatGrounding {
-  kind: 'memory'
+  kind: 'memory' | 'rag'
   label: string
   empty_label?: string
   count?: number

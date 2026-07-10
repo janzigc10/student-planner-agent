@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import uuid
+from threading import Lock
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,7 +70,10 @@ RAG_MIN_EVIDENCE_SEGMENT_COVERAGE = 0.6
 RAG_MAX_EVIDENCE_UNMATCHED_RUN = 2
 RAG_MIN_EVIDENCE_ANCHOR_COVERAGE = 0.45
 CHROMA_COLLECTION_NAME = "student_planner_rag"
+RAG_MAX_QUERY_CHARS = 8000
+RAG_MAX_QUERY_BYTES = 32000
 _RAG_RETRIEVER_CACHE: dict[tuple[Any, ...], "LocalRAGRetriever"] = {}
+_RAG_BUILD_LOCK = Lock()
 _CHROMA_RUNTIME_PROBE: tuple[bool, str] | None = None
 _RAG_QUERY_STOP_FRAGMENTS = {
     "是什么",
@@ -142,8 +146,11 @@ class HashEmbeddings(Embeddings):
 
 
 def _tokenize(text: str) -> list[str]:
-    latin_tokens = re.findall(r"[a-z0-9]+", text.lower())
-    chinese_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    value = str(text or "")
+    if len(value) > RAG_MAX_QUERY_CHARS or len(value.encode("utf-8")) > RAG_MAX_QUERY_BYTES:
+        raise ValueError("rag_query_too_long")
+    latin_tokens = re.findall(r"[a-z0-9]+", value.lower())
+    chinese_chars = re.findall(r"[\u4e00-\u9fff]", value)
     chinese_ngrams: list[str] = []
     if len(chinese_chars) == 1:
         chinese_ngrams.extend(chinese_chars)
@@ -496,14 +503,19 @@ def _cosine(left: list[float], right: list[float]) -> float:
     return sum(a * b for a, b in zip(left, right, strict=False))
 
 
-def _corpus_signature(corpus_dir: Path) -> tuple[tuple[str, int, int], ...]:
+def _corpus_signature(corpus_dir: Path) -> tuple[tuple[str, str], ...]:
     if not corpus_dir.exists():
         return ()
-    entries: list[tuple[str, int, int]] = []
+    entries: list[tuple[str, str]] = []
     for path in sorted(corpus_dir.rglob("*")):
         if _is_corpus_content_file(path):
-            stat = path.stat()
-            entries.append((str(path.relative_to(corpus_dir)), stat.st_size, stat.st_mtime_ns))
+            content = path.read_bytes()
+            entries.append(
+                (
+                    str(path.relative_to(corpus_dir)),
+                    hashlib.sha256(content).hexdigest(),
+                )
+            )
     return tuple(entries)
 
 
@@ -743,13 +755,14 @@ def get_rag_retriever(corpus_dir: str | Path | None = None) -> "LocalRAGRetrieve
         RAG_CHUNK_SIZE,
         RAG_CHUNK_OVERLAP,
     )
-    cached = _RAG_RETRIEVER_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    _RAG_RETRIEVER_CACHE.clear()
-    retriever = LocalRAGRetriever(resolved_dir)
-    _RAG_RETRIEVER_CACHE[cache_key] = retriever
-    return retriever
+    with _RAG_BUILD_LOCK:
+        cached = _RAG_RETRIEVER_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        _RAG_RETRIEVER_CACHE.clear()
+        retriever = LocalRAGRetriever(resolved_dir)
+        _RAG_RETRIEVER_CACHE[cache_key] = retriever
+        return retriever
 
 
 class LocalRAGRetriever:
@@ -831,7 +844,6 @@ class LocalRAGRetriever:
 
     def _build_corpus_key(self) -> str:
         raw = {
-            "corpus_dir": str(self.corpus_dir),
             "corpus_signature": _corpus_signature(self.corpus_dir),
             "embedding_provider": self.embedding_info.get("embedding_provider", ""),
             "embedding_model": self.embedding_info.get("embedding_model", ""),
@@ -879,7 +891,6 @@ class LocalRAGRetriever:
             "base_url": self.embedding_info.get("embedding_base_url", ""),
             "chunk_size": RAG_CHUNK_SIZE,
             "chunk_overlap": RAG_CHUNK_OVERLAP,
-            "corpus_dir": str(self.corpus_dir),
         }
         ids: list[str] = []
         for index, document in enumerate(self.documents):
@@ -1171,6 +1182,8 @@ class LocalRAGRetriever:
 
 
 def build_rag_context(query: str, *, corpus_dir: str | Path | None = None, top_k: int = 3) -> dict[str, Any]:
+    if len(str(query or "")) > RAG_MAX_QUERY_CHARS or len(str(query or "").encode("utf-8")) > RAG_MAX_QUERY_BYTES:
+        raise ValueError("rag_query_too_long")
     retriever = get_rag_retriever(corpus_dir)
     candidate_top_k = max(top_k, RAG_EVIDENCE_CANDIDATE_K)
     candidate_hits = retriever.retrieve(query, top_k=candidate_top_k)

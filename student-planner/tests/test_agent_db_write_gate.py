@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.agent.contracts import AgentRoute, DBWritePlan, PendingConfirmation
 from app.agent.loop import _execute_confirmed_db_write_plan, _restore_confirmed_task_reminder_arg
+from app.agent.tool_executor import execute_tool
 from app.models.course import Course
 from app.models.reminder import Reminder
 from app.models.task import Task
@@ -19,6 +20,7 @@ def _pending(
     tool_name: str = "create_task",
     allowed_tool_names: list[str] | None = None,
     data: dict | None = None,
+    planned_args: list[dict] | None = None,
 ) -> PendingConfirmation:
     return PendingConfirmation(
         confirmation_id=confirmation_id,
@@ -29,6 +31,7 @@ def _pending(
         options=("确认", "取消"),
         data=data,
         allowed_tool_names=tuple(allowed_tool_names or ()),
+        planned_args=tuple(planned_args or ()),
     )
 
 
@@ -200,3 +203,100 @@ async def test_db_write_gate_blocks_tool_mismatch_not_in_confirmation_scope(setu
         assert result["error"] == "Confirmation state does not match database write plan."
         reminders = list((await db.execute(select(Reminder).where(Reminder.user_id == user.id))).scalars().all())
         assert reminders == []
+
+
+@pytest.mark.asyncio
+async def test_db_write_gate_rejects_confirmation_a_with_plan_b_args(setup_db):
+    async with TestSession() as db:
+        user = User(id="gate-args-user", username="gate-args-user", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        confirmed_args = {
+            "title": "confirmed task",
+            "scheduled_date": "2099-06-01",
+            "start_time": "09:00",
+            "end_time": "10:00",
+        }
+        result = await _execute_confirmed_db_write_plan(
+            pending_confirmation=_pending(planned_args=[confirmed_args]),
+            db_write_plan=_plan(
+                args={**confirmed_args, "title": "tampered task"},
+            ),
+            confirmation_answer="确认",
+            db=db,
+            user_id=user.id,
+        )
+
+        assert result["error"] == "Confirmation state does not match database write plan."
+        tasks = list((await db.execute(select(Task).where(Task.user_id == user.id))).scalars().all())
+        assert tasks == []
+
+
+@pytest.mark.asyncio
+async def test_db_write_gate_consumes_same_ticket_once(setup_db):
+    async with TestSession() as db:
+        user = User(id="gate-replay-user", username="gate-replay-user", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        args = {
+            "title": "only once",
+            "scheduled_date": "2099-06-01",
+            "start_time": "09:00",
+            "end_time": "10:00",
+        }
+        pending = _pending(planned_args=[args])
+        plan = _plan(args=args)
+        first = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending,
+            db_write_plan=plan,
+            confirmation_answer="确认",
+            db=db,
+            user_id=user.id,
+        )
+        second = await _execute_confirmed_db_write_plan(
+            pending_confirmation=pending,
+            db_write_plan=plan,
+            confirmation_answer="确认",
+            db=db,
+            user_id=user.id,
+        )
+
+        assert first["status"] == "created"
+        assert second["error"] == "Confirmation ticket has already been consumed."
+        tasks = list((await db.execute(select(Task).where(Task.user_id == user.id))).scalars().all())
+        assert len(tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_rolls_back_all_rows_when_later_course_is_invalid(setup_db):
+    async with TestSession() as db:
+        user = User(id="bulk-rollback-user", username="bulk-rollback-user", hashed_password="x")
+        user_id = user.id
+        db.add(user)
+        await db.commit()
+
+        result = await execute_tool(
+            "bulk_import_courses",
+            {
+                "courses": [
+                    {
+                        "name": "first course",
+                        "weekday": 1,
+                        "start_time": "09:00",
+                        "end_time": "10:00",
+                    },
+                    {
+                        "name": "invalid second course",
+                        "weekday": 2,
+                    },
+                ]
+            },
+            db,
+            user_id,
+        )
+
+        assert "error" in result
+        courses = list((await db.execute(select(Course).where(Course.user_id == user_id))).scalars().all())
+        assert courses == []

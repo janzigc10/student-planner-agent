@@ -7,6 +7,9 @@ moving the legacy agent loop yet.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from threading import RLock
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -99,6 +102,10 @@ CURRENT_INFO_OBJECT_MARKERS = (
     "赛程",
     "比分",
     "利率",
+    "政策",
+    "法律",
+    "时事",
+    "热点",
 )
 
 
@@ -112,6 +119,7 @@ class PendingConfirmation:
     options: tuple[str, ...]
     data: dict[str, Any] | None = None
     allowed_tool_names: tuple[str, ...] = ()
+    planned_args: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,6 +129,76 @@ class DBWritePlan:
     tool_name: str
     args: dict[str, Any]
     description: str
+    args_digest: str = ""
+    nonce: str = ""
+
+    def __post_init__(self) -> None:
+        args_digest = self.args_digest or stable_args_digest(self.args)
+        nonce = self.nonce or build_write_nonce(
+            confirmation_id=self.confirmation_id,
+            route=self.route,
+            tool_name=self.tool_name,
+            args_digest=args_digest,
+        )
+        object.__setattr__(self, "args_digest", args_digest)
+        object.__setattr__(self, "nonce", nonce)
+
+
+def canonicalize_args(args: Any) -> str:
+    """Return a stable representation for confirmation and retry contracts."""
+
+    return json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def stable_args_digest(args: Any) -> str:
+    return hashlib.sha256(canonicalize_args(args).encode("utf-8")).hexdigest()
+
+
+def build_write_nonce(
+    *,
+    confirmation_id: str,
+    route: str,
+    tool_name: str,
+    args_digest: str,
+) -> str:
+    payload = f"{confirmation_id}|{route}|{tool_name}|{args_digest}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def confirmation_matches_write_plan(
+    pending_confirmation: PendingConfirmation,
+    db_write_plan: DBWritePlan,
+) -> bool:
+    """Check the explicit planned arguments when the confirmation carries them."""
+
+    if not pending_confirmation.planned_args:
+        return True
+    return any(
+        canonicalize_args(planned_args) == canonicalize_args(db_write_plan.args)
+        for planned_args in pending_confirmation.planned_args
+    )
+
+
+_ticket_lock = RLock()
+_claimed_write_tickets: set[tuple[str, str]] = set()
+_consumed_write_tickets: set[tuple[str, str]] = set()
+
+
+def claim_write_ticket(user_id: str, db_write_plan: DBWritePlan) -> bool:
+    key = (str(user_id), db_write_plan.nonce)
+    with _ticket_lock:
+        if key in _claimed_write_tickets or key in _consumed_write_tickets:
+            return False
+        _claimed_write_tickets.add(key)
+        return True
+
+
+def finish_write_ticket(user_id: str, db_write_plan: DBWritePlan, *, succeeded: bool) -> None:
+    key = (str(user_id), db_write_plan.nonce)
+    with _ticket_lock:
+        _claimed_write_tickets.discard(key)
+        if succeeded:
+            _consumed_write_tickets.add(key)
 
 
 STATE_SCHEMA_FIELDS = (
@@ -594,10 +672,15 @@ def resolve_route_policy(
     )
 
 
-def _looks_like_no_web_request(message: str) -> bool:
-    from app.agent.loop import _looks_like_current_public_info_request
+def looks_like_current_public_info_request(message: str) -> bool:
+    """Use one narrow hard guard for genuinely time-sensitive public facts."""
 
-    return _looks_like_current_public_info_request(message)
+    compact = str(message or "").lower().replace(" ", "")
+    return _looks_like_current_info_request(compact)
+
+
+def _looks_like_no_web_request(message: str) -> bool:
+    return looks_like_current_public_info_request(message)
 
 
 def _looks_like_rag_tool_workflow(compact: str) -> bool:
