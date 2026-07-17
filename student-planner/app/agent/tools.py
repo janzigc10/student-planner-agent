@@ -395,7 +395,46 @@ TOOL_DEFINITIONS: list[dict] = [
                         "items": {"type": "string"},
                         "description": "Choices for select mode",
                     },
-                    "data": {"type": "object", "description": "Structured payload shown to the user"},
+                    "data": {
+                        "type": "object",
+                        "description": (
+                            "Structured payload shown to the user. Before any database write, include planned_operations "
+                            "with the exact tool name and complete arguments that will execute after confirmation."
+                        ),
+                        "properties": {
+                            "planned_operations": {
+                                "type": "array",
+                                "description": "Exact database write operations authorized by this confirmation.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tool_name": {
+                                            "type": "string",
+                                            "enum": [
+                                                "add_course",
+                                                "update_course",
+                                                "delete_course",
+                                                "create_task",
+                                                "update_task",
+                                                "complete_task",
+                                                "set_reminder",
+                                                "save_period_times",
+                                                "bulk_import_courses",
+                                                "save_memory",
+                                                "delete_memory",
+                                            ],
+                                        },
+                                        "args": {
+                                            "type": "object",
+                                            "description": "Complete arguments for the write tool, including explicit null values.",
+                                        },
+                                    },
+                                    "required": ["tool_name", "args"],
+                                    "additionalProperties": False,
+                                },
+                            }
+                        },
+                    },
                 },
                 "required": ["question", "type"],
             },

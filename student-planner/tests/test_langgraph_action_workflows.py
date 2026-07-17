@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
+from app.agent import langgraph_loop as langgraph_runtime
 from app.agent.contracts import DBWritePlan, PendingConfirmation
 from app.agent.langgraph_loop import (
     GraphPlanWorkflowRuntime,
@@ -45,6 +46,31 @@ async def collect_events(generator, *, answers: list[str] | None = None) -> list
         except StopAsyncIteration:
             break
     return events
+
+
+def test_route_owned_workflows_only_trace_committed_writes():
+    rejected = {"error": "boom", "write_status": "rejected"}
+    base_state = {"graph_nodes": ["route"]}
+
+    schedule = langgraph_runtime._with_schedule_import_state(
+        base_state,
+        node_name="confirmed_write",
+        confirmed_result=rejected,
+    )
+    plan = langgraph_runtime._with_plan_workflow_state(
+        base_state,
+        node_name="confirmed_write",
+        confirmed_result=rejected,
+    )
+    course = langgraph_runtime._with_course_maintenance_state(
+        base_state,
+        node_name="confirmed_write",
+        confirmed_result=rejected,
+    )
+
+    assert schedule["graph_nodes"] == ["route"]
+    assert plan["graph_nodes"] == ["route"]
+    assert course["graph_nodes"] == ["route"]
 
 
 def assert_native_action_graph(state: dict, route: str) -> None:
@@ -242,10 +268,23 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
                             "function": {
                                 "name": "ask_user",
                                 "arguments": json.dumps(
-                                    {
-                                        "question": "确认创建任务：做饭，2026-05-02 17:00-17:30，并在17:00提醒。",
-                                        "type": "confirm",
-                                    },
+                                        {
+                                            "question": "确认创建任务：做饭，2026-05-02 17:00-17:30，并在17:00提醒。",
+                                            "type": "confirm",
+                                            "data": {
+                                                "planned_operations": [
+                                                    {
+                                                        "tool_name": "create_task",
+                                                        "args": {
+                                                            "title": "做饭",
+                                                            "scheduled_date": "2026-05-02",
+                                                            "start_time": "17:00",
+                                                            "end_time": "17:30",
+                                                        },
+                                                    }
+                                                ]
+                                            },
+                                        },
                                     ensure_ascii=False,
                                 ),
                             },
@@ -296,13 +335,51 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
                             "id": "reminder_1",
                             "type": "function",
                             "function": {
-                                "name": "set_reminder",
+                                "name": "ask_user",
                                 "arguments": json.dumps(
                                     {
-                                        "target_type": "task",
-                                        "target_id": task_id,
-                                        "advance_minutes": 0,
+                                        "question": "确认给刚创建的任务设置提醒吗？",
+                                        "type": "confirm",
+                                        "data": {
+                                            "planned_operations": [
+                                                {
+                                                    "tool_name": "set_reminder",
+                                                    "args": {
+                                                        "target_type": "task",
+                                                        "target_id": task_id,
+                                                        "advance_minutes": 0,
+                                                    },
+                                                }
+                                            ]
+                                        },
                                     },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 4:
+            tool_messages = [str(message.get("content") or "") for message in messages if message.get("role") == "tool"]
+            task_id = next(
+                content.split('"id": "')[1].split('"', 1)[0]
+                for content in tool_messages
+                if '"status": "created"' in content
+            )
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "reminder_1",
+                            "type": "function",
+                            "function": {
+                                "name": "set_reminder",
+                                "arguments": json.dumps(
+                                    {"target_type": "task", "target_id": task_id, "advance_minutes": 0},
                                     ensure_ascii=False,
                                 ),
                             },
@@ -342,7 +419,7 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
 
             events = await collect_events(
                 run_langgraph_agent_loop(prompt, user, "session-lg-task-reminder", db, mock_client),
-                answers=["可以"],
+                answers=["可以", "可以"],
             )
 
             task_result = await db.execute(select(Task).where(Task.user_id == user.id))
@@ -356,6 +433,8 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
         "tool_call",
         "tool_result",
         "tool_call",
+        "ask_user",
+        "tool_call",
         "tool_result",
         "text",
         "done",
@@ -363,22 +442,20 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
     assert [event["name"] for event in events if event["type"] == "tool_call"] == [
         "ask_user",
         "create_task",
+        "ask_user",
         "set_reminder",
     ]
     event_graph_nodes = graph_nodes_from_tool_results(events)
     assert "task_tool_node" in event_graph_nodes
     assert "ask_user_pause" in event_graph_nodes
     assert "confirmed_write" in event_graph_nodes
-    assert tool_node_spy.await_count == 3
+    assert tool_node_spy.await_count == 4
     assert tool_node_outputs[0]["pending_ask"]["status"] == "awaiting_answer"
     assert tool_node_outputs[0]["resume_state"]["status"] == "awaiting_answer"
     assert tool_node_inputs[1]["submitted_answer"] == "可以"
     assert tool_node_inputs[1]["pending_ask"]["status"] == "answered"
     assert isinstance(tool_node_inputs[1]["pending_confirmation"], PendingConfirmation)
-    assert set(tool_node_inputs[1]["pending_confirmation"].allowed_tool_names) == {
-        "create_task",
-        "set_reminder",
-    }
+    assert set(tool_node_inputs[1]["pending_confirmation"].allowed_tool_names) == {"create_task"}
     assert tool_node_inputs[1]["pending_confirmation_answer"] == "可以"
     assert tool_node_inputs[1]["tool_history"] == ["ask_user"]
     assert isinstance(tool_node_outputs[1]["db_write_plan"], DBWritePlan)
@@ -387,11 +464,11 @@ async def test_langgraph_native_task_reminder_confirmed_write_does_not_delegate(
         tool_node_outputs[1]["db_write_plan"].confirmation_id
         == tool_node_outputs[1]["pending_confirmation"].confirmation_id
     )
-    assert isinstance(tool_node_outputs[2]["db_write_plan"], DBWritePlan)
-    assert tool_node_outputs[2]["db_write_plan"].tool_name == "set_reminder"
+    assert isinstance(tool_node_outputs[3]["db_write_plan"], DBWritePlan)
+    assert tool_node_outputs[3]["db_write_plan"].tool_name == "set_reminder"
     assert (
-        tool_node_outputs[2]["db_write_plan"].confirmation_id
-        == tool_node_outputs[2]["pending_confirmation"].confirmation_id
+        tool_node_outputs[3]["db_write_plan"].confirmation_id
+        == tool_node_outputs[3]["pending_confirmation"].confirmation_id
     )
     assert len(tasks) == 1
     assert tasks[0].title == "做饭"
@@ -701,6 +778,51 @@ async def test_langgraph_work_plan_review_override_empty_tasks_message_is_readab
     assert_no_mojibake_text(content)
     assert [event.get("name") for event in events if event["type"] == "tool_call"] == []
     assert events[-1]["type"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_plan_batch_rollback_reports_zero_written(monkeypatch, setup_db):
+    async with TestSession() as db:
+        user = User(id="user-lg-plan-rollback", username="lg-plan-rollback", hashed_password="x")
+        db.add(user)
+        await db.commit()
+
+        async def fake_batch(*_args, **_kwargs):
+            return {
+                "status": "rolled_back",
+                "failed_index": 1,
+                "results": [{"status": "created"}, {"error": "invalid second task"}],
+            }
+
+        monkeypatch.setattr("app.agent.langgraph_loop.execute_tool_batch", fake_batch)
+        raw_tasks = [
+            {
+                "title": "第一条有效任务",
+                "scheduled_date": "2099-06-01",
+                "start_time": "09:00",
+                "end_time": "10:00",
+            },
+            {
+                "title": "第二条错误任务",
+                "scheduled_date": "2099-06-01",
+                "start_time": "10:00",
+                "end_time": "11:00",
+            },
+        ]
+        events = await collect_events(
+            run_langgraph_plan_review_write_workflow(
+                raw_tasks,
+                GraphPlanWorkflowRuntime(db=db, user=user, session_id="session-lg-plan-rollback"),
+            ),
+            answers=["确认"],
+        )
+        tasks = list((await db.execute(select(Task).where(Task.user_id == user.id))).scalars().all())
+
+    result_events = [event for event in events if event["type"] == "result"]
+    assert tasks == []
+    assert result_events[-1]["data"]["created_count"] == 0
+    assert "整体回滚" in result_events[-1]["content"]
+    assert "confirmed_write" not in result_events[-1].get("graph_nodes", [])
 
 
 @pytest.mark.asyncio

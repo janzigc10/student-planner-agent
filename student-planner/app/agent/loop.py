@@ -1689,11 +1689,9 @@ def _is_confirmed_answer(answer: str) -> bool:
     normalized = (answer or "").strip().lower()
     if not normalized:
         return False
-    negative_prefixes = ("不", "先不", "取消", "等等", "no")
-    if any(normalized.startswith(prefix) for prefix in negative_prefixes):
-        return False
-    positive_prefixes = ("确认", "好", "可以", "行", "是", "yes", "ok")
-    return any(normalized.startswith(prefix) for prefix in positive_prefixes)
+    if normalized in {"确认", "好", "可以", "行", "是", "yes", "ok"}:
+        return True
+    return normalized.startswith(("确认\nreview_override=", "确认 review_override="))
 
 
 def _build_schedule_import_write_state(
@@ -1740,6 +1738,7 @@ def _build_pending_confirmation(
     data: dict[str, Any] | None = None,
     allowed_tool_names: tuple[str, ...] | None = None,
     planned_args: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+    planned_tool_names: list[str] | tuple[str, ...] | None = None,
 ) -> PendingConfirmation:
     return PendingConfirmation(
         confirmation_id=f"{route}:{uuid.uuid4().hex}",
@@ -1751,6 +1750,7 @@ def _build_pending_confirmation(
         data=data,
         allowed_tool_names=allowed_tool_names or (),
         planned_args=tuple(dict(item) for item in (planned_args or ())),
+        planned_tool_names=tuple(planned_tool_names or ()),
     )
 
 
@@ -1802,11 +1802,7 @@ def _confirmed_tool_scope(pending_confirmation: PendingConfirmation) -> tuple[st
 
 
 def _is_write_authorized_answer(pending_confirmation: PendingConfirmation, answer: str) -> bool:
-    if _is_confirmed_answer(answer):
-        return True
-    if pending_confirmation.ask_type == "review" and str(answer or "").strip():
-        return not _is_cancelled_answer(answer)
-    return False
+    return _is_confirmed_answer(answer)
 
 
 def _infer_confirmed_write_scope(
@@ -1921,23 +1917,52 @@ def _build_confirmed_write_state_from_ask(
 ) -> PendingConfirmation | None:
     question = str(ask_result.get("question") or tool_args.get("question") or "")
     data = ask_result.get("data") if ask_result.get("data") is not None else tool_args.get("data")
-    allowed_tool_names = _infer_confirmed_write_scope(
-        question=question,
-        data=data,
-        confirmation_answer=confirmation_answer,
-    )
-    if not allowed_tool_names:
+    operations: list[tuple[str, dict[str, Any]]] = []
+    raw_operations = data.get("planned_operations") if isinstance(data, dict) else None
+    if isinstance(raw_operations, list):
+        for operation in raw_operations:
+            if not isinstance(operation, dict):
+                continue
+            tool_name = str(operation.get("tool_name") or "")
+            args = operation.get("args")
+            if tool_name in CONFIRMATION_REQUIRED_TOOLS and isinstance(args, dict):
+                operations.append((tool_name, dict(args)))
+
+    if not operations and isinstance(data, dict):
+        tasks = data.get("tasks")
+        if isinstance(tasks, list) and tasks and all(isinstance(task, dict) for task in tasks):
+            operations = [("create_task", dict(task)) for task in tasks]
+        courses = data.get("courses")
+        if not operations and isinstance(courses, list) and courses and all(isinstance(course, dict) for course in courses):
+            operations = [("bulk_import_courses", {"courses": [dict(course) for course in courses]})]
+        actions = data.get("actions")
+        if not operations and isinstance(actions, list):
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                action_name = str(action.get("action") or "")
+                course = action.get("course") if isinstance(action.get("course"), dict) else {}
+                course_id = str(course.get("id") or "")
+                if action_name == "update" and course_id:
+                    operations.append(("update_course", {"course_id": course_id, **dict(action.get("updates") or {})}))
+                elif action_name == "delete" and course_id:
+                    operations.append(("delete_course", {"course_id": course_id}))
+
+    if not operations:
         return None
 
-    route = _route_for_db_write_tool(allowed_tool_names[0])
+    allowed_tool_names = tuple(dict.fromkeys(tool_name for tool_name, _ in operations))
+    route = _route_for_db_write_tool(operations[0][0])
     return _build_pending_confirmation(
         route=route,
-        tool_name=allowed_tool_names[0],
+        tool_name=operations[0][0],
         question=question,
         ask_type=str(ask_result.get("type") or tool_args.get("type") or "confirm"),
         options=tuple(str(option) for option in (ask_result.get("options") or tool_args.get("options") or ())),
         data=data if isinstance(data, dict) else None,
         allowed_tool_names=allowed_tool_names,
+        planned_args=[args for _, args in operations],
+        planned_tool_names=[tool_name for tool_name, _ in operations],
     )
 
 
@@ -1948,31 +1973,33 @@ async def _execute_confirmed_db_write_plan(
     confirmation_answer: str,
     db: AsyncSession,
     user_id: str,
-    allow_derived_reschedule: bool = False,
 ) -> dict[str, Any]:
+    def rejected(message: str) -> dict[str, Any]:
+        return {"error": message, "write_status": "rejected"}
+
     if pending_confirmation is None:
-        return {"error": "Missing pending confirmation state for database write."}
+        return rejected("Missing pending confirmation state for database write.")
     if db_write_plan is None:
-        return {"error": "Missing database write plan for confirmed write."}
+        return rejected("Missing database write plan for confirmed write.")
     if pending_confirmation.confirmation_id != db_write_plan.confirmation_id:
-        return {"error": "Confirmation state does not match database write plan."}
+        return rejected("Confirmation state does not match database write plan.")
     if pending_confirmation.route != db_write_plan.route:
-        return {"error": "Confirmation state does not match database write plan."}
+        return rejected("Confirmation state does not match database write plan.")
     if db_write_plan.tool_name not in _confirmed_tool_scope(pending_confirmation):
-        return {"error": "Confirmation state does not match database write plan."}
-    if not allow_derived_reschedule and not confirmation_matches_write_plan(pending_confirmation, db_write_plan):
-        return {"error": "Confirmation state does not match database write plan."}
+        return rejected("Confirmation state does not match database write plan.")
+    if not confirmation_matches_write_plan(pending_confirmation, db_write_plan):
+        return rejected("Confirmation state does not match database write plan.")
     if not _is_write_authorized_answer(pending_confirmation, confirmation_answer):
-        return {"status": "cancelled", "message": "Write cancelled before database execution."}
+        return {"status": "cancelled", "message": "Write cancelled before database execution.", "write_status": "cancelled"}
     if not claim_write_ticket(user_id, db_write_plan):
-        return {"error": "Confirmation ticket has already been consumed."}
+        return rejected("Confirmation ticket has already been consumed.")
     try:
         result = await execute_tool(db_write_plan.tool_name, dict(db_write_plan.args), db, user_id)
     except Exception:
         finish_write_ticket(user_id, db_write_plan, succeeded=False)
         raise
     finish_write_ticket(user_id, db_write_plan, succeeded="error" not in result)
-    return result
+    return {**result, "write_status": "committed" if "error" not in result else "rejected"}
 
 
 async def _execute_confirmed_db_write_batch(
@@ -2020,7 +2047,7 @@ async def _execute_confirmed_db_write_batch(
         db,
         user_id,
     )
-    succeeded = batch.get("status") == "committed" and all(
+    succeeded = batch.get("status") in {"committed", "committed_with_effect_errors"} and all(
         "error" not in result for result in batch.get("results", [])
     )
     for plan in claimed:
@@ -2054,8 +2081,9 @@ def _build_plan_write_result_event(
     created_count: int,
     failed_count: int,
     rescheduled_count: int,
+    effect_failed_count: int = 0,
 ) -> dict[str, Any]:
-    has_failure = failed_count > 0 or created_count == 0
+    has_failure = failed_count > 0 or created_count == 0 or effect_failed_count > 0
     chips: list[str] = []
     if created_count > 0:
         chips.append(f"{created_count} 条记录")
@@ -2063,6 +2091,8 @@ def _build_plan_write_result_event(
         chips.append("含自动重排")
     if failed_count > 0:
         chips.append(f"{failed_count} 条待处理")
+    if effect_failed_count > 0:
+        chips.append(f"{effect_failed_count} 条提醒调度失败")
 
     return {
         "type": "result",
@@ -2079,6 +2109,7 @@ def _build_plan_write_result_event(
             "created_count": created_count,
             "failed_count": failed_count,
             "rescheduled_count": rescheduled_count,
+            "effect_failed_count": effect_failed_count,
         },
     }
 
@@ -2420,14 +2451,17 @@ async def _run_course_merge_shortcut(
         )
     )
     planned_tool_args: list[dict[str, Any]] = []
+    planned_tool_names: list[str] = []
     for item in actions:
         action = str(item.get("action") or "")
         course = item.get("course") if isinstance(item.get("course"), dict) else {}
         course_id = str(course.get("id") or "")
         if action == "update" and course_id:
             planned_tool_args.append({"course_id": course_id, **dict(item.get("updates") or {})})
+            planned_tool_names.append("update_course")
         elif action == "delete" and course_id:
             planned_tool_args.append({"course_id": course_id})
+            planned_tool_names.append("delete_course")
     pending_confirmation = _build_pending_confirmation(
         route=AgentRoute.COURSE_MAINTENANCE.value,
         tool_name=allowed_tool_names[0] if allowed_tool_names else "update_course",
@@ -2436,6 +2470,7 @@ async def _run_course_merge_shortcut(
         data=review_data,
         allowed_tool_names=allowed_tool_names,
         planned_args=planned_tool_args,
+        planned_tool_names=planned_tool_names,
     )
     first_db_write_plan: DBWritePlan | None = None
     for item in actions:
@@ -2914,7 +2949,18 @@ async def _run_confirmed_plan_write(
         for result in batch_results
         if isinstance(result, dict)
     )
-    if batch_result.get("status") == "committed" or (batch_results and not batch_has_conflict):
+    if batch_result.get("status") not in {"committed", "committed_with_effect_errors"}:
+        for task_args, batch_item_result in zip(tasks, batch_results):
+            await _persist_local_tool_step(
+                db,
+                session_id,
+                user.id,
+                step + 1,
+                "create_task",
+                task_args,
+                batch_item_result,
+            )
+    if batch_result.get("status") in {"committed", "committed_with_effect_errors"}:
         step = start_step
         for task_args, create_result in zip(tasks, batch_results):
             step += 1
@@ -2953,122 +2999,16 @@ async def _run_confirmed_plan_write(
         yield {"type": "done"}
         return
 
-    for task_args in tasks:
-        step += 1
-        yield {"type": "tool_call", "name": "create_task", "args": task_args}
-        create_result = await _execute_confirmed_db_write_plan(
-            pending_confirmation=pending_confirmation,
-            db_write_plan=_build_db_write_plan(
-                pending_confirmation=pending_confirmation,
-                tool_name="create_task",
-                args=task_args,
-                description=f"Write confirmed {task_label}.",
-            ),
-            confirmation_answer=str(confirm_answer or ""),
-            db=db,
-            user_id=user.id,
-        )
-        yield {"type": "tool_result", "name": "create_task", "result": create_result}
-        await _persist_local_tool_step(
-            db,
-            session_id,
-            user.id,
-            step,
-            "create_task",
-            task_args,
-            create_result,
-        )
-        if "error" not in create_result:
-            created_results.append(create_result)
-            continue
-
-        duration = _task_duration_minutes(task_args)
-        if not (_is_time_conflict_result(create_result) and plan_date_range is not None and duration is not None):
-            failed_results.append(create_result)
-            continue
-
-        start_date, end_date = plan_date_range
-        free_args = {
-            "start_date": start_date,
-            "end_date": end_date,
-            "min_duration_minutes": duration,
-        }
-        step += 1
-        yield {"type": "tool_call", "name": "get_free_slots", "args": free_args}
-        free_result = await execute_tool("get_free_slots", free_args, db, user.id)
-        yield {"type": "tool_result", "name": "get_free_slots", "result": free_result}
-        await _persist_local_tool_step(
-            db,
-            session_id,
-            user.id,
-            step,
-            "get_free_slots",
-            free_args,
-            free_result,
-        )
-
-        rescheduled_args = _find_rescheduled_task_args(task_args, free_result)
-        if rescheduled_args is None:
-            failed_results.append(create_result)
-            continue
-
-        step += 1
-        yield {"type": "tool_call", "name": "create_task", "args": rescheduled_args}
-        retry_result = await _execute_confirmed_db_write_plan(
-            pending_confirmation=pending_confirmation,
-            db_write_plan=_build_db_write_plan(
-                pending_confirmation=pending_confirmation,
-                tool_name="create_task",
-                args=rescheduled_args,
-                description=f"Write rescheduled confirmed {task_label}.",
-            ),
-            confirmation_answer=str(confirm_answer or ""),
-            db=db,
-            user_id=user.id,
-            allow_derived_reschedule=True,
-        )
-        yield {"type": "tool_result", "name": "create_task", "result": retry_result}
-        await _persist_local_tool_step(
-            db,
-            session_id,
-            user.id,
-            step,
-            "create_task",
-            rescheduled_args,
-            retry_result,
-        )
-        if "error" in retry_result:
-            failed_results.append(retry_result)
-            continue
-        created_results.append(retry_result)
-        rescheduled_results.append(
-            {
-                "title": rescheduled_args.get("title") or task_args.get("title"),
-                "from": f"{task_args.get('scheduled_date')} {task_args.get('start_time')}-{task_args.get('end_time')}",
-                "to": f"{rescheduled_args.get('scheduled_date')} {rescheduled_args.get('start_time')}-{rescheduled_args.get('end_time')}",
-            }
-        )
-
     message_id = str(uuid.uuid4())
-    reschedule_text = ""
-    if rescheduled_results:
-        reschedule_text = f"其中 {len(rescheduled_results)} 条因原时间冲突已自动重排；"
-    if failed_results and created_results:
-        text = f"已写入 {len(created_results)} 条{task_label}；{reschedule_text}另有 {len(failed_results)} 条因为时间冲突或参数问题未写入。"
-    elif failed_results:
-        text = f"这些{task_label}暂时没有写入成功，主要原因是时间冲突或参数不完整。请调整后再试。"
-    elif rescheduled_results:
-        text = f"已把 {len(created_results)} 条{task_label}写入日程，其中 {len(rescheduled_results)} 条因原时间冲突已自动重排。"
-    else:
-        text = f"已把 {len(created_results)} 条{task_label}写入日程。"
+    text = f"这批{task_label}没有写入成功，系统已整体回滚；数据库没有新增项目。"
 
     yield _build_plan_write_result_event(
         message_id=message_id,
         text=text,
         task_label=task_label,
-        created_count=len(created_results),
-        failed_count=len(failed_results),
-        rescheduled_count=len(rescheduled_results),
+        created_count=0,
+        failed_count=0,
+        rescheduled_count=0,
     )
     yield {"type": "text", "message_id": message_id, "content": text}
     await _save_message(db, session_id, "assistant", text)
@@ -3556,6 +3496,10 @@ async def _run_shortcut_with_langgraph_ask_state(
                         db_write_plan=db_write_plan,
                     )
                 )
+                graph_nodes = list(active_state.get("graph_nodes") or [])
+                if "ask_user_pause" not in graph_nodes:
+                    graph_nodes.append("ask_user_pause")
+                public_event = {**public_event, "graph_nodes": graph_nodes}
                 user_response = yield public_event
                 active_state = dict(
                     langgraph_runtime.resume_langgraph_ask_user_state(
@@ -3570,7 +3514,17 @@ async def _run_shortcut_with_langgraph_ask_state(
                     active_state["db_write_plan"] = db_write_plan
                 event = await shortcut.asend(user_response)
             else:
-                yield _strip_internal_shortcut_event_fields(event)
+                public_event = _strip_internal_shortcut_event_fields(event)
+                graph_nodes = list(active_state.get("graph_nodes") or [])
+                if event.get("type") in {"tool_call", "tool_result"} and "task_tool_node" not in graph_nodes:
+                    graph_nodes.append("task_tool_node")
+                result = event.get("result")
+                if isinstance(result, dict) and result.get("write_status") == "committed":
+                    if "confirmed_write" not in graph_nodes:
+                        graph_nodes.append("confirmed_write")
+                if graph_nodes:
+                    public_event = {**public_event, "graph_nodes": graph_nodes}
+                yield public_event
                 event = await shortcut.__anext__()
     except StopAsyncIteration:
         return

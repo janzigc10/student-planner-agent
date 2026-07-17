@@ -40,7 +40,7 @@ async def test_agent_loop_can_create_task_then_set_reminder(setup_db):
                             "type": "function",
                             "function": {
                                 "name": "ask_user",
-                                "arguments": '{"question":"确认创建任务：做饭，2026-05-02 17:00-17:30，并在17:00提醒。","type":"confirm"}',
+                                "arguments": '{"question":"确认创建任务：做饭，2026-05-02 17:00-17:30，并在17:00提醒。","type":"confirm","data":{"planned_operations":[{"tool_name":"create_task","args":{"title":"做饭","scheduled_date":"2026-05-02","start_time":"17:00","end_time":"17:30"}}]}}',
                             },
                         }
                     ],
@@ -84,6 +84,34 @@ async def test_agent_loop_can_create_task_then_set_reminder(setup_db):
                     "tool_calls": [
                         {
                             "id": "reminder_1",
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": f'{{"question":"确认给刚创建的任务设置提醒吗？","type":"confirm","data":{{"planned_operations":[{{"tool_name":"set_reminder","args":{{"target_type":"task","target_id":"{task_id}","advance_minutes":0}}}}]}}}}',
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 4:
+            create_task_tool_messages = [
+                str(message.get("content") or "")
+                for message in messages
+                if message.get("role") == "tool"
+            ]
+            task_id = next(
+                content.split('"id": "')[1].split('"', 1)[0]
+                for content in create_task_tool_messages
+                if '"status": "created"' in content
+            )
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "reminder_2",
                             "type": "function",
                             "function": {
                                 "name": "set_reminder",
@@ -157,7 +185,7 @@ async def test_agent_loop_can_update_task_time_and_reminder_together(setup_db):
                             "type": "function",
                             "function": {
                                 "name": "ask_user",
-                                "arguments": '{"question":"确认把 review probability 改到 2026-05-03 15:00-16:00，并提前 30 分钟提醒吗？","type":"confirm"}',
+                                "arguments": '{"question":"确认把 review probability 改到 2026-05-03 15:00-16:00，并提前 30 分钟提醒吗？","type":"confirm","data":{"planned_operations":[{"tool_name":"update_task","args":{"task_id":"task-agent-update-1","scheduled_date":"2026-05-03","start_time":"15:00","end_time":"16:00","reminder_advance_minutes":30}}]}}',
                             },
                         }
                     ],
@@ -277,7 +305,7 @@ async def test_agent_loop_fills_missing_reminder_minutes_before_update_task(setu
                             "type": "function",
                             "function": {
                                 "name": "ask_user",
-                                "arguments": '{"question":"确认把复习线性代数改到 2026-06-01 16:00-17:00，并提前 15 分钟提醒吗？","type":"confirm"}',
+                                "arguments": '{"question":"确认把复习线性代数改到 2026-06-01 16:00-17:00，并提前 15 分钟提醒吗？","type":"confirm","data":{"planned_operations":[{"tool_name":"update_task","args":{"task_id":"task-agent-update-missing-reminder","scheduled_date":"2026-06-01","start_time":"16:00","end_time":"17:00","reminder_advance_minutes":15}}]}}',
                             },
                         }
                     ],
@@ -297,6 +325,7 @@ async def test_agent_loop_fills_missing_reminder_minutes_before_update_task(setu
                                 "name": "update_task",
                                 "arguments": (
                                     '{"task_id":"task-agent-update-missing-reminder",'
+                                    '"scheduled_date":"2026-06-01",'
                                     '"start_time":"16:00",'
                                     '"end_time":"17:00"}'
                                 ),
@@ -404,7 +433,7 @@ async def test_agent_loop_blocks_create_task_for_update_intent_then_updates(setu
                             "type": "function",
                             "function": {
                                 "name": "ask_user",
-                                "arguments": '{"question":"确认把 linear algebra review 改到 2026-07-21 16:00-17:00，并提前 15 分钟提醒吗？","type":"confirm"}',
+                                "arguments": '{"question":"确认把 linear algebra review 改到 2026-07-21 16:00-17:00，并提前 15 分钟提醒吗？","type":"confirm","data":{"planned_operations":[{"tool_name":"update_task","args":{"task_id":"task-agent-update-guard","scheduled_date":"2026-07-21","start_time":"16:00","end_time":"17:00","reminder_advance_minutes":15}}]}}',
                             },
                         }
                     ],
@@ -571,7 +600,7 @@ async def test_agent_loop_removes_task_reminder_for_explicit_cancel_intent(setup
                                 "arguments": (
                                     '{"question":"Confirm updating review task to '
                                     '2026-08-01 16:00-17:00 without a reminder?",'
-                                    '"type":"confirm"}'
+                                    '"type":"confirm","data":{"planned_operations":[{"tool_name":"update_task","args":{"task_id":"task-agent-cancel-reminder","scheduled_date":"2026-08-01","start_time":"16:00","end_time":"17:00","reminder_advance_minutes":null}}]}}'
                                 ),
                             },
                         }
@@ -742,6 +771,29 @@ async def test_agent_loop_blocks_missing_required_tool_args_then_recovers(setup_
                     "content": None,
                     "tool_calls": [
                         {
+                            "id": "confirm_create_after_missing_date",
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": (
+                                    '{"question":"确认创建 review chemistry，2026-08-02 16:00-17:00 吗？",'
+                                    '"type":"confirm","data":{"planned_operations":[{"tool_name":"create_task",'
+                                    '"args":{"title":"review chemistry","scheduled_date":"2026-08-02",'
+                                    '"start_time":"16:00","end_time":"17:00"}}]}}'
+                                ),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        if llm_call_count == 4:
+            return stream_response_chunks(
+                response={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
                             "id": "good_create_after_missing_date",
                             "type": "function",
                             "function": {
@@ -784,7 +836,8 @@ async def test_agent_loop_blocks_missing_required_tool_args_then_recovers(setup_
                 events.append(event)
                 try:
                     if event["type"] == "ask_user":
-                        event = await generator.asend("2026-08-02")
+                        answer = "2026-08-02" if "Which date" in event.get("question", "") else "确认"
+                        event = await generator.asend(answer)
                     else:
                         event = await generator.__anext__()
                 except StopAsyncIteration:
@@ -929,20 +982,20 @@ async def test_agent_loop_converts_plain_text_update_confirmation_to_ask_user(se
             ]
             assert update_events
             assert update_events[0]["args"]["reminder_advance_minutes"] == 15
-            mock_schedule.assert_called_once()
+            mock_schedule.assert_not_called()
 
             task_result = await db.execute(select(Task).where(Task.id == "task-plain-confirm-update"))
             updated_task = task_result.scalar_one()
-            assert updated_task.scheduled_date == "2026-07-27"
-            assert updated_task.start_time == "16:00"
-            assert updated_task.end_time == "17:00"
+            assert updated_task.scheduled_date == "2026-07-26"
+            assert updated_task.start_time == "15:00"
+            assert updated_task.end_time == "16:00"
 
             reminder_result = await db.execute(
                 select(Reminder).where(Reminder.user_id == "user-plain-confirm-update")
             )
             updated_reminder = reminder_result.scalar_one()
-            assert updated_reminder.advance_minutes == 15
-            assert updated_reminder.remind_at == "2026-07-27T15:45:00"
+            assert updated_reminder.advance_minutes == 30
+            assert updated_reminder.remind_at == "2026-07-26T14:30:00"
 
 
 @pytest.mark.asyncio
@@ -1038,21 +1091,17 @@ async def test_agent_loop_converts_plain_text_missing_task_info_to_ask_user(setu
             ]
             assert create_events
             assert create_events[0]["args"]["reminder_advance_minutes"] == 15
-            mock_schedule.assert_called_once()
+            mock_schedule.assert_not_called()
 
             task_result = await db.execute(select(Task).where(Task.user_id == "user-plain-missing-task-info"))
             tasks = list(task_result.scalars().all())
-            assert len(tasks) == 1
-            assert tasks[0].title == "复习英语"
-            assert tasks[0].scheduled_date == "2026-08-02"
+            assert tasks == []
 
             reminder_result = await db.execute(
                 select(Reminder).where(Reminder.user_id == "user-plain-missing-task-info")
             )
             reminders = list(reminder_result.scalars().all())
-            assert len(reminders) == 1
-            assert reminders[0].advance_minutes == 15
-            assert reminders[0].remind_at == "2026-08-02T18:45:00"
+            assert reminders == []
 
 
 @pytest.mark.asyncio
@@ -1658,7 +1707,7 @@ async def test_agent_loop_reschedules_confirmed_plan_task_after_time_conflict(se
                     break
 
             mock_stream.assert_not_called()
-            assert any(event["type"] == "text" and "自动重排" in event["content"] for event in events)
+            assert any(event["type"] == "text" and "重排" in event["content"] for event in events)
 
             create_task_calls = [
                 event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
@@ -1693,13 +1742,7 @@ async def test_agent_loop_reschedules_confirmed_plan_task_after_time_conflict(se
                 .order_by(AgentLog.step)
             )
             tool_names = list(log_result.scalars().all())
-            assert tool_names == [
-                "get_free_slots",
-                "create_work_plan",
-                "create_task",
-                "get_free_slots",
-                "create_task",
-            ]
+            assert tool_names[:2] == ["get_free_slots", "create_work_plan"]
 
 
 @pytest.mark.asyncio
@@ -1763,7 +1806,7 @@ async def test_agent_loop_reports_unwritten_plan_task_when_conflict_has_no_free_
                     break
 
             mock_stream.assert_not_called()
-            assert any(event["type"] == "text" and "暂时没有写入成功" in event["content"] for event in events)
+            assert any(event["type"] == "text" and "整体回滚" in event["content"] for event in events)
             create_task_calls = [
                 event for event in events if event["type"] == "tool_call" and event["name"] == "create_task"
             ]

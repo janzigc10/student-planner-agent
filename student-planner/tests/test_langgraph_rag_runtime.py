@@ -37,6 +37,20 @@ def stream_response_chunks(*, response: dict, deltas: list[str] | None = None):
     return _generator()
 
 
+def test_rag_grounding_uses_the_same_evidence_hits_as_model_context():
+    grounding = langgraph_runtime._rag_grounding_payload(
+        {
+            "requested_top_k": 3,
+            "hits": [{"metadata": {"source": "wrong.md"}, "content": "unused candidate"}],
+            "evidence_hits": [
+                {"metadata": {"source": "right.md"}, "content": "actual evidence"}
+            ],
+        }
+    )
+
+    assert grounding["items"] == [{"label": "right.md", "text": "actual evidence"}]
+
+
 @pytest.fixture(autouse=True)
 def disable_real_rag_embedding_key(monkeypatch):
     clear_rag_cache()
@@ -862,6 +876,100 @@ async def test_langgraph_agent_loop_does_not_emit_internal_tool_summary_text(mon
     assert "[TOOL_SUMMARY:" not in visible_text
     assert [event["type"] for event in events] == ["text", "done"]
     assert events[0]["content"] == "已更新任务。"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_result",
+    [
+        {"status": "cancelled", "message": "Write cancelled before database execution."},
+        {"error": "tool failed"},
+        {"status": "rolled_back", "error": "batch failed"},
+    ],
+)
+async def test_langgraph_trace_does_not_mark_failed_write_as_confirmed(monkeypatch, setup_db, tool_result):
+    async def fake_prepare_langgraph_state(_message: str) -> dict:
+        return {
+            "route": "tool_workflow",
+            "should_retrieve": False,
+            "graph_nodes": ["route", "tool_workflow"],
+            "uses_langgraph": False,
+        }
+
+    async def fake_run_agent_action_loop(*_args, **_kwargs):
+        yield {"type": "tool_result", "name": "create_task", "result": tool_result}
+        yield {"type": "text", "message_id": "failed", "content": "未写入"}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(langgraph_runtime, "prepare_langgraph_state", fake_prepare_langgraph_state)
+    monkeypatch.setattr(langgraph_runtime, "run_agent_action_loop", fake_run_agent_action_loop)
+
+    async with TestSession() as db:
+        user = User(id="user-langgraph-failed-write", username="langgraph-failed-write", hashed_password="x")
+        db.add(user)
+        await db.commit()
+        events = [
+            event
+            async for event in run_langgraph_agent_loop(
+                "创建任务",
+                user,
+                "session-langgraph-failed-write",
+                db,
+                AsyncMock(),
+            )
+        ]
+
+    traces = [event.get("graph_nodes", []) for event in events if isinstance(event.get("graph_nodes"), list)]
+    assert all("confirmed_write" not in trace for trace in traces)
+
+
+@pytest.mark.asyncio
+async def test_langgraph_trace_marks_confirmed_write_only_after_explicit_commit(monkeypatch, setup_db):
+    async def fake_prepare_langgraph_state(_message: str) -> dict:
+        return {
+            "route": "tool_workflow",
+            "should_retrieve": False,
+            "graph_nodes": ["route", "tool_workflow"],
+            "uses_langgraph": False,
+        }
+
+    async def fake_run_agent_action_loop(*_args, **_kwargs):
+        yield {
+            "type": "tool_result",
+            "name": "create_task",
+            "result": {"write_status": "committed", "task": {"id": "task-1"}},
+        }
+        yield {"type": "text", "message_id": "success", "content": "已写入"}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(langgraph_runtime, "prepare_langgraph_state", fake_prepare_langgraph_state)
+    monkeypatch.setattr(langgraph_runtime, "run_agent_action_loop", fake_run_agent_action_loop)
+
+    async with TestSession() as db:
+        user = User(id="user-langgraph-success-write", username="langgraph-success-write", hashed_password="x")
+        db.add(user)
+        await db.commit()
+        events = [
+            event
+            async for event in run_langgraph_agent_loop(
+                "创建任务",
+                user,
+                "session-langgraph-success-write",
+                db,
+                AsyncMock(),
+            )
+        ]
+
+    traces = [event.get("graph_nodes", []) for event in events if isinstance(event.get("graph_nodes"), list)]
+    assert any("confirmed_write" in trace for trace in traces)
+    assert sum(trace.count("confirmed_write") for trace in traces) == len(traces)
+
+
+@pytest.mark.asyncio
+async def test_prepare_langgraph_state_does_not_claim_compiled_langgraph_execution():
+    state = await prepare_langgraph_state("hello")
+
+    assert state["uses_langgraph"] is False
 
 
 @pytest.mark.asyncio

@@ -836,6 +836,28 @@ describe('ChatPage attachment drafting', () => {
     expect(screen.getByText('含自动重排')).toBeInTheDocument()
   })
 
+  it('keeps RAG grounding visible when the answer also matches a result card', () => {
+    const { container } = render(<ChatPage />)
+
+    act(() => {
+      useChatStore.getState().applyServerEvent({
+        type: 'text',
+        message_id: 'rag-result-message',
+        content: '创建学习任务成功后，可以继续设置提醒。',
+        answer_kind: 'rag',
+        grounding: {
+          kind: 'rag',
+          label: '基于课程资料',
+          items: [{ label: '课程讲义', text: '创建学习任务后可以设置提醒。' }],
+        },
+      })
+    })
+
+    expect(container.querySelector('.assistant-result--success')).toBeTruthy()
+    expect(screen.getByLabelText('基于课程资料')).toHaveTextContent('课程讲义')
+    expect(screen.getByLabelText('基于课程资料')).toHaveTextContent('创建学习任务后可以设置提醒。')
+  })
+
   it('renders structured result events without keyword classification', () => {
     const { container } = render(<ChatPage />)
 

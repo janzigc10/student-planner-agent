@@ -27,6 +27,54 @@ from app.services.period_converter import convert_periods, normalize_period, par
 from app.services.schedule_upload_cache import get_schedule_upload, update_schedule_upload_state
 
 
+_POST_COMMIT_EFFECTS_KEY = "_post_commit_effects"
+
+
+def _schedule_effect(*, reminder_id: str, fire_time: Any, user_id: str) -> dict[str, Any]:
+    return {
+        "kind": "schedule_reminder",
+        "reminder_id": reminder_id,
+        "fire_time": fire_time,
+        "user_id": user_id,
+    }
+
+
+def _cancel_effect(*, reminder_id: str) -> dict[str, Any]:
+    return {"kind": "cancel_reminder", "reminder_id": reminder_id}
+
+
+def _run_post_commit_effects(effects: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    for effect in effects:
+        try:
+            if effect.get("kind") == "schedule_reminder":
+                schedule_reminder_job(
+                    reminder_id=str(effect["reminder_id"]),
+                    fire_time=effect["fire_time"],
+                    user_id=str(effect["user_id"]),
+                )
+            elif effect.get("kind") == "cancel_reminder":
+                cancel_reminder_job(str(effect["reminder_id"]))
+        except Exception as exc:
+            errors.append(f"{effect.get('kind')}: {exc}")
+    return errors
+
+
+def _finalize_effect_result(result: dict[str, Any], effects: list[dict[str, Any]]) -> dict[str, Any]:
+    public_result = {key: value for key, value in result.items() if key != _POST_COMMIT_EFFECTS_KEY}
+    if not effects:
+        return {**public_result, "effect_status": "not_required"}
+    errors = _run_post_commit_effects(effects)
+    if errors:
+        return {
+            **public_result,
+            "effect_status": "failed",
+            "effect_errors": errors,
+            "effect_message": "数据已保存，但提醒调度失败。",
+        }
+    return {**public_result, "effect_status": "committed"}
+
+
 async def execute_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -41,7 +89,13 @@ async def execute_tool(
         return {"error": f"Unknown tool: {tool_name}"}
 
     try:
-        return await handler(db=db, user_id=user_id, _commit=commit, **arguments)
+        result = await handler(db=db, user_id=user_id, _commit=commit, **arguments)
+        if not isinstance(result, dict):
+            return {"error": f"Tool {tool_name} returned an invalid result."}
+        if commit and "error" not in result and _POST_COMMIT_EFFECTS_KEY in result:
+            effects = list(result.get(_POST_COMMIT_EFFECTS_KEY) or [])
+            return _finalize_effect_result(result, effects)
+        return result
     except Exception as exc:
         await db.rollback()
         return {"error": str(exc)}
@@ -55,18 +109,48 @@ async def execute_tool_batch(
     """Run a preflighted write batch and commit it once, or rollback all rows."""
 
     results: list[dict[str, Any]] = []
+    pending_effects: list[tuple[int, list[dict[str, Any]]]] = []
     try:
-        for tool_name, arguments in calls:
+        for index, (tool_name, arguments) in enumerate(calls):
             result = await execute_tool(tool_name, arguments, db, user_id, commit=False)
             results.append(result)
             if "error" in result:
                 await db.rollback()
-                return {"status": "rolled_back", "results": results}
+                return {
+                    "status": "rolled_back",
+                    "results": [
+                        {key: value for key, value in item.items() if key != _POST_COMMIT_EFFECTS_KEY}
+                        for item in results
+                    ],
+                    "failed_index": index,
+                }
+            pending_effects.append((index, list(result.get(_POST_COMMIT_EFFECTS_KEY) or [])))
         await db.commit()
-        return {"status": "committed", "results": results}
+        public_results = [
+            {key: value for key, value in item.items() if key != _POST_COMMIT_EFFECTS_KEY}
+            for item in results
+        ]
+        effect_errors: list[str] = []
+        for index, effects in pending_effects:
+            finalized = _finalize_effect_result(public_results[index], effects)
+            public_results[index] = finalized
+            effect_errors.extend(finalized.get("effect_errors") or [])
+        return {
+            "status": "committed_with_effect_errors" if effect_errors else "committed",
+            "results": public_results,
+            "effect_errors": effect_errors,
+        }
     except Exception as exc:
         await db.rollback()
-        return {"status": "rolled_back", "results": results, "error": str(exc)}
+        return {
+            "status": "rolled_back",
+            "results": [
+                {key: value for key, value in item.items() if key != _POST_COMMIT_EFFECTS_KEY}
+                for item in results
+            ],
+            "error": str(exc),
+            "failed_index": len(results),
+        }
 
 
 async def _list_courses(db: AsyncSession, user_id: str, **kwargs) -> dict[str, Any]:
@@ -438,16 +522,13 @@ def _set_task_reminder_time(
     task: Task,
     advance_minutes: int,
     user_id: str,
+    effects: list[dict[str, Any]],
 ) -> None:
     fire_time = resolve_fire_time(_task_event_time(task), advance_minutes=advance_minutes)
     reminder.remind_at = fire_time.isoformat(timespec="seconds")
     reminder.advance_minutes = advance_minutes
     reminder.status = "pending"
-    schedule_reminder_job(
-        reminder_id=reminder.id,
-        fire_time=fire_time,
-        user_id=user_id,
-    )
+    effects.append(_schedule_effect(reminder_id=reminder.id, fire_time=fire_time, user_id=user_id))
 
 
 async def _sync_task_reminders(
@@ -455,11 +536,12 @@ async def _sync_task_reminders(
     user_id: str,
     task: Task,
     reminder_advance_minutes: int | None,
+    effects: list[dict[str, Any]],
 ) -> list[Reminder]:
     reminders = await _list_task_reminders(db, user_id, task.id)
     if reminder_advance_minutes is None:
         for reminder in reminders:
-            cancel_reminder_job(reminder.id)
+            effects.append(_cancel_effect(reminder_id=reminder.id))
             await db.delete(reminder)
         return []
 
@@ -482,6 +564,7 @@ async def _sync_task_reminders(
             task=task,
             advance_minutes=reminder_advance_minutes,
             user_id=user_id,
+            effects=effects,
         )
     return reminders
 
@@ -490,6 +573,7 @@ async def _reschedule_existing_task_reminders(
     db: AsyncSession,
     user_id: str,
     task: Task,
+    effects: list[dict[str, Any]],
 ) -> list[Reminder]:
     reminders = await _list_task_reminders(db, user_id, task.id)
     for reminder in reminders:
@@ -498,6 +582,7 @@ async def _reschedule_existing_task_reminders(
             task=task,
             advance_minutes=reminder.advance_minutes,
             user_id=user_id,
+            effects=effects,
         )
     return reminders
 
@@ -514,6 +599,7 @@ async def _create_task(
     _commit: bool = True,
     **kwargs,
 ) -> dict[str, Any]:
+    effects: list[dict[str, Any]] = []
     reminder_minutes = _normalize_reminder_advance_minutes(reminder_advance_minutes)
     conflict = await _find_task_conflict(
         db,
@@ -539,7 +625,7 @@ async def _create_task(
     await db.flush()
     reminders: list[Reminder] = []
     if reminder_minutes is not None:
-        reminders = await _sync_task_reminders(db, user_id, task, reminder_minutes)
+        reminders = await _sync_task_reminders(db, user_id, task, reminder_minutes, effects)
     if _commit:
         await db.commit()
         await db.refresh(task)
@@ -549,10 +635,12 @@ async def _create_task(
         "status": "created",
         "task": task_summary,
         "reminders": [_reminder_payload(reminder) for reminder in reminders],
+        _POST_COMMIT_EFFECTS_KEY: effects,
     }
 
 
 async def _update_task(db: AsyncSession, user_id: str, task_id: str, _commit: bool = True, **kwargs) -> dict[str, Any]:
+    effects: list[dict[str, Any]] = []
     result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
     task = result.scalar_one_or_none()
     if task is None:
@@ -587,9 +675,9 @@ async def _update_task(db: AsyncSession, user_id: str, task_id: str, _commit: bo
             setattr(task, key, value)
 
     if reminder_minutes_was_explicit:
-        reminders = await _sync_task_reminders(db, user_id, task, reminder_minutes)
+        reminders = await _sync_task_reminders(db, user_id, task, reminder_minutes, effects)
     elif time_changed:
-        reminders = await _reschedule_existing_task_reminders(db, user_id, task)
+        reminders = await _reschedule_existing_task_reminders(db, user_id, task, effects)
     else:
         reminders = await _list_task_reminders(db, user_id, task.id)
 
@@ -602,6 +690,7 @@ async def _update_task(db: AsyncSession, user_id: str, task_id: str, _commit: bo
         "status": "updated",
         "task": task_summary,
         "reminders": [_reminder_payload(reminder) for reminder in reminders],
+        _POST_COMMIT_EFFECTS_KEY: effects,
     }
 
 
@@ -623,8 +712,10 @@ async def _set_reminder(
     target_type: str,
     target_id: str,
     advance_minutes: int = 15,
+    _commit: bool = True,
     **kwargs,
 ) -> dict[str, Any]:
+    effects: list[dict[str, Any]] = []
     advance_minutes = _normalize_reminder_advance_minutes(advance_minutes)
     if advance_minutes is None:
         advance_minutes = 15
@@ -651,15 +742,22 @@ async def _set_reminder(
         target = result.scalar_one_or_none()
         if target is None:
             return {"error": "Task not found"}
-        reminders = await _sync_task_reminders(db, user_id, target, advance_minutes)
-        await db.commit()
+        reminders = await _sync_task_reminders(db, user_id, target, advance_minutes, effects)
+        if _commit:
+            await db.commit()
         reminder = reminders[0] if reminders else None
         if reminder is None:
-            return {"status": "reminder_removed", "target_type": "task", "target_id": target_id}
+            return {
+                "status": "reminder_removed",
+                "target_type": "task",
+                "target_id": target_id,
+                _POST_COMMIT_EFFECTS_KEY: effects,
+            }
         return {
             **_reminder_payload(reminder),
             "status": "reminder_set",
             "reminder": _reminder_payload(reminder),
+            _POST_COMMIT_EFFECTS_KEY: effects,
         }
 
     fire_time = resolve_fire_time(event_time, advance_minutes=advance_minutes)
@@ -673,14 +771,11 @@ async def _set_reminder(
         advance_minutes=advance_minutes,
     )
     db.add(reminder)
-    await db.commit()
-    await db.refresh(reminder)
-
-    schedule_reminder_job(
-        reminder_id=reminder.id,
-        fire_time=fire_time,
-        user_id=user_id,
-    )
+    await db.flush()
+    if _commit:
+        await db.commit()
+        await db.refresh(reminder)
+    effects.append(_schedule_effect(reminder_id=reminder.id, fire_time=fire_time, user_id=user_id))
     return {
         "id": reminder.id,
         "status": "reminder_set",
@@ -689,6 +784,7 @@ async def _set_reminder(
         "remind_at": remind_at,
         "advance_minutes": advance_minutes,
         "reminder": _reminder_payload(reminder),
+        _POST_COMMIT_EFFECTS_KEY: effects,
     }
 
 
@@ -1056,6 +1152,7 @@ async def _bulk_import_courses(
 ) -> dict[str, Any]:
     created: list[str] = []
     reminders_created = 0
+    effects: list[dict[str, Any]] = []
     user_result = await db.execute(select(User).where(User.id == user_id))
     user = user_result.scalar_one_or_none()
     semester_start = user.current_semester_start if user else None
@@ -1067,6 +1164,7 @@ async def _bulk_import_courses(
             period = course_data.get("period")
             await db.rollback()
             return {
+                "status": "rolled_back",
                 "error": f"课程 {course_data.get('name', '未命名课程')} 缺少具体时间，请先补充节次时间（period={period}）。"
             }
 
@@ -1103,10 +1201,8 @@ async def _bulk_import_courses(
             db.add(reminder)
             await db.flush()
 
-            schedule_reminder_job(
-                reminder_id=reminder.id,
-                fire_time=fire_time,
-                user_id=user_id,
+            effects.append(
+                _schedule_effect(reminder_id=reminder.id, fire_time=fire_time, user_id=user_id)
             )
             reminders_created += 1
         created.append(course_data["name"])
@@ -1118,6 +1214,7 @@ async def _bulk_import_courses(
         "count": len(created),
         "courses": created,
         "reminders_created": reminders_created,
+        _POST_COMMIT_EFFECTS_KEY: effects,
     }
 
 

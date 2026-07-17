@@ -1711,7 +1711,8 @@ export function ChatPage() {
                 }`}
                 key={message.id}
                 style={{ order: (index + 1) * 10 }}
-              >
+                >
+                {message.role === 'assistant' && isRagAnswer ? <RagGrounding grounding={message.grounding} /> : null}
                 {uploadReceipt ? (
                   <div className="message__upload-receipt">
                     <span className="message__upload-tag">
@@ -1729,7 +1730,6 @@ export function ChatPage() {
                   <AssistantResultCard result={assistantResult} messageId={message.id} />
                 ) : message.role === 'assistant' ? (
                   <div className="message__rich">
-                    {isRagAnswer ? <RagGrounding grounding={message.grounding} /> : null}
                     {renderRichTextContent(message.content, message.id)}
                     {isStreamingMessage ? <span className="message__cursor" aria-hidden="true" /> : null}
                   </div>

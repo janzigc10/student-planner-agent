@@ -30,6 +30,28 @@ def _chat_input_limit_error(value: str) -> dict[str, object] | None:
         }
     return None
 
+
+def _chat_input_type_error(field: str) -> dict[str, object]:
+    return {
+        "type": "error",
+        "code": "invalid_input_type",
+        "recoverable": True,
+        "message": f"{field} must be a string.",
+    }
+
+
+def _string_field(payload: object, *field_names: str) -> tuple[str, dict[str, object] | None]:
+    if not isinstance(payload, dict):
+        return "", _chat_input_type_error("payload")
+    for field_name in field_names:
+        if field_name not in payload or payload[field_name] is None:
+            continue
+        value = payload[field_name]
+        if not isinstance(value, str):
+            return "", _chat_input_type_error(field_name)
+        return value.strip(), None
+    return "", None
+
 LLM_PROVIDER_UNAVAILABLE_CODE = "llm_provider_unavailable"
 LLM_PROVIDER_UNAVAILABLE_MESSAGE = (
     "模型服务暂时连接不上，刚才的操作还没有执行。"
@@ -147,13 +169,19 @@ async def chat_websocket(websocket: WebSocket) -> None:
     try:
         while True:
             data = await websocket.receive_json()
-            user_message = str(data.get("message") or "").strip()
+            user_message, type_error = _string_field(data, "message")
+            if type_error is not None:
+                await websocket.send_json(type_error)
+                continue
             input_error = _chat_input_limit_error(user_message)
             if input_error is not None:
                 await websocket.send_json(input_error)
                 continue
             if not user_message:
-                orphan_answer = str(data.get("answer") or "").strip()
+                orphan_answer, answer_type_error = _string_field(data, "answer")
+                if answer_type_error is not None:
+                    await websocket.send_json(answer_type_error)
+                    continue
                 if orphan_answer:
                     if "review_override=" in orphan_answer and session_id is not None:
                         async for db in get_db():
@@ -199,11 +227,14 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         if event["type"] == "ask_user":
                             while True:
                                 user_response = await websocket.receive_json()
-                                user_answer = (
-                                    user_response.get("answer")
-                                    or user_response.get("message")
-                                    or ""
-                                ).strip()
+                                user_answer, answer_type_error = _string_field(
+                                    user_response,
+                                    "answer",
+                                    "message",
+                                )
+                                if answer_type_error is not None:
+                                    await websocket.send_json(answer_type_error)
+                                    continue
                                 answer_error = _chat_input_limit_error(user_answer)
                                 if answer_error is not None:
                                     await websocket.send_json(answer_error)

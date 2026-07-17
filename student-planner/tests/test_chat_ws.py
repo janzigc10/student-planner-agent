@@ -104,6 +104,57 @@ async def test_ws_rejects_oversized_utf8_message_before_agent_loop(setup_db):
 
 
 @pytest.mark.asyncio
+async def test_ws_rejects_non_string_confirmation_and_keeps_pending_generator(setup_db):
+    from app.main import create_app
+
+    app = create_app()
+
+    async def override_get_db():
+        async with TestSession() as session:
+            yield session
+
+    async with TestSession() as session:
+        user = User(username="ws-type-user", hashed_password="x")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+    async def asking_agent_loop(*args, **kwargs):
+        answer = yield {
+            "type": "ask_user",
+            "question": "确认吗？",
+            "ask_type": "confirm",
+            "options": ["确认", "取消"],
+        }
+        yield {"type": "text", "message_id": "type-ok", "content": str(answer)}
+        yield {"type": "done"}
+
+    token = create_access_token(user_id)
+    with (
+        patch("app.routers.chat.create_llm_client", return_value=AsyncMock()),
+        patch("app.routers.chat.get_db", side_effect=override_get_db),
+        patch("app.routers.chat.run_langgraph_agent_loop", side_effect=asking_agent_loop),
+        patch("app.routers.chat.end_session", new_callable=AsyncMock),
+    ):
+        client = TestClient(app, raise_server_exceptions=False)
+        with client.websocket_connect("/ws/chat") as websocket:
+            websocket.send_json({"token": token})
+            assert websocket.receive_json()["type"] == "connected"
+            websocket.send_json({"message": "create something"})
+            assert websocket.receive_json()["type"] == "ask_user"
+
+            websocket.send_json({"answer": {"unexpected": "object"}})
+            invalid = websocket.receive_json()
+            websocket.send_json({"answer": "确认"})
+            resumed = websocket.receive_json()
+
+    assert invalid["code"] == "invalid_input_type"
+    assert invalid["recoverable"] is True
+    assert resumed["content"] == "确认"
+
+
+@pytest.mark.asyncio
 async def test_ws_returns_error_event_when_agent_loop_raises(setup_db):
     from app.main import create_app
 

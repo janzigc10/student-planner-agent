@@ -45,6 +45,18 @@ def test_expected_tools_present():
     assert expected.issubset(names)
 
 
+def test_ask_user_contract_exposes_exact_planned_write_operations():
+    tool = _tool_by_name("ask_user")
+    data_schema = tool["function"]["parameters"]["properties"]["data"]
+    operation_schema = data_schema["properties"]["planned_operations"]["items"]
+
+    assert operation_schema["required"] == ["tool_name", "args"]
+    assert "create_task" in operation_schema["properties"]["tool_name"]["enum"]
+    assert "save_memory" in operation_schema["properties"]["tool_name"]["enum"]
+    assert "planned_operations" in TASK_TOOL_RULES
+    assert "planned_operations" in RESPONSE_FORMAT_RULES
+
+
 def test_update_task_contract_exposes_task_reminder_cancellation():
     tool = _tool_by_name("update_task")
     function = tool["function"]

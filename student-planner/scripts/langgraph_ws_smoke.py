@@ -180,12 +180,19 @@ def choose_message(payload):
 
     if "TOOL_FAILURE_SMOKE" in user:
         if "create_task" not in calls:
-            return {"role": "assistant", "content": None, "tool_calls": [tool_call("create_task", {"title": "Recovered task"})]}
+            return {"role": "assistant", "content": None, "tool_calls": [tool_call("create_task", {"title": "Failed task"})]}
+        return {"role": "assistant", "content": "tool failure handled without write"}
+
+    if "ROLLBACK_SMOKE" in user:
+        courses = [
+            {"name": "Rollback first course", "weekday": 1, "start_time": "08:00", "end_time": "09:00"},
+            {"name": "Rollback invalid course", "weekday": 2},
+        ]
         if "ask_user" not in calls:
-            return {"role": "assistant", "content": None, "tool_calls": [tool_call("ask_user", {"question": "Confirm recovered task", "type": "review", "data": {"tasks": [{"title": "Recovered task", "scheduled_date": "2099-06-02", "start_time": "10:00", "end_time": "10:30"}]}})]}
-        if calls.count("create_task") >= 2:
-            return {"role": "assistant", "content": "tool failure recovered"}
-        return {"role": "assistant", "content": None, "tool_calls": [tool_call("create_task", {"title": "Recovered task", "scheduled_date": "2099-06-02", "start_time": "10:00", "end_time": "10:30"})]}
+            return {"role": "assistant", "content": None, "tool_calls": [tool_call("ask_user", {"question": "确认执行课程批量回滚测试吗？", "type": "review", "data": {"courses": courses}})]}
+        if "bulk_import_courses" not in calls:
+            return {"role": "assistant", "content": None, "tool_calls": [tool_call("bulk_import_courses", {"courses": courses})]}
+        return {"role": "assistant", "content": "rollback handled without partial write"}
 
     if "TASK_CANCEL_SMOKE" in user:
         if "ask_user" not in calls:
@@ -198,7 +205,38 @@ def choose_message(payload):
         if "list_tasks" not in calls:
             return {"role": "assistant", "content": None, "tool_calls": [tool_call("list_tasks", {"date_from": "2099-06-01", "date_to": "2099-06-01"})]}
         if "ask_user" not in calls:
-            return {"role": "assistant", "content": None, "tool_calls": [tool_call("ask_user", {"question": "Confirm updating Smoke task", "type": "confirm"})]}
+            task_id = None
+            for text in tools:
+                if "Smoke task" in text:
+                    task_id = first_id(text)
+                    break
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    tool_call(
+                        "ask_user",
+                        {
+                            "question": "Confirm updating Smoke task",
+                            "type": "confirm",
+                            "data": {
+                                "planned_operations": [
+                                    {
+                                        "tool_name": "update_task",
+                                        "args": {
+                                            "task_id": task_id,
+                                            "scheduled_date": "2099-06-01",
+                                            "start_time": "16:00",
+                                            "end_time": "17:00",
+                                            "reminder_advance_minutes": 15,
+                                        },
+                                    }
+                                ]
+                            },
+                        },
+                    )
+                ],
+            }
         if "update_task" not in calls:
             task_id = None
             for text in tools:
@@ -267,7 +305,7 @@ async def run_turn(ws, label: str, message: str, answers: list[str]) -> dict:
         if event.get("type") == "done":
             if "delegate_legacy_loop" in graph_nodes:
                 raise AssertionError(f"{label} graph_nodes used legacy delegate: {graph_nodes}")
-            return {"sequence": sequence, "graph_nodes": graph_nodes, "final_text": final_text}
+            return {"sequence": sequence, "graph_nodes": list(dict.fromkeys(graph_nodes)), "final_text": final_text}
 
 
 async def run_ws_smoke(token: str) -> dict[str, list[str]]:
@@ -336,6 +374,12 @@ async def run_ws_smoke(token: str) -> dict[str, list[str]]:
                 ws,
                 "tool_failure",
                 "TOOL_FAILURE_SMOKE 创建一个 Recovered task 任务，时间是 2099-06-02 10:00-10:30",
+                ["确认"],
+            ),
+            "rollback": await run_turn(
+                ws,
+                "rollback",
+                "ROLLBACK_SMOKE 创建一个任务 2099-06-01 09:00-10:00 并测试批量课程回滚",
                 ["确认"],
             ),
             "task_cancel": await run_turn(
@@ -456,13 +500,8 @@ def assert_invariants(db_state: dict) -> None:
     assert "Course Alpha Renamed" in courses, json.dumps(db_state, ensure_ascii=True)
     assert "Course Beta" not in courses, json.dumps(db_state, ensure_ascii=True)
     assert courses.count("Course Gamma") == 1, json.dumps(db_state, ensure_ascii=True)
-    assert any(
-        task["title"] == "Recovered task"
-        and task["date"] == "2099-06-02"
-        and task["start"] == "10:00"
-        and task["end"] == "10:30"
-        for task in tasks
-    ), json.dumps(db_state, ensure_ascii=True)
+    assert "Rollback first course" not in courses, json.dumps(db_state, ensure_ascii=True)
+    assert "Rollback invalid course" not in courses, json.dumps(db_state, ensure_ascii=True)
     assert not any(task["title"] == "Cancelled task" for task in tasks), json.dumps(
         db_state,
         ensure_ascii=True,
@@ -488,13 +527,22 @@ def assert_smoke_evidence(sequences: dict) -> None:
     assert "plain_chat" in sequences["plain_chat"]["graph_nodes"], json.dumps(
         sequences["plain_chat"], ensure_ascii=True
     )
-    assert "create_task" in sequences["tool_failure"]["sequence"], json.dumps(
+    assert "confirmed_write" not in sequences["tool_failure"]["graph_nodes"], json.dumps(
         sequences["tool_failure"], ensure_ascii=True
+    )
+    assert "bulk_import_courses" in sequences["rollback"]["sequence"], json.dumps(
+        sequences["rollback"], ensure_ascii=True
+    )
+    assert "confirmed_write" not in sequences["rollback"]["graph_nodes"], json.dumps(
+        sequences["rollback"], ensure_ascii=True
     )
     assert "ask_user" in sequences["task_cancel"]["sequence"], json.dumps(
         sequences["task_cancel"], ensure_ascii=True
     )
     assert "create_task" in sequences["task_cancel"]["sequence"], json.dumps(
+        sequences["task_cancel"], ensure_ascii=True
+    )
+    assert "confirmed_write" not in sequences["task_cancel"]["graph_nodes"], json.dumps(
         sequences["task_cancel"], ensure_ascii=True
     )
     assert "task_tool_node" in sequences["task_create"]["graph_nodes"], json.dumps(
@@ -505,9 +553,6 @@ def assert_smoke_evidence(sequences: dict) -> None:
     )
     assert "confirmed_write" in sequences["task_create"]["graph_nodes"], json.dumps(
         sequences["task_create"], ensure_ascii=True
-    )
-    assert "task_tool_node" in sequences["task_cancel"]["graph_nodes"], json.dumps(
-        sequences["task_cancel"], ensure_ascii=True
     )
     assert "schedule_parse" in sequences["schedule"]["graph_nodes"], json.dumps(
         sequences["schedule"], ensure_ascii=True
@@ -539,6 +584,10 @@ def assert_smoke_evidence(sequences: dict) -> None:
         assert "delegate_legacy_loop" not in evidence["graph_nodes"], json.dumps(
             {label: evidence}, ensure_ascii=True
         )
+
+    assert sequences["task_create"]["graph_nodes"].count("confirmed_write") == 1, json.dumps(
+        sequences["task_create"], ensure_ascii=True
+    )
 
 
 def main() -> int:

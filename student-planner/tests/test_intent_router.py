@@ -67,6 +67,9 @@ async def test_hybrid_router_sends_short_underspecified_input_to_plain_chat(monk
     [
         "最近学的中国近现代史怎么总结？",
         "现在政治经济学是什么意思？",
+        "现在政策工具是什么意思？",
+        "当前法律课程的核心概念是什么？",
+        "根据课件总结当前利率政策的作用",
     ],
 )
 def test_hard_route_keeps_course_knowledge_questions_in_rag(message):
@@ -97,6 +100,9 @@ def test_hard_route_keeps_live_public_information_in_no_web(message):
     [
         "最近学的中国近现代史怎么总结？",
         "现在政治经济学是什么意思？",
+        "现在政策工具是什么意思？",
+        "当前法律课程的核心概念是什么？",
+        "根据课件总结当前利率政策的作用",
     ],
 )
 async def test_hybrid_route_keeps_course_knowledge_questions_in_rag(message):

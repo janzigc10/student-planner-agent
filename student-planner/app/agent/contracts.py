@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
 from threading import RLock
 from dataclasses import dataclass
 from enum import Enum
@@ -109,6 +110,25 @@ CURRENT_INFO_OBJECT_MARKERS = (
 )
 
 
+class FrozenDict(dict[str, Any]):
+    """JSON-compatible recursively immutable mapping for confirmation tickets."""
+
+    def _immutable(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("confirmation arguments are frozen")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _immutable
+
+
+def deep_freeze(value: Any) -> Any:
+    if isinstance(value, dict):
+        return FrozenDict({key: deep_freeze(item) for key, item in copy.deepcopy(value).items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(deep_freeze(item) for item in copy.deepcopy(value))
+    if isinstance(value, set):
+        return frozenset(deep_freeze(item) for item in copy.deepcopy(value))
+    return copy.deepcopy(value)
+
+
 @dataclass(frozen=True)
 class PendingConfirmation:
     confirmation_id: str
@@ -120,6 +140,12 @@ class PendingConfirmation:
     data: dict[str, Any] | None = None
     allowed_tool_names: tuple[str, ...] = ()
     planned_args: tuple[dict[str, Any], ...] = ()
+    planned_tool_names: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "data", deep_freeze(self.data) if self.data is not None else None)
+        object.__setattr__(self, "planned_args", tuple(deep_freeze(item) for item in self.planned_args))
+        object.__setattr__(self, "planned_tool_names", tuple(str(name) for name in self.planned_tool_names))
 
 
 @dataclass(frozen=True)
@@ -133,6 +159,8 @@ class DBWritePlan:
     nonce: str = ""
 
     def __post_init__(self) -> None:
+        frozen_args = deep_freeze(self.args)
+        object.__setattr__(self, "args", frozen_args)
         args_digest = self.args_digest or stable_args_digest(self.args)
         nonce = self.nonce or build_write_nonce(
             confirmation_id=self.confirmation_id,
@@ -142,6 +170,9 @@ class DBWritePlan:
         )
         object.__setattr__(self, "args_digest", args_digest)
         object.__setattr__(self, "nonce", nonce)
+
+    def has_valid_args_digest(self) -> bool:
+        return self.args_digest == stable_args_digest(self.args)
 
 
 def canonicalize_args(args: Any) -> str:
@@ -171,12 +202,18 @@ def confirmation_matches_write_plan(
 ) -> bool:
     """Check the explicit planned arguments when the confirmation carries them."""
 
-    if not pending_confirmation.planned_args:
-        return True
-    return any(
-        canonicalize_args(planned_args) == canonicalize_args(db_write_plan.args)
-        for planned_args in pending_confirmation.planned_args
-    )
+    if not pending_confirmation.planned_args or not db_write_plan.has_valid_args_digest():
+        return False
+    if pending_confirmation.planned_tool_names:
+        return any(
+            planned_tool_name == db_write_plan.tool_name
+            and canonicalize_args(planned_args) == canonicalize_args(db_write_plan.args)
+            for planned_tool_name, planned_args in zip(
+                pending_confirmation.planned_tool_names,
+                pending_confirmation.planned_args,
+            )
+        )
+    return any(canonicalize_args(planned_args) == canonicalize_args(db_write_plan.args) for planned_args in pending_confirmation.planned_args)
 
 
 _ticket_lock = RLock()
@@ -548,7 +585,7 @@ def decide_hard_agent_route(user_message: str, rag_result: dict[str, Any] | None
     if not compact:
         return RouteDecision(AgentRoute.PLAIN_CHAT, "empty_message")
 
-    if _looks_like_no_web_request(message) or _looks_like_current_info_request(compact):
+    if _looks_like_no_web_request(message):
         return RouteDecision(
             AgentRoute.NO_WEB,
             "hard_current_public_information_guard",
@@ -676,7 +713,7 @@ def looks_like_current_public_info_request(message: str) -> bool:
     """Use one narrow hard guard for genuinely time-sensitive public facts."""
 
     compact = str(message or "").lower().replace(" ", "")
-    return _looks_like_current_info_request(compact)
+    return _looks_like_current_info_request(compact) and not _looks_like_course_knowledge_context(compact)
 
 
 def _looks_like_no_web_request(message: str) -> bool:
@@ -693,6 +730,25 @@ def _looks_like_rag_tool_workflow(compact: str) -> bool:
 
 def _looks_like_material_reference(compact: str) -> bool:
     return any(marker.lower() in compact for marker in MATERIAL_REFERENCE_MARKERS)
+
+
+def _looks_like_course_knowledge_context(compact: str) -> bool:
+    if _looks_like_material_reference(compact):
+        return True
+    return any(
+        marker in compact
+        for marker in (
+            "课程",
+            "课上",
+            "教材",
+            "讲义",
+            "老师发",
+            "宏观经济学",
+            "政治经济学",
+            "法律课",
+            "政策工具",
+        )
+    )
 
 
 def _looks_like_current_info_request(compact: str) -> bool:
