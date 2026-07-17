@@ -27,3 +27,4 @@ student-planner/data/rag/chroma/
 student-planner/.idea/
 student-planner/frontend/agent_loop_e2e*.db
 student_planner.db
+docs/local/graduation-project-plan.md

@@ -1,3 +1,7 @@
+2026-07-17 版本基线收口：链路正确性源码与测试已提交为 `89c4e53 Harden agent chain correctness`，明确排除 tracked Chroma SQLite。提交前复跑后端路由/确认/事务/LangGraph/RAG/WebSocket 矩阵 `161 passed, 1 warning`，前端 Chat/store `64 passed, 2 skipped`，typecheck/build 通过，`git diff --check` 通过；warning 仍为既有 APScheduler 协程清理噪声。随后单独整理已完成 plan、本文档和本地毕业设计草案忽略规则，作为文档提交；下一阶段正式 benchmark 必须以干净 commit、数据集版本和 run manifest 为复现基线。
+
+2026-07-17 追加更新：建立本地毕业设计筹划草案 `docs/local/graduation-project-plan.md`，并将该文件加入根 `.gitignore`，避免尚未开题的个人规划进入功能提交。草案将项目收尾主线限定为三组可答辩证据：规则/LLM/混合意图路由比较，Embedding/BM25/Hybrid/Hybrid+rerank 检索消融，以及确认绑定、事务回滚、幂等和真实执行轨迹的 Agent 链路可靠性验证；明确不继续堆产品功能、不做第三方框架优劣对比、不为复杂度引入多 Agent。下一步先取得学校开题模板与时间节点，再冻结正式题目、研究问题和评测数据格式。
+
 2026-07-06 追加更新：完成 LangGraph worktree 合回主 tree 前的合并候选整理与验证。范围仍限定在 `D:\tmp\student-planner-langgraph-final` 的 `codex/langgraph-rag-submission` worktree；已把主 tree 独有提交 `08d1cbd Align RAG chat response contract` 合入 LangGraph 分支并解决 `progress.md`、`student-planner/app/agent/loop.py` 冲突，保留 LangGraph 的 pending confirmation / confirmed write 状态链路，同时保留 master 的 RAG `answer_kind/grounding` 响应契约。合并后发现并修复两个阻塞点：1）OpenAI-compatible stub 可能返回 `content: None`，`study_planner.py` 现在把空内容按空字符串处理并走 fallback 计划；2）LangGraph confirmed write 路径里，确认卡已经包含的 `reminder_advance_minutes=30` 可能被后续模型二次 `create_task` 的 `null` 覆盖，`loop.py` 现在会在确认落库前从 pending confirmation data 恢复该提醒参数，避免“确认创建带提醒任务”最终只写 task 不写 reminder。E2E 里的 `lower daily limit` 失败不是状态管理回归，而是测试夹具写死 `2026-06-09/10`，当前日期已经是 `2026-07-06`，代码按“未来 30 天”查询自然找不到；已把该夹具改为相对当前日期未来 14/15 天。
 
 验证结果：`git diff --check` 通过（仅 CRLF warning）；`scripts/langgraph_ws_smoke.py --db D:\tmp\student-planner-langgraph-merge-smoke-final.db --stub-port 18228` 通过，task/study/work/schedule/course/RAG/no-web/plain_chat DB invariant 均正常；后端分组矩阵使用独立 `--basetemp` 串行通过：第一组 `80 passed`，第二组 `50 passed`，第三组 `30 passed, 1 warning`（末尾仍有既有 Windows/aiosqlite access violation 噪声但退出码为 0）；前端 `npm.cmd test -- src/stores/chatStore.test.ts src/pages/ChatPage.test.tsx` -> `63 passed | 2 skipped`，`npm.cmd run typecheck` 通过，`npm.cmd run build` 通过；真实浏览器 `npm.cmd run e2e:agent-loop -- --reporter=list --global-timeout=900000` 现在 `12 passed (4.5m)`。本轮未修改 DB schema、RAG corpus、OCR、scheduler 或前端聊天协议；运行产物如 Chroma sqlite、E2E sqlite、test-results/dist 仍需在提交前排除。下一步：清理运行产物，提交 LangGraph 分支修复，然后检查 `D:\student_time_plan` 主 tree 的未提交状态；只有主 tree 可安全合并时才执行正常 `git merge`，不使用目录复制覆盖。
@@ -295,3 +299,32 @@ Plan 1 至 Plan 8 已收束；项目当前应回到 Agent Loop 闭环稳定性�
 - 新增三层回归覆盖 `decide_hard_agent_route`、`decide_agent_route_hybrid`、`prepare_langgraph_state`：`最近学的中国近现代史怎么总结？`、`现在政治经济学是什么意思？` 进入 RAG；新闻/汇率请求仍进入 `NO_WEB`。
 - 证据：`pytest -q tests/test_intent_router.py tests/test_langgraph_rag_runtime.py -k "course_knowledge or live_public_information"` -> `10 passed`。
 - 下一步：链路二，修正真实 `graph_nodes` 产生条件并把 cancel/error/rollback/success 断言写入 WS smoke。
+
+2026-07-10 Chain correctness follow-up（链路二完成）
+- `confirmed_write` 现在只接受显式 `write_status=committed` 的真实提交结果；cancel、tool error、rollback、票据失败不会产生该节点。
+- `graph_nodes` 改为由实际 `graph_node`/`graph_nodes` 事件及提交结果驱动，不再按工具名猜测未来节点；`uses_langgraph` 不再因安装 StateGraph 就伪装为 true。
+- 修正 ask_user、study/work plan、schedule、course maintenance 的 trace；smoke 强断言覆盖 no-web/RAG、tool error、rollback、task cancel、task create/update、study/work、schedule、course rename/delete/merge。
+- 证据：`C:\Users\Chen\anaconda3\python.exe scripts\langgraph_ws_smoke.py --db D:\tmp\student-planner-chain-correctness-smoke-final3.db --stub-port 18343` 通过；rollback 数据库保持无部分写入，task create/update 各只有一次 `confirmed_write`，study/work 含 `plan_generate -> plan_review_write -> confirmed_write`。
+- 下一步：链路三，继续验证 fail-closed 确认参数与所有写工具的可达性。
+
+2026-07-10 Chain correctness follow-up（链路三、四完成）
+- 确认门禁改为 fail-closed：普通 review 文本、无 `planned_operations` 的通用 ask_user、空计划、嵌套参数修改、digest 不一致、确认 A 执行 B 均不能授权写入；确认票据绑定 route/tool/args/confirmation_id，并深冻结嵌套参数。
+- 移除 `allow_derived_reschedule` 绕过；冲突重排必须生成完整新批次并重新确认，不能用旧确认票据直接写入。
+- 批量执行统一先 preflight、单事务提交；失败整体 rollback，最终计数为 0。study/work 计划和课程混合 update/delete 均覆盖失败回归。
+- 证据：`tests/test_agent_contracts.py tests/test_agent_db_write_gate.py tests/test_langgraph_action_workflows.py` -> `39 passed, 1 warning`；`tests/test_agent_loop_task_creation.py` -> `18 passed`；批量专项 -> `2 passed`；`tests/test_langgraph_rag_runtime.py --basetemp D:\tmp\pytest-chain-correctness-rag` -> `54 passed`。
+- 下一步：链路五，完成 RAG 来源在结果卡场景的前端/后端契约与最终矩阵验证。
+
+2026-07-10 Chain correctness follow-up（链路五与最终验证完成）
+- `ChatPage` 将 RAG grounding 从结果卡互斥分支中移出；即使 `classifyAssistantResult` 命中成功/结果卡，`rag_qa` 的来源标签和 source 仍可见。新增前端回归覆盖该组合场景。
+- 后端 RAG metadata、chatStore/ChatPage 类型和 WS 事件契约通过现有回归；未改变 `answer_kind=rag`、grounding/source 字段形状。
+- 最终后端矩阵：`tests/test_intent_router.py tests/test_agent_contracts.py tests/test_agent_db_write_gate.py tests/test_langgraph_rag_runtime.py tests/test_langgraph_action_workflows.py tests/test_agent_loop_task_creation.py tests/test_chat_ws.py --basetemp D:\tmp\pytest-chain-final` -> `130 passed, 2 warnings`。
+- 最终前端：`npm.cmd test -- --run src/stores/chatStore.test.ts src/pages/ChatPage.test.tsx` -> `64 passed, 2 skipped`；`npm.cmd run typecheck` PASS；`npm.cmd run build` PASS。
+- 最终真实 WS：`scripts/langgraph_ws_smoke.py --db D:\tmp\student-planner-chain-correctness-final.db --stub-port 18343` PASS；覆盖 no-web/RAG/失败/回滚/cancel/成功写入/update/study/work/schedule/course maintenance，并核对 DB 快照。
+- `git diff --check` PASS（仅 Windows LF/CRLF 提示）；`allow_derived_reschedule` 在 app/tests 无匹配。未 commit/push/merge/reset；既有 tracked Chroma SQLite dirty 状态和运行产物均保留。
+
+2026-07-11 Chain correctness 审查修复完成
+- 真实 `ask_user` schema、`Agent.md` 和 runtime prompt 现在公开 `data.planned_operations[] = {tool_name, args}` 精确确认协议；普通写入不再依赖测试 mock 才知道的隐藏字段。确认答案改为严格值匹配，“好像不对”“行程不对，取消”“是这样，但我想取消”均不能授权写入，结构化 `review_override` 仍保留。
+- schedule/plan/course route-owned state 只在 `write_status=committed` 时追加 `confirmed_write`；rejected/cancelled/rollback 不再虚报。旧计划 shortcut 在 batch rollback 后不再逐条重放，避免回滚后再次形成部分写入。
+- task/course reminder 的 schedule/cancel 副作用从数据库提交前移到 commit 后执行；`execute_tool_batch()` 在 rollback 时不执行 effect，提交后用独立 `effect_status` 报告调度结果。`set_reminder` 已遵守 `_commit=False`，新增真实测试证明 rollback 不留 reminder/job，post-commit scheduler 失败时 DB 事实保留并返回部分失败信息。
+- RAG grounding 改为引用真正进入模型 context 的 `evidence_hits`；课程/课件/讲义/法律课/政策工具语境优先于 NO_WEB hard guard；WebSocket 对 payload/message/answer 增加字符串类型校验，错误后保持 pending generator 可继续确认。
+- 验证：统一后端矩阵 `161 passed, 1 warning in 146.61s`（warning 为既有 APScheduler coroutine cleanup）；前端 Chat/store `64 passed, 2 skipped`，typecheck/build PASS；`scripts/langgraph_ws_smoke.py --db D:\tmp\student-planner-chain-repair-final.db --stub-port 18347` PASS，并新增断言确认 rollback 课程未落库；`git diff --check` 通过。设计规格已提交为 `9b0c767 docs: design chain correctness repair`，源码修复尚未 commit/push。
