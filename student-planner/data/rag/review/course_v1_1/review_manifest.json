@@ -1,0 +1,46 @@
+{
+  "schema_version": "course-rag-blind-review-v1",
+  "source_corpus_version": "rag-course-v1.1",
+  "source_corpus_manifest_sha256": "8ac077eb690cba2db97fe1d3335a00b19d2a2f933a1b9e6a40cca723b93c52d7",
+  "source_dataset_version": "rag-course-golden-v1.1",
+  "source_dataset_sha256": "4e6f4ce854602fa8af76f4cc677da6f7d7df1c56d6814dad926e21433a91722e",
+  "review_seed": 20260729,
+  "query_count": 20,
+  "candidate_count": 240,
+  "queries_per_course": 5,
+  "candidates_per_query": 12,
+  "course_counts": {
+    "machine_learning": 5,
+    "modern_chinese_history": 5,
+    "political_theory": 5,
+    "world_modern_history": 5
+  },
+  "hidden_answerability_counts": {
+    "full": 12,
+    "none": 4,
+    "partial": 4
+  },
+  "hidden_query_type_counts": {
+    "comparison": 3,
+    "exact_entity": 4,
+    "long_student_query": 4,
+    "multi_concept": 1,
+    "out_of_scope": 4,
+    "paraphrase": 1,
+    "summary": 3
+  },
+  "selection_policy": "Per course: one none and one partial query when available, then fill with distinct query types. Per query: up to two grade-2, five grade-1, then grade-0 pooled candidates; final order is deterministically shuffled. Existing labels are omitted.",
+  "labels_excluded_from_review_files": [
+    "answerability",
+    "reference_answer",
+    "expected_terms",
+    "qrels.relevance",
+    "relevant_source_ids",
+    "split"
+  ],
+  "files": {
+    "query_review": "query_review.tsv",
+    "qrel_review": "qrel_review.tsv"
+  },
+  "review_status": "optional_archive_not_planned"
+}

@@ -1,7 +1,7 @@
 # Student Planner 课程复习资料 RAG 设计
 
 > 生成日期：2026-07-28
-> 状态：DRAFT，待书面复核
+> 状态：IMPLEMENTED（2026-07-28）；采用 synthetic 未人工复核评测边界，当前四门课版本的真实 Qwen 在线 benchmark 待执行
 > 模式：毕业设计 / 研究型系统设计
 
 ## 1. 问题与目标
@@ -28,8 +28,8 @@ RAG 与混合意图路由并列为毕业设计的两项主要实验内容；安�
 1. 第一版继续使用预置资料，不实现学生自行上传 PDF、Word 或 PPT。
 2. 允许正式实验调用在线 Embedding、Reranker 和 LLM Judge，但必须冻结模型、参数、运行日期和原始输出。
 3. 课程资料允许使用生成式模型辅助构造，但必须显式标注为模拟语料，不宣称来自真实高校课程。
-4. 语料目标为约 5 门课程、50～70 份结构化资料、600～1000 个有效 chunk。
-5. 检索 golden set 目标为 80～120 条人工复核问题。
+4. 语料目标为 4 门课程、45～60 份结构化资料、500～850 个有效 chunk。
+5. 检索评测集目标为 80～120 条自动构造问题；因人力限制不执行人工复核，论文必须显式说明 synthetic 标签边界。
 6. 当前运行时继续由 LangGraph 负责路由和状态流转，不迁移到 LlamaIndex。
 
 ## 3. 当前基线
@@ -152,7 +152,7 @@ LlamaIndex 只有在后续范围明确扩大到用户上传大量 PDF、Word、P
 技术选择依据：
 
 - 阿里云当前将 `text-embedding-v4` 定位为文本搜索与 RAG 的主力文本向量模型：<https://help.aliyun.com/en/model-studio/embedding>
-- 阿里云当前推荐 `qwen3-rerank` 用于文本 RAG 重排：<https://help.aliyun.com/en/model-studio/embedding-rerank-model/>
+- 阿里云当前推荐 `qwen3-rerank` 用于文本 RAG 重排：<https://help.aliyun.com/en/model-studio/rerank>
 - LlamaIndex ingestion 与 Node 能力适合复杂资料导入，但不是当前预置 Markdown 范围的必要依赖：<https://docs.llamaindex.ai/en/v0.10.19/understanding/loading/loading.html>
 
 ## 7. 模拟课程语料
@@ -165,7 +165,8 @@ LlamaIndex 只有在后续范围明确扩大到用户上传大量 PDF、Word、P
 2. 中国近现代史
 3. 世界现代史
 4. 思想政治理论
-5. 大学英语
+
+2026-07-29 范围调整：大学英语模拟资料偏听说读写训练，概念问答密度低，容易引入与其他课程不一致的模板噪声，因此从正式 corpus、查询和 qrels 中整体移除；普通课程管理和复习计划功能仍可处理英语课程。
 
 每门课程准备 10～14 份资料，资料类型包括：
 
@@ -393,7 +394,7 @@ Reranker.rerank(query, candidates, top_n) -> ranked_candidates
 
 `evidence_requirements` 只用于 `answerability=full` 的完整证据评测；`partial` 和 `none` 不进入 complete-evidence recall 分母，而进入独立的 gate/拒答评测。检索指标按 answerability 分层报告，避免把“能召回局部相关资料”和“资料足以完整回答”混为一类。
 
-先完成 15～20 条 pilot 并修订指南，再扩展到完整数据集。pilot 不进入最终结果。正式数据集完成标注后，按 course、query type 和 answerability 分层，以固定 seed 划分为 30% development、70% test；划分清单与 dataset manifest 一起冻结。所有 Top-K、RRF、Reranker、证据阈值和提示词只能在 development 调整，test 只在最终配置冻结后运行。建议随机抽取约 25 条由第二人独立复标；若无法找到第二标注者，论文必须如实写明单人标注限制。
+先完成 15～20 条 pilot 并修订生成规则，再扩展到完整数据集。pilot 不进入最终结果。正式 synthetic 数据集按 course、query type 和 answerability 分层，以固定 seed 划分为 30% development、70% test；划分清单与 dataset manifest 一起冻结。所有 Top-K、RRF、Reranker、证据阈值和提示词只能在 development 调整，test 只在最终配置冻结后运行。本项目因人力限制不执行人工复标，因此结果只表示各检索方案在同一自动构造数据合同上的相对表现，不能外推为人工相关性判断或真实课程问答效果。
 
 ## 11. 评测
 
@@ -453,6 +454,10 @@ LLM Judge 不是唯一真值，必须保留原始回答、模型配置和人工�
 7. 能以固定命令导出原始 JSON/JSONL、汇总 CSV 和论文图表数据。
 8. 后端 RAG、路由、LangGraph、WebSocket 相关回归通过，`git diff --check` 通过。
 
+2026-07-28 实现审计：以上八项均已有代码与自动化证据；pilot/full corpus 与 dataset 校验通过，四模式离线 fallback smoke 成功，禁止 fallback 的 Reranker 缺配置路径以失败状态和 `failed_run.json` 收口，RAG/路由/LangGraph/WebSocket 联合回归 `97 passed`，后端全量 `432 passed`，前端 Chat/store `64 passed, 2 skipped`，typecheck/build 与 `git diff --check` 通过。真实 Qwen 在线 benchmark 仍按第 15 节列为外部后续，不计入当前代码落地完成声明。
+
+2026-07-29 语料范围调整审计：移除大学英语后重新冻结 full corpus 和查询集，当前论文基线为 `rag-course-v1.1 / rag-course-golden-v1.1`，包含 4 门课程、49 份资料、552 个 chunks、80 条查询（development 24 / test 56、2295 qrels），`corpus_manifest_sha256=8ac077eb690cba2db97fe1d3335a00b19d2a2f933a1b9e6a40cca723b93c52d7`；corpus/dataset 校验以及包含盲审导出的 76 项 RAG 定向测试通过。此前基于 5 门课程版本的在线 comparison smoke 仅保留为历史记录，不能代表当前数据集。
+
 ## 14. 非目标
 
 - 本阶段不实现用户上传资料。
@@ -464,18 +469,18 @@ LLM Judge 不是唯一真值，必须保留原始回答、模型配置和人工�
 
 ## 15. 开放事项
 
-1. 最终 5 门课程和每门资料模板仍需在 corpus pilot 时冻结。
-2. `qwen3-rerank` 的地区 endpoint、配额和稳定模型 ID 需在实施前验证。
-3. 是否能找到第二标注者复核约 25 条样本尚未确认。
+1. 已冻结 4 门 synthetic 课程、49 份资料、552 个 chunks 和 80 条自动构造查询；20 题、240 个候选 chunks 的无标签盲审包仅作为可选归档，不执行人工填写与裁决。
+2. `qwen3-rerank` 的模型名和 `/reranks` 请求合同已按官方文档实现；当前账号所在地区/workspace 的 base URL、配额与真实在线稳定性仍需使用实际凭据验证。
+3. 当前评测集明确标记为 `synthetic_unreviewed`，任何结果均不得称为人工 golden set、人工标注准确率或真实课程效果。
 4. 课程 metadata filtering 和相邻上下文扩展是否进入第二阶段辅助实验，待核心消融结果后决定。
 
 ## 16. 下一项具体工作
 
-先制作一个小型 pilot，而不是一次生成全部语料：
+实现已经完成 pilot 和完整 synthetic 数据集。下一步不再扩功能：
 
-1. 验证 `qwen3-rerank` 所在地区 endpoint、可固定的模型 ID、配额、超时和单次 Top 20 输入合同；同时冻结 `text-embedding-v4` 维度与 query instruct。
-2. 选择“机器学习基础”和“中国近现代史”两门课程。
-3. 每门生成 5 份不同类型资料。
-4. 按本设计导出 corpus manifest、chunks JSONL 和稳定 chunk ID。
-5. 人工复核 15～20 条问题、三级 qrels 和多证据 requirements。
-6. 在 pilot 上跑通四模式统一输出、分模式 gate 校准和错误记录，确认指标能够区分方案后，再扩展到完整 5 门课程。
+1. 配置实际 workspace 的 Embedding/Reranker endpoint、Key 和单价。
+2. 从干净 Git commit 运行不带 `--allow-reranker-fallback` 的正式四模式 synthetic benchmark。
+3. 只用 development set 冻结各模式 gate，再一次性报告 test set。
+4. 输出论文表格、图表、失败案例和限制说明，明确 synthetic 未人工复核边界。
+
+2026-07-30 更新：正式评测协议已由 `docs/superpowers/specs/2026-07-30-rag-benchmark-v2-design.md` 接管。旧在线 pilot 已查看完整主集结果，因此当前 56 条 test 的证据等级明确为 `internal_test_exposed_by_pilot`；唯一一次正式在线运行必须使用 v2 的 dev/test 分离汇总、bootstrap CI、配对比较和 `--formal` preflight。独立 challenge holdout 与答案层判断仍按 v2 合同另行冻结，不再直接按本节旧命令运行正式结果。

@@ -1,0 +1,165 @@
+{
+  "schema_version": "course-rag-corpus-v1",
+  "corpus_version": "rag-course-v1",
+  "normalizer": {
+    "version": "course-rag-normalize-v1",
+    "unicode": "NFC",
+    "newlines": "LF",
+    "strip_trailing_whitespace": true,
+    "front_matter_in_chunks": false
+  },
+  "chunker": {
+    "version": "course-rag-chunker-v1",
+    "chunk_size": 520,
+    "chunk_overlap": 150,
+    "length_function": "len",
+    "keep_separator": true,
+    "separators": [
+      "\n\n",
+      "\n",
+      "。",
+      "！",
+      "？",
+      "；",
+      "，",
+      " ",
+      ""
+    ]
+  },
+  "source_count": 10,
+  "chunk_count": 113,
+  "chunk_set_sha256": "e3e5cdb00f560fff37358f4ad51bf94b9a8283b53e835e087a66371980a5e175",
+  "sources": [
+    {
+      "source_id": "machine_learning/classification_metrics/common_mistakes.md",
+      "source_sha256": "26c24fba0bfb850880913f83b7c8f0930a8a19d4141836d9fda21dcef6e762ef",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "classification_metrics",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "分类评估指标"
+      }
+    },
+    {
+      "source_id": "machine_learning/cross_validation/concept_comparison.md",
+      "source_sha256": "932a58a2a173ba9e054b8437b390e178248a672735348056d6efa96efd71b5fd",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "cross_validation",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "交叉验证"
+      }
+    },
+    {
+      "source_id": "machine_learning/dataset_split/review_outline.md",
+      "source_sha256": "b89ef53a8539a652ddb18e31560e32843706771686831480dd2d528eac88a1a0",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "dataset_split",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "训练集验证集与测试集"
+      }
+    },
+    {
+      "source_id": "machine_learning/overfitting_regularization/worked_examples.md",
+      "source_sha256": "2af026c7b0702b8d7f862760338fc653186ef85f4e247642a0a1d207f7946fc5",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "overfitting_regularization",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "过拟合与正则化"
+      }
+    },
+    {
+      "source_id": "machine_learning/supervised_learning/chapter_notes.md",
+      "source_sha256": "6834ee8e5929989176446632fcbfb75c56a6dbb0c341c7d7d58a2e1ba12cc4c1",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "supervised_learning",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "监督学习"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/opium_war/chapter_notes.md",
+      "source_sha256": "f765d024e423c888a0974a69757007cb7ec9ebb26d35a6f43a87eaebbd39d62d",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "opium_war",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "鸦片战争"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/reform1898/worked_examples.md",
+      "source_sha256": "4bc986abdf8e455877e50b9379fe0209a9cdfc6edbd83b4c62f17d048e48e765",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "reform1898",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "戊戌维新"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/taiping/review_outline.md",
+      "source_sha256": "5563a842e12a6cec26a7bae301e0b0b518ff8de79da182936faa1cf0091b7c46",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "taiping",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "太平天国运动"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/westernization/concept_comparison.md",
+      "source_sha256": "9b50c6d0b411cdd74d4d66dc5fd2ebf9c671ba5a2e3d53fca73af47c7ff530a3",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "westernization",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "洋务运动"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/xinhai/common_mistakes.md",
+      "source_sha256": "8fe04aa06494465e319587368ea11ca800576c7b7e75e4515df534ce6502fc95",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "xinhai",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1",
+        "title": "辛亥革命"
+      }
+    }
+  ],
+  "manifest_sha256": "1af87128cef41113ff589b8d52db6fb550947c9bf361e4da779d846d0aa88b0e"
+}

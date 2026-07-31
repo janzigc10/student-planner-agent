@@ -1024,6 +1024,7 @@ function RagGrounding({ grounding }: { grounding?: ChatGrounding }) {
           {items.map((item, index) => (
             <li key={`${item.label}-${index}`}>
               <strong>{item.label}</strong>
+              {item.source ? <small>{item.source}</small> : null}
               <span>{item.text}</span>
             </li>
           ))}

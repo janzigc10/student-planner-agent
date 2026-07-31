@@ -58,7 +58,9 @@ WebSocket chat
 ```
 
 - 运行时开关：`.env` 中设置 `SP_AGENT_RUNTIME=langgraph`。
-- RAG 资料库：`student-planner/data/rag/`，当前包含大学英语、机器学习报告、自建历史/政治复习资料，以及 `data/rag/public/` 下 74 份中文维基百科公开条目；切分参数为 `chunk_size=520 / chunk_overlap=150`，当前共 `2472` 个 chunks。向量层支持阿里云百炼 DashScope `text-embedding-v4`，按每批 10 条 chunk 调用；默认使用 Chroma 持久化向量库 `data/rag/chroma`，避免每次进程重启后重新 embed 全库。若运行环境检测到 Chroma native upsert 不可用，会自动退到同目录下的 SQLite 持久化文件。未配置 Key 或请求异常时退回本地 hash embedding。
+- RAG 资料库：默认冻结语料位于 `student-planner/data/rag/course_v1/`，当前论文基线版本为 `rag-course-v1.1 / rag-course-golden-v1.1`，包含机器学习、中国近现代史、世界现代史和思想政治理论 4 门 synthetic 课程，共 49 份资料、552 个 chunks；`data/rag/public/` 下另有 74 份中文维基百科公开条目，不计入当前正式 course_v1 数据集。切分参数为 `chunk_size=520 / chunk_overlap=150`。向量层支持阿里云百炼 DashScope `text-embedding-v4`，按每批 10 条 chunk 调用；默认使用 Chroma 持久化向量库 `data/rag/chroma`，避免每次进程重启后重新 embed 全库。若运行环境检测到 Chroma native upsert 不可用，会自动退到同目录下的 SQLite 持久化文件。未配置 Key 或请求异常时退回本地 hash embedding。
+- RAG challenge：`student-planner/data/rag/course_challenge_v1/` 已冻结 28 条与主集零重复的 synthetic holdout query 和 842 个四模式候选判断项；当前证据等级为 `llm_assisted_unreviewed`，尚未人工复核或运行正式指标。
+- RAG 正式评测：`student-planner/scripts/run_course_rag_benchmark_v2.py --formal` 按“主集 development 冻结 gate → main test → challenge holdout”顺序运行；challenge 不允许重新校准 gate，三层 manifest 以 SHA-256 绑定。
 - LangChain 接入：`app/agent/langchain_tools.py` 把现有业务工具转换为 LangChain `bind_tools` 兼容 schema。
 - LangGraph 接入：`app/agent/langgraph_loop.py` 使用 `StateGraph` 编排 RAG 检索和运行时提示，并正确透传 `ask_user` 的用户确认答案。
 - 稳定性策略：旧 `run_agent_loop` 没有被重写；LangGraph 只做外层编排，最终写入仍走原有工具校验、review 卡和确定性落库链路。

@@ -1,5 +1,30 @@
 # Student Planner 已知问题与环境坑
 
+## 2026-07-31 两阶段正式流程与本机环境已就绪
+- `scripts/run_course_rag_benchmark_v2.py --formal` 已能按 `main development -> main test -> challenge holdout` 执行，并对 frozen gate、模型/检索合同及各层 hash 做强校验。用户已授权继续整理干净基线并执行唯一正式运行；基线建立前使用 native venv 重跑 RAG/LangGraph/Benchmark 合同为 `112 passed`，前端 Chat/store 为 `64 passed / 2 skipped`，typecheck、build、`py_compile`、corpus/challenge validator 和 `git diff --check` 均通过。
+- 正式 runtime 禁止 Embedding、Reranker 与 Vector Store 静默 fallback。ignored 的 `student-planner/.venv-native/` 已安装项目依赖、`langchain-text-splitters`、OpenAI SDK、`chromadb 1.5.9` 和测试依赖；`_chroma_runtime_available()` 实测为 `(True, '')`。Anaconda 的 Chroma probe 仍会以 `3221225477` 失败，正式命令必须使用 `.venv-native\Scripts\python.exe`，不能改回 Anaconda。
+- 只检查配置是否存在、不打印任何 secret 后，当前 `.env` 已满足 `embedding_provider=dashscope`、Embedding Key 已配置、`reranker_provider=qwen3`、Reranker Key 与 base URL 已配置。正式在线 endpoint 的实际连通性和配额只会在干净基线的唯一正式运行中验证。
+- canonical 28 题 challenge 仍未运行任何指标。离线两阶段 smoke 使用的是测试临时目录中的 24 题 synthetic fixture，只验证控制流和防泄漏合同；不得把其输出解释为课程 benchmark 结果。
+
+## 2026-07-30 Benchmark v2 challenge 已冻结，但尚未人工复核或正式运行
+- 已创建 `student-planner/data/rag/course_challenge_v1/`：28 条与主集 ID/文本零重复的 holdout query、842 个四模式 Top-20 去重候选、逐题 qrels、冻结配置、内部 candidate pool、盲审 TSV/JSONL 和独立 review key；validator 已确认四门课各 7 条、七种 query type、`full 20 / partial 4 / none 4`，数据集 SHA-256 为 `9b3e603a58645929905335e7bf2cf3fb74f0501bfee166e55d412635c711edf5`。
+- 当前 qrels 是模型编写难题规范加 deterministic source-truth 自动标签，证据等级保持 `llm_assisted_unreviewed`，`human_review_status=not_reviewed`。候选 pooling 使用本地 hash embedding 和 local-feature rerank，仅用于扩大判定覆盖，不是正式四模式结果。因此当前仍不得称为人工 gold、人工标注准确率或外部真实课程泛化；若不做人审，只能在论文中明确报告为“未人工复核的独立 synthetic challenge”。
+- challenge 尚未运行任何正式指标。唯一一次正式读取其结果前，必须先用主集 development 完成 gate 选择并保存选中 config；之后不得根据 challenge 结果调参。旧在线 pilot 已查看完整主集结果，主集 56 条 test 仍标记为 `internal_test_exposed_by_pilot`。
+
+## 2026-07-30 本机 Python 3.12 启动器缺少课程 RAG 切块依赖
+- `py -3.12` 指向 `C:\Users\Chen\AppData\Local\Programs\Python\Python312\python.exe`，当前缺少 `langchain-text-splitters`，会在 `write_corpus_artifacts()` 报 `RuntimeError: langchain-text-splitters is required for course-rag-chunker-v1`。本轮没有擅自安装依赖，改用已有 `C:\Users\Chen\anaconda3\python.exe` 完成 v2 测试与离线 smoke。RAG runtime 测试 fixture 已显式清空 Embedding/Reranker 在线凭据，避免本地 `.env` 的真实配置污染单元测试。
+
+## 2026-07-29 大学英语移除后旧在线评测已过期
+- `data/rag/course_v1` 已冻结为论文基线 `rag-course-v1.1 / rag-course-golden-v1.1`：4 门课程、49 份资料、552 个 chunks、80 条查询和 2295 条 qrels，`corpus_manifest_sha256=8ac077eb690cba2db97fe1d3335a00b19d2a2f933a1b9e6a40cca723b93c52d7`。此前 `output/rag/course_v1_qwen_online_smoke/` 基于 5 门课程、689 chunks、100 条查询生成，其排序指标和逐题结果只能作为历史诊断，不能与当前语料版本混用；下一次正式比较使用新输出目录并记录当前 manifest hash，不再等待人工复核。
+
+## 2026-07-29 评测输出目录复用会保留旧失败标记
+- `scripts/evaluate_course_rag.py` 在失败时写入 `failed_run.json`，但之后若使用同一 `--output-dir` 成功重跑，不会删除旧失败文件，成功 `run_manifest.json` 还会把它列入 outputs。本次真实 Qwen comparison smoke 的第一次运行因受限网络失败、批准联网后复用同一目录成功，因此四个模式 JSONL、summary 和 chart 均为成功新结果，但目录内仍含第一次的旧 `failed_run.json`。正式论文运行必须使用全新空输出目录；后续可让 runner 在开始前拒绝非空目录或显式区分 attempt 子目录。
+- 2026-07-30 v2 已修复：所有 run 在开始前拒绝非空输出目录；若 preflight 针对既有非空目录失败，failure manifest 写到目标目录旁边的新文件，不再向原目录加入旧失败标记。旧 `course_v1_qwen_online_smoke/failed_run.json` 仍是历史产物，不会自动清理。
+
+## 2026-07-28 课程 RAG 正式评测的外部前置项
+- 代码已实现 `qwen3-rerank` 的 OpenAI-compatible `/reranks` 合同，并通过 stub/失败合同测试；但当前账号所在地域/workspace 的真实 base URL、配额、计费与在线稳定性尚未用实际凭据验证。正式 `hybrid_rerank` benchmark 不允许 `LocalFeatureReranker` 静默替代，缺少配置或在线调用失败应让该 run 失败。
+- `data/rag/course_v1` 的 80 条查询、2295 条 qrels 和 answerability/evidence requirements 是确定性生成的 synthetic 数据，manifest 明确标记 `human_review_status=synthetic_unreviewed`。因人力限制不执行人工复核，论文只能把指标解释为同一自动构造数据合同上的相对比较，不得称为人工 golden set、人工标注准确率、真实课程效果，也不能把离线 fallback smoke 宣传为真实 Qwen 或生产结论。
+
 ## 2026-06-21 追加：multi-exam study plan 已在 LangGraph worktree 修复
 - 当前 `D:\tmp\student-planner-langgraph-final` worktree 中，上一条记录里的 `generates a multi-exam study plan with tasks for both exams` 不再是当前失败项。根因复核后确认：不是 `scope` 必填问题，而是模型在 `get_free_slots` 后绕过真实 `create_study_plan` 工具调用，输出了普通文本形式的伪 `[TOOL_SUMMARY:create_study_plan:*]` 和计划预览，导致没有 `create_study_plan` agent log、没有结构化 review、没有确认后 `create_task` 写库。
 - 当前修复把 `scope` / `weak_areas` 保持为 exam 级选填字段；用户提供时按课程绑定，未提供时允许默认计划。同时对完整 ISO 日期考试复习请求走确定性 LangGraph study-plan workflow：`get_free_slots -> create_study_plan -> plan_review_write -> confirmed_write/create_task`。

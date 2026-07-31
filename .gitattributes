@@ -1,0 +1,2 @@
+# TSV review templates intentionally preserve empty trailing form fields.
+*.tsv whitespace=-blank-at-eol

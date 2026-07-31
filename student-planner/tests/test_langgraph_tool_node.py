@@ -212,6 +212,7 @@ async def test_langgraph_tool_node_repairs_reminder_slot_and_logs_updated_args(s
             "end_time": "17:00",
             "reminder_advance_minutes": 15,
         },
+        "graph_node": "task_tool_node",
     }
     assert state["events"][1]["type"] == "tool_result"
     assert state["events"][1]["result"]["status"] == "updated"

@@ -43,6 +43,10 @@ export type ChatAnswerKind = 'rag'
 export interface ChatGroundingItem {
   label: string
   text: string
+  course?: string
+  chapter?: string
+  source?: string
+  chunk_id?: string
 }
 
 export interface ChatGrounding {

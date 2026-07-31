@@ -1,0 +1,29 @@
+review_query_id	course_id	query	answerability_full_partial_none	review_notes
+review-05447772bb2d85b7	machine_learning	梯度下降里的“步子迈得太大”具体指什么，为什么它会让损失在低点附近反复越过去？		
+review-2949ddadd9f2865a	machine_learning	有人说支持向量机只是在训练样本里找一条分界线。请用资料纠正这个说法，并解释支持向量和核方法各自做什么。		
+review-427ba6bbd2c9b050	machine_learning	同样写成一个数值输出，线性回归和逻辑回归的学习目标为什么不同？请从输出含义、损失思路和适用任务比较。		
+review-2ca558a7bc897092	machine_learning	我先在全部样本上挑出最有用的特征，再划训练集和测试集，这样评估为什么可能虚高？请把数据划分和特征工程连起来说明。		
+review-c367b9d0f8435974	machine_learning	概括类别极不平衡时为什么不能只报准确率，并说明混淆矩阵、精确率、召回率和 F1 分别怎样帮助判断。		
+review-b3468f03e4bf9238	machine_learning	请先根据资料解释 K-means 怎样反复更新簇中心，再给出我校 2027 年这道题的评分细则和老师尚未公布的标准答案。		
+review-1594baefa9a8eaf7	machine_learning	只根据这套机器学习复习资料，告诉我明天学校 GPU 服务器每小时的实时排队人数。		
+review-b403bbaf127e8002	modern_chinese_history	社会主义改造完成后，所有制结构发生了什么关键变化，它和中华人民共和国成立是不是同一件事？		
+review-22a5574cdc99c0f1	modern_chinese_history	把改革开放说成“只是恢复旧市场”哪里不准确？请用资料解释它怎样调整发展路径。		
+review-82c71e532d7b3929	modern_chinese_history	洋务运动和戊戌维新都主张学习西方，但二者想改到哪一层、采取什么办法、为什么不能混为一谈？		
+review-4234917494684232	modern_chinese_history	从思想启蒙到群众运动再到新型政党建立：新文化运动、五四运动和中国共产党成立之间应怎样串联，又有哪些边界不能写成简单因果？		
+review-a837f63ea5fef0ea	modern_chinese_history	概括全民族抗战形成、主要力量和历史意义，并指出为什么不能把胜利归因于单一战场或单一力量。		
+review-78810f9b6d66c04c	modern_chinese_history	请依据资料说明辛亥革命结束了什么、又没有完成什么，然后附上 2027 年本校命题教师准备采用的原题。		
+review-dfed919bc0ba35bc	modern_chinese_history	根据中国近现代史复习资料，查询本周末当地历史博物馆每个展厅的实时排队时长。		
+review-9c8f203a64dd4c15	world_modern_history	1929—1933 年经济危机为什么会从局部市场问题扩散成广泛危机？材料给出的机制链是什么？		
+review-86cb08e35bf4544f	world_modern_history	“冷战就是完全没有战争”这句话为什么站不住？请换一种说法解释它的竞争方式和边界。		
+review-9e96aaf80f003bbc	world_modern_history	杜鲁门主义和马歇尔计划都服务于美国冷战战略，但一个偏政治宣示、一个偏经济援助，这样比较还缺哪些目标与作用差异？		
+review-8fd4368724400279	world_modern_history	把杜鲁门主义、马歇尔计划、北约与华约放到同一条冷战升级链里：它们分别对应政治、经济和军事的哪一环？		
+review-fa4545dd0621489a	world_modern_history	用“爆发—转折—国际合作—战后秩序”四个节点概括第二次世界大战，并说明材料提醒避免哪些单线叙事。		
+review-8e41d5ac748d3e5f	world_modern_history	先说明亚非拉民族解放运动为何在战后高涨，再列出截至 2027 年新增独立国家的实时完整名单和最新人口。		
+review-9ebe34860ea26682	world_modern_history	用世界现代史课程资料计算下周美元兑人民币每天收盘价，并保证误差小于 0.1%。		
+review-f05ca82d6c2f59da	political_theory	全过程人民民主中的“全过程”具体覆盖哪些环节，为什么不能只用投票次数衡量？		
+review-2fd02ce695a1121c	political_theory	共同富裕是不是要求所有人的收入和生活方式完全一样？请用资料中的目标与边界重新解释。		
+review-89d660124660c900	political_theory	人民代表大会和人民政协都讨论公共事务，但二者在国家权力、履职方式和制度定位上有什么根本区别？		
+review-99746903c8e2d9f9	political_theory	如果一个项目追求增长却造成高污染，怎样同时用新发展理念和生态文明建设判断它的问题，而不是只贴“绿色”标签？		
+review-4996a9ed2381b070	political_theory	概括全面依法治国与宪法权威的关系：为什么既要依法规范公权力，也不能把法治理解成只有惩罚？		
+review-a89bc1de8ffcc3f3	political_theory	请先说明文化自信为什么不等于排斥外来文化，再给出 2027 年各短视频平台文化类内容的实时热度排名。		
+review-c4f120fb53c4caf2	political_theory	根据思想政治理论复习资料，告诉我明早 8 点经过学校东门的每辆公交车实时到站秒数。		

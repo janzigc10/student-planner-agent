@@ -107,6 +107,8 @@ CURRENT_INFO_OBJECT_MARKERS = (
     "法律",
     "时事",
     "热点",
+    "大事件",
+    "大事",
 )
 
 

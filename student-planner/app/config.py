@@ -17,14 +17,25 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 4096
     llm_temperature: float = 0.3
     agent_runtime: str = "langgraph"
-    rag_corpus_dir: str = "data/rag"
+    rag_corpus_dir: str = "data/rag/course_v1"
     rag_embedding_provider: str = "dashscope"
     rag_embedding_model: str = "text-embedding-v4"
     rag_embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     rag_embedding_api_key: str = ""
     rag_embedding_batch_size: int = 10
+    rag_embedding_dimensions: int = 1024
+    rag_embedding_query_instruct: str = ""
     rag_vector_store_provider: str = "chroma"
     rag_vector_store_dir: str = "data/rag/chroma"
+    rag_retrieval_mode: str = "hybrid_rerank"
+    rag_reranker_provider: str = "qwen3"
+    rag_reranker_model: str = "qwen3-rerank"
+    rag_reranker_base_url: str = ""
+    rag_reranker_api_key: str = ""
+    rag_reranker_timeout_seconds: float = 20.0
+    rag_reranker_instruct: str = (
+        "Given a student course question, retrieve passages that directly answer the question."
+    )
     vision_llm_api_key: str = ""
     vision_llm_base_url: str = ""
     vision_llm_model: str = "qwen-vl-plus"

@@ -848,7 +848,11 @@ describe('ChatPage attachment drafting', () => {
         grounding: {
           kind: 'rag',
           label: '基于课程资料',
-          items: [{ label: '课程讲义', text: '创建学习任务后可以设置提醒。' }],
+          items: [{
+            label: '课程讲义',
+            text: '创建学习任务后可以设置提醒。',
+            source: 'study_skills/task_workflow/chapter_notes.md',
+          }],
         },
       })
     })
@@ -856,6 +860,9 @@ describe('ChatPage attachment drafting', () => {
     expect(container.querySelector('.assistant-result--success')).toBeTruthy()
     expect(screen.getByLabelText('基于课程资料')).toHaveTextContent('课程讲义')
     expect(screen.getByLabelText('基于课程资料')).toHaveTextContent('创建学习任务后可以设置提醒。')
+    expect(screen.getByLabelText('基于课程资料')).toHaveTextContent(
+      'study_skills/task_workflow/chapter_notes.md',
+    )
   })
 
   it('renders structured result events without keyword classification', () => {

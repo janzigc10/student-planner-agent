@@ -1,0 +1,21 @@
+﻿review_id	query_id	course_id	query_type	query_text	reviewer_id	review_date	review_answerability	review_reference_answer	review_expected_terms	review_notes
+R01	machine_learning-none-02	machine_learning	out_of_scope	请根据课程资料预测下一期彩票开奖的全部号码。						
+R02	machine_learning-pair-01	machine_learning	comparison	比较监督学习与训练集验证集与测试集，说明两者的核心含义、机制和不能混淆的地方。						
+R03	machine_learning-partial-01	machine_learning	long_student_query	资料是否能完整说明支持向量机，并给出本校今年任课教师未公开的期末原题和标准答案？						
+R04	machine_learning-topic-03	machine_learning	summary	请按定义、机制、案例和易错点总结交叉验证。						
+R05	machine_learning-topic-09	machine_learning	exact_entity	支持向量机的核心定义和关键词是什么？						
+R06	modern_chinese_history-none-02	modern_chinese_history	out_of_scope	请根据课程资料预测下一期彩票开奖的全部号码。						
+R07	modern_chinese_history-pair-02	modern_chinese_history	comparison	比较洋务运动与戊戌维新，说明两者的核心含义、机制和不能混淆的地方。						
+R08	modern_chinese_history-partial-02	modern_chinese_history	long_student_query	资料是否能完整说明解放战争，并给出本校今年任课教师未公开的期末原题和标准答案？						
+R09	modern_chinese_history-topic-01	modern_chinese_history	exact_entity	鸦片战争的核心定义和关键词是什么？						
+R10	modern_chinese_history-topic-03	modern_chinese_history	summary	请按定义、机制、案例和易错点总结洋务运动。						
+R11	political_theory-none-02	political_theory	out_of_scope	请根据课程资料预测下一期彩票开奖的全部号码。						
+R12	political_theory-pair-01	political_theory	comparison	比较马克思主义基本立场与社会主义核心价值观，说明两者的核心含义、机制和不能混淆的地方。						
+R13	political_theory-partial-02	political_theory	long_student_query	资料是否能完整说明生态文明建设，并给出本校今年任课教师未公开的期末原题和标准答案？						
+R14	political_theory-topic-05	political_theory	exact_entity	宪法与根本制度的核心定义和关键词是什么？						
+R15	political_theory-topic-07	political_theory	summary	请按定义、机制、案例和易错点总结中国人民政治协商会议。						
+R16	world_modern_history-none-01	world_modern_history	out_of_scope	请根据复习资料给出明天本市精确到分钟的降雨开始时间。						
+R17	world_modern_history-pair-03	world_modern_history	multi_concept	把第二次世界大战和联合国成立串成一条复习逻辑，分别给出关键机制，并说明它们如何共同帮助理解本课程。						
+R18	world_modern_history-partial-01	world_modern_history	long_student_query	资料是否能完整说明马歇尔计划，并给出本校今年任课教师未公开的期末原题和标准答案？						
+R19	world_modern_history-topic-01	world_modern_history	exact_entity	第一次世界大战的核心定义和关键词是什么？						
+R20	world_modern_history-topic-10	world_modern_history	paraphrase	不用照抄教材，解释一下北约与华约是怎样运作或发展的。						

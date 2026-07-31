@@ -1,0 +1,30 @@
+{
+  "schema_version": "course-rag-golden-set-v1",
+  "dataset_version": "rag-course-golden-v1.1",
+  "corpus_manifest_sha256": "8ac077eb690cba2db97fe1d3335a00b19d2a2f933a1b9e6a40cca723b93c52d7",
+  "query_count": 80,
+  "qrel_count": 2295,
+  "development_count": 24,
+  "test_count": 56,
+  "split_seed": 20260728,
+  "query_types": [
+    "comparison",
+    "exact_entity",
+    "long_student_query",
+    "multi_concept",
+    "out_of_scope",
+    "paraphrase",
+    "summary"
+  ],
+  "answerability": [
+    "full",
+    "none",
+    "partial"
+  ],
+  "dataset_sha256": "4e6f4ce854602fa8af76f4cc677da6f7d7df1c56d6814dad926e21433a91722e",
+  "generated_at": "2026-07-29T05:04:22.462886+00:00",
+  "profile": "full",
+  "synthetic": true,
+  "annotation_method": "synthetic topic truth plus four-mode Top-20 pooling; relevant source chunks receive graded labels",
+  "human_review_status": "synthetic_unreviewed"
+}

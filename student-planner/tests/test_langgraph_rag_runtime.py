@@ -48,7 +48,16 @@ def test_rag_grounding_uses_the_same_evidence_hits_as_model_context():
         }
     )
 
-    assert grounding["items"] == [{"label": "right.md", "text": "actual evidence"}]
+    assert grounding["items"] == [
+        {
+            "label": "right.md",
+            "text": "actual evidence",
+            "course": "",
+            "chapter": "",
+            "source": "right.md",
+            "chunk_id": "",
+        }
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +68,8 @@ def disable_real_rag_embedding_key(monkeypatch):
     monkeypatch.setattr(settings, "rag_embedding_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     monkeypatch.setattr(settings, "rag_embedding_api_key", "")
     monkeypatch.setattr(settings, "rag_vector_store_provider", "memory")
+    monkeypatch.setattr(settings, "rag_reranker_api_key", "")
+    monkeypatch.setattr(settings, "rag_reranker_base_url", "")
     yield
     clear_rag_cache()
 
@@ -87,8 +98,9 @@ def test_local_rag_retrieves_course_materials(tmp_path):
     assert result["corpus_dir"] == str(tmp_path)
     assert result["chunk_size"] == 520
     assert result["chunk_overlap"] == 150
-    assert result["retrieval_mode"] == "hybrid_vector_bm25"
+    assert result["retrieval_mode"] == "hybrid_rerank"
     assert result["reranker_provider"] == "local-feature-rerank"
+    assert result["reranker_fallback_reason"] == "qwen3_reranker_missing_api_key"
     assert result["hits"][0]["retrieval_sources"]
     assert "rerank_score" in result["hits"][0]
 
@@ -194,6 +206,18 @@ def test_rag_context_marks_insufficient_evidence_for_uncovered_questions(tmp_pat
     assert miss["evidence_sufficient"] is False
     assert miss["evidence_count"] == 0
     assert miss["context"] == ""
+
+
+def test_rag_context_accepts_temporal_answer_without_repeating_question_wording(tmp_path):
+    (tmp_path / "改革开放.md").write_text(
+        "改革开放从 1978 年十一届三中全会后进入新时期。",
+        encoding="utf-8",
+    )
+
+    result = build_rag_context("改革开放是什么时候开始的", corpus_dir=tmp_path, top_k=1)
+
+    assert result["evidence_sufficient"] is True
+    assert "1978 年" in result["context"]
 
 
 def test_rag_context_rejects_topic_only_overlap_when_requested_detail_is_absent(tmp_path):
@@ -1039,6 +1063,13 @@ async def test_langgraph_agent_loop_emits_rag_events_and_answers_without_legacy_
     assert events[1]["type"] == "tool_result"
     assert events[1]["result"]["count"] > 0
     assert events[1]["result"]["embedding_configured_model"] == "text-embedding-v4"
+    assert events[1]["result"]["retrieval_mode"] == "hybrid_rerank"
+    assert events[1]["result"]["reranker_provider"] == "local-feature-rerank"
+    assert (
+        events[1]["result"]["reranker_fallback_reason"]
+        == "qwen3_reranker_missing_api_key"
+    )
+    assert events[1]["result"]["embedding_dimensions"] == "1024"
     assert "delegate_legacy_loop" not in events[1]["result"]["graph_nodes"]
     assert "rag_qa" in events[1]["result"]["graph_nodes"]
     assert events[2]["type"] == "text"
@@ -1127,7 +1158,7 @@ async def test_langgraph_agent_loop_blocks_rag_qa_when_evidence_is_insufficient(
     assert "rag_insufficient" in events[1]["result"]["graph_nodes"]
     assert "rag_insufficient" in events[2]["graph_nodes"]
     assert "delegate_legacy_loop" not in events[2]["graph_nodes"]
-    assert events[2]["content"] == "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
+    assert events[2]["content"] == "当前课程资料不足以完整回答这个问题；为避免补入资料外内容，本次不生成答案。"
 
 
 @pytest.mark.asyncio
@@ -1235,7 +1266,7 @@ async def test_langgraph_agent_loop_blocks_arrangement_question_when_evidence_is
 
     assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
     assert events[1]["result"]["evidence_sufficient"] is False
-    assert events[2]["content"] == "当前知识库没有足够资料，无法基于本地资料可靠回答这个问题。"
+    assert events[2]["content"] == "当前课程资料不足以完整回答这个问题；为避免补入资料外内容，本次不生成答案。"
 
 
 @pytest.mark.asyncio

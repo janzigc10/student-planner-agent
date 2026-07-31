@@ -673,6 +673,12 @@ a {
   font-size: 12px;
 }
 
+.rag-grounding__list small {
+  color: var(--color-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
 .rag-grounding__list span,
 .rag-grounding p {
   margin: 0;

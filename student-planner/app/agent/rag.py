@@ -25,6 +25,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.agent.rag_corpus import (
+    CHUNK_OVERLAP as COURSE_RAG_CHUNK_OVERLAP,
+    CHUNK_SEPARATORS as COURSE_RAG_CHUNK_SEPARATORS,
+    CHUNK_SIZE as COURSE_RAG_CHUNK_SIZE,
+    frozen_chunk_documents,
+    load_course_sources,
+    normalize_text,
+    stable_chunk_id,
+)
+from app.agent.rerankers import (
+    LocalFeatureReranker,
+    Qwen3Reranker,
+    RerankerError,
+)
 from app.config import BASE_DIR, settings
 
 try:  # pragma: no cover - depends on optional runtime package
@@ -55,8 +69,8 @@ except Exception:  # pragma: no cover
 
 _OPENAI_COMPATIBLE_PROVIDERS = {"dashscope", "bailian", "aliyun", "openai-compatible"}
 _CHROMA_VECTOR_STORE_PROVIDERS = {"chroma", "chromadb"}
-RAG_CHUNK_SIZE = 520
-RAG_CHUNK_OVERLAP = 150
+RAG_CHUNK_SIZE = COURSE_RAG_CHUNK_SIZE
+RAG_CHUNK_OVERLAP = COURSE_RAG_CHUNK_OVERLAP
 RAG_CONTEXT_EXCERPT_CHARS = 260
 RAG_EVIDENCE_CANDIDATE_K = 10
 RAG_VECTOR_CANDIDATE_K = 20
@@ -72,10 +86,19 @@ RAG_MIN_EVIDENCE_ANCHOR_COVERAGE = 0.45
 CHROMA_COLLECTION_NAME = "student_planner_rag"
 RAG_MAX_QUERY_CHARS = 8000
 RAG_MAX_QUERY_BYTES = 32000
+RAG_RETRIEVAL_MODES = {
+    "embedding_only",
+    "bm25_only",
+    "hybrid_rrf",
+    "hybrid_rerank",
+}
 _RAG_RETRIEVER_CACHE: dict[tuple[Any, ...], "LocalRAGRetriever"] = {}
 _RAG_BUILD_LOCK = Lock()
 _CHROMA_RUNTIME_PROBE: tuple[bool, str] | None = None
 _RAG_QUERY_STOP_FRAGMENTS = {
+    "什么时候开始",
+    "哪一年开始",
+    "何时开始",
     "是什么",
     "什么",
     "怎么",
@@ -228,7 +251,7 @@ def _anchor_query_terms(query: str) -> set[str]:
 
 def _contentful_query_chars(query: str) -> set[str]:
     compact = str(query or "").lower()
-    for fragment in _RAG_QUERY_STOP_FRAGMENTS:
+    for fragment in sorted(_RAG_QUERY_STOP_FRAGMENTS, key=len, reverse=True):
         compact = compact.replace(fragment, "")
     ignored_chars = _RAG_QUERY_STOP_CHARS | set("里我你请帮")
     return {
@@ -249,7 +272,7 @@ def _evidence_query_coverage(query: str, content: str) -> float:
 
 def _query_segment_char_sets(query: str) -> list[set[str]]:
     compact = str(query or "").lower()
-    for fragment in _RAG_QUERY_STOP_FRAGMENTS:
+    for fragment in sorted(_RAG_QUERY_STOP_FRAGMENTS, key=len, reverse=True):
         compact = compact.replace(fragment, " ")
     for separator in _RAG_QUERY_SEGMENT_SEPARATORS:
         compact = compact.replace(separator, " ")
@@ -280,7 +303,7 @@ def _evidence_segment_coverage(query: str, content: str) -> float:
 
 def _longest_unmatched_query_run(query: str, content: str) -> int:
     compact = str(query or "").lower()
-    for fragment in _RAG_QUERY_STOP_FRAGMENTS:
+    for fragment in sorted(_RAG_QUERY_STOP_FRAGMENTS, key=len, reverse=True):
         compact = compact.replace(fragment, " ")
 
     ignored_chars = _RAG_QUERY_STOP_CHARS | set("里我你请帮")
@@ -341,6 +364,9 @@ def _is_evidence_hit(query: str, hit: dict[str, Any]) -> bool:
 
 
 def _document_identity(content: str, metadata: dict[str, Any]) -> str:
+    chunk_id = metadata.get("chunk_id")
+    if chunk_id:
+        return str(chunk_id)
     vector_id = metadata.get("vector_id")
     if vector_id:
         return str(vector_id)
@@ -362,12 +388,22 @@ def _normalize_score(value: float, *, lower: float = 0.0, upper: float = 1.0) ->
 class OpenAICompatibleEmbeddings(Embeddings):
     """Embedding adapter for Bailian/DashScope and other OpenAI-compatible APIs."""
 
-    def __init__(self, *, api_key: str, base_url: str, model: str, batch_size: int = 10) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        batch_size: int = 10,
+        dimensions: int | None = None,
+    ) -> None:
         if OpenAI is None:
             raise RuntimeError("openai package is not installed")
         self.model = model
         self.base_url = base_url
         self.batch_size = max(1, min(batch_size, 10))
+        self.dimensions = dimensions
+        self.last_call_usage_tokens = 0
         self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -378,12 +414,16 @@ class OpenAICompatibleEmbeddings(Embeddings):
 
     def _embed(self, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
+        usage_tokens = 0
         for offset in range(0, len(texts), self.batch_size):
             batch = list(texts[offset : offset + self.batch_size])
             response = None
             for attempt in range(3):
                 try:
-                    response = self.client.embeddings.create(model=self.model, input=batch)
+                    request: dict[str, Any] = {"model": self.model, "input": batch}
+                    if self.dimensions:
+                        request["dimensions"] = self.dimensions
+                    response = self.client.embeddings.create(**request)
                     break
                 except Exception:
                     if attempt >= 2:
@@ -391,8 +431,11 @@ class OpenAICompatibleEmbeddings(Embeddings):
                     time.sleep(1.0 + attempt * 2.0)
             if response is None:  # pragma: no cover - defensive guard
                 raise RuntimeError("embedding response missing")
+            usage = getattr(response, "usage", None)
+            usage_tokens += int(getattr(usage, "total_tokens", 0) or 0)
             data = sorted(response.data, key=lambda item: item.index)
             vectors.extend(list(item.embedding) for item in data)
+        self.last_call_usage_tokens = usage_tokens
         return vectors
 
 
@@ -405,6 +448,8 @@ def _local_embedding_info(*, configured_provider: str, reason: str) -> dict[str,
         "embedding_configured_model": settings.rag_embedding_model,
         "embedding_base_url": settings.rag_embedding_base_url,
         "embedding_batch_size": str(settings.rag_embedding_batch_size),
+        "embedding_dimensions": str(settings.rag_embedding_dimensions),
+        "embedding_query_instruct": settings.rag_embedding_query_instruct,
         "embedding_fallback_reason": reason,
     }
 
@@ -423,6 +468,7 @@ def build_embeddings() -> tuple[Embeddings, dict[str, str]]:
                 base_url=settings.rag_embedding_base_url,
                 model=settings.rag_embedding_model,
                 batch_size=settings.rag_embedding_batch_size,
+                dimensions=settings.rag_embedding_dimensions,
             ),
             {
                 "embedding_provider": provider,
@@ -431,6 +477,8 @@ def build_embeddings() -> tuple[Embeddings, dict[str, str]]:
                 "embedding_configured_model": settings.rag_embedding_model,
                 "embedding_base_url": settings.rag_embedding_base_url,
                 "embedding_batch_size": str(settings.rag_embedding_batch_size),
+                "embedding_dimensions": str(settings.rag_embedding_dimensions),
+                "embedding_query_instruct": settings.rag_embedding_query_instruct,
                 "embedding_fallback_reason": "",
             },
         )
@@ -460,23 +508,10 @@ def _is_corpus_content_file(path: Path) -> bool:
 
 def load_documents(corpus_dir: str | Path | None = None) -> list[Any]:
     root = resolve_corpus_dir(corpus_dir)
-    if not root.exists():
-        return []
-
-    documents: list[Any] = []
-    for path in sorted(root.rglob("*")):
-        if not _is_corpus_content_file(path):
-            continue
-        content = path.read_text(encoding="utf-8").strip()
-        if not content:
-            continue
-        documents.append(
-            _document(
-                content,
-                {"source": str(path.relative_to(root)), "file_name": path.name},
-            )
-        )
-    return documents
+    return [
+        _document(source.body, dict(source.metadata))
+        for source in load_course_sources(root, strict_metadata=False)
+    ]
 
 
 def split_documents(documents: list[Any]) -> list[Any]:
@@ -486,8 +521,35 @@ def split_documents(documents: list[Any]) -> list[Any]:
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=RAG_CHUNK_SIZE,
             chunk_overlap=RAG_CHUNK_OVERLAP,
+            length_function=len,
+            keep_separator=True,
+            separators=list(COURSE_RAG_CHUNK_SEPARATORS),
+            is_separator_regex=False,
+            strip_whitespace=True,
         )
-        return splitter.split_documents(documents)
+        chunks: list[Any] = []
+        for document in documents:
+            content = str(getattr(document, "page_content", ""))
+            metadata = dict(getattr(document, "metadata", {}) or {})
+            source = str(metadata.get("source_id") or metadata.get("source") or "")
+            for chunk_index, raw_chunk in enumerate(splitter.split_text(content)):
+                text = normalize_text(raw_chunk)
+                if not text:
+                    continue
+                chunk_id = stable_chunk_id(source, chunk_index, text)
+                chunks.append(
+                    _document(
+                        text,
+                        {
+                            **metadata,
+                            "source": source,
+                            "source_id": source,
+                            "chunk_id": chunk_id,
+                            "chunk_index": chunk_index,
+                        },
+                    )
+                )
+        return chunks
 
     chunks: list[Any] = []
     for document in documents:
@@ -495,7 +557,20 @@ def split_documents(documents: list[Any]) -> list[Any]:
         metadata = dict(getattr(document, "metadata", {}) or {})
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
         for index, paragraph in enumerate(paragraphs):
-            chunks.append(_document(paragraph, {**metadata, "chunk": index}))
+            source = str(metadata.get("source_id") or metadata.get("source") or "")
+            text = normalize_text(paragraph)
+            chunks.append(
+                _document(
+                    text,
+                    {
+                        **metadata,
+                        "source": source,
+                        "source_id": source,
+                        "chunk_id": stable_chunk_id(source, index, text),
+                        "chunk_index": index,
+                    },
+                )
+            )
     return chunks
 
 
@@ -519,13 +594,15 @@ def _corpus_signature(corpus_dir: Path) -> tuple[tuple[str, str], ...]:
     return tuple(entries)
 
 
-def _embedding_signature() -> tuple[str, str, str, bool, int, str, str]:
+def _embedding_signature() -> tuple[str, str, str, bool, int, int, str, str, str]:
     return (
         settings.rag_embedding_provider.strip().lower(),
         settings.rag_embedding_model,
         settings.rag_embedding_base_url,
         bool(settings.rag_embedding_api_key.strip()),
         settings.rag_embedding_batch_size,
+        settings.rag_embedding_dimensions,
+        settings.rag_embedding_query_instruct,
         settings.rag_vector_store_provider.strip().lower(),
         settings.rag_vector_store_dir,
     )
@@ -776,6 +853,7 @@ class LocalRAGRetriever:
         self.vector_store: ChromaVectorStore | SQLiteVectorStore | None = self._build_vector_store()
         self.vector_store_hits = 0
         self.vector_store_misses = 0
+        self.last_retrieval_info: dict[str, Any] = {}
         if embeddings is None:
             self.embeddings, self.embedding_info = build_embeddings()
         else:
@@ -787,9 +865,14 @@ class LocalRAGRetriever:
                 "embedding_configured_model": "",
                 "embedding_base_url": "",
                 "embedding_batch_size": "",
+                "embedding_dimensions": "",
+                "embedding_query_instruct": "",
                 "embedding_fallback_reason": "",
             }
-        self.documents = split_documents(load_documents(self.corpus_dir))
+        self.documents = [
+            _document(row["page_content"], dict(row["metadata"]))
+            for row in frozen_chunk_documents(self.corpus_dir)
+        ]
         self._document_tokens = [_tokenize(text) for text in self._document_texts()]
         self._bm25_doc_freqs = self._build_bm25_doc_freqs()
         self._bm25_avg_doc_len = (
@@ -848,6 +931,11 @@ class LocalRAGRetriever:
             "embedding_provider": self.embedding_info.get("embedding_provider", ""),
             "embedding_model": self.embedding_info.get("embedding_model", ""),
             "embedding_base_url": self.embedding_info.get("embedding_base_url", ""),
+            "embedding_dimensions": self.embedding_info.get("embedding_dimensions", ""),
+            "embedding_query_instruct": self.embedding_info.get(
+                "embedding_query_instruct",
+                "",
+            ),
             "chunk_size": RAG_CHUNK_SIZE,
             "chunk_overlap": RAG_CHUNK_OVERLAP,
         }
@@ -889,6 +977,8 @@ class LocalRAGRetriever:
             "provider": self.embedding_info.get("embedding_provider", ""),
             "model": self.embedding_info.get("embedding_model", ""),
             "base_url": self.embedding_info.get("embedding_base_url", ""),
+            "dimensions": self.embedding_info.get("embedding_dimensions", ""),
+            "query_instruct": self.embedding_info.get("embedding_query_instruct", ""),
             "chunk_size": RAG_CHUNK_SIZE,
             "chunk_overlap": RAG_CHUNK_OVERLAP,
         }
@@ -896,10 +986,18 @@ class LocalRAGRetriever:
         for index, document in enumerate(self.documents):
             content = str(getattr(document, "page_content", ""))
             metadata = dict(getattr(document, "metadata", {}) or {})
+            chunk_index = int(metadata.get("chunk_index", index))
+            chunk_id = str(
+                metadata.get("chunk_id")
+                or stable_chunk_id(
+                    str(metadata.get("source") or ""),
+                    chunk_index,
+                    content,
+                )
+            )
             raw = {
                 **embedding_key,
-                "index": index,
-                "source": metadata.get("source", ""),
+                "chunk_id": chunk_id,
                 "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
             }
             ids.append(hashlib.sha256(_stable_json(raw).encode("utf-8")).hexdigest())
@@ -934,11 +1032,19 @@ class LocalRAGRetriever:
         metadatas: list[dict[str, Any]] = []
         for index, (document, vector_id) in enumerate(zip(self.documents, vector_ids, strict=True)):
             metadata = dict(getattr(document, "metadata", {}) or {})
+            metadata.setdefault("chunk_index", index)
+            metadata.setdefault(
+                "chunk_id",
+                stable_chunk_id(
+                    str(metadata.get("source") or ""),
+                    int(metadata["chunk_index"]),
+                    str(getattr(document, "page_content", "")),
+                ),
+            )
             metadata.update(
                 {
                     "corpus_key": self.corpus_key,
                     "vector_id": vector_id,
-                    "chunk_index": index,
                     "chunk_size": RAG_CHUNK_SIZE,
                     "chunk_overlap": RAG_CHUNK_OVERLAP,
                 }
@@ -983,20 +1089,63 @@ class LocalRAGRetriever:
             self.corpus_key = self._build_corpus_key()
         self._update_vector_store_info()
 
-    def retrieve(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        mode: str | None = None,
+        allow_reranker_fallback: bool = True,
+    ) -> list[dict[str, Any]]:
         if not query.strip() or not self.documents:
+            self.last_retrieval_info = {
+                "retrieval_mode": mode or settings.rag_retrieval_mode,
+                "reranker_provider": "none",
+                "reranker_fallback_reason": "",
+            }
             return []
+        retrieval_mode = (mode or settings.rag_retrieval_mode).strip().lower()
+        if retrieval_mode not in RAG_RETRIEVAL_MODES:
+            raise ValueError(f"unsupported_rag_retrieval_mode:{retrieval_mode}")
         vector_top_k = max(top_k, RAG_VECTOR_CANDIDATE_K)
         bm25_top_k = max(top_k, RAG_BM25_CANDIDATE_K)
-        try:
-            query_vector = self.embeddings.embed_query(query)
-        except Exception as exc:
-            self._fallback_to_hash(f"query_embedding_failed:{exc.__class__.__name__}")
-            self.vectors = self._embed_documents()
-            query_vector = self.embeddings.embed_query(query)
-        vector_hits = self.retrieve_by_vector(query_vector, top_k=vector_top_k)
-        bm25_hits = self.retrieve_by_bm25(query, top_k=bm25_top_k)
-        return self._hybrid_rerank(query, vector_hits=vector_hits, bm25_hits=bm25_hits, top_k=top_k)
+        vector_hits: list[dict[str, Any]] = []
+        bm25_hits: list[dict[str, Any]] = []
+        if retrieval_mode in {"embedding_only", "hybrid_rrf", "hybrid_rerank"}:
+            try:
+                query_vector = self.embeddings.embed_query(query)
+            except Exception as exc:
+                self._fallback_to_hash(f"query_embedding_failed:{exc.__class__.__name__}")
+                self.vectors = self._embed_documents()
+                query_vector = self.embeddings.embed_query(query)
+            vector_hits = self.retrieve_by_vector(query_vector, top_k=vector_top_k)
+        if retrieval_mode in {"bm25_only", "hybrid_rrf", "hybrid_rerank"}:
+            bm25_hits = self.retrieve_by_bm25(query, top_k=bm25_top_k)
+
+        self.last_retrieval_info = {
+            "retrieval_mode": retrieval_mode,
+            "reranker_provider": "none",
+            "reranker_fallback_reason": "",
+            "reranker_model": "",
+            "reranker_usage_total_tokens": 0,
+        }
+        if retrieval_mode == "embedding_only":
+            return self._rank_single_source(query, vector_hits, top_k=top_k)
+        if retrieval_mode == "bm25_only":
+            return self._rank_single_source(query, bm25_hits, top_k=top_k)
+
+        rrf_candidates = self._rrf_fuse(
+            vector_hits=vector_hits,
+            bm25_hits=bm25_hits,
+        )
+        if retrieval_mode == "hybrid_rrf":
+            return self._rank_rrf(query, rrf_candidates, top_k=top_k)
+        return self._rerank_hybrid_candidates(
+            query,
+            rrf_candidates=rrf_candidates[:RAG_EVIDENCE_CANDIDATE_K * 2],
+            top_k=top_k,
+            allow_fallback=allow_reranker_fallback,
+        )
 
     def retrieve_by_vector(self, query_vector: list[float], top_k: int = 3) -> list[dict[str, Any]]:
         if isinstance(self.vector_store, ChromaVectorStore):
@@ -1087,13 +1236,47 @@ class LocalRAGRetriever:
             score += idf * (freq * (BM25_K1 + 1.0)) / denominator
         return score
 
-    def _hybrid_rerank(
+    def _rank_single_source(
         self,
         query: str,
+        hits: Sequence[dict[str, Any]],
+        *,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        ranked: list[dict[str, Any]] = []
+        for final_rank, raw_hit in enumerate(hits[:top_k], 1):
+            hit = dict(raw_hit)
+            metadata = dict(hit.get("metadata") or {})
+            content = str(hit.get("content") or "")
+            hit.update(
+                {
+                    "chunk_id": metadata.get("chunk_id"),
+                    "source": metadata.get("source"),
+                    "final_rank": final_rank,
+                    "rerank_provider": "none",
+                    "query_coverage": round(
+                        _evidence_query_coverage(query, content),
+                        4,
+                    ),
+                    "segment_coverage": round(
+                        _evidence_segment_coverage(query, content),
+                        4,
+                    ),
+                    "anchor_coverage": round(
+                        _evidence_anchor_coverage(query, content),
+                        4,
+                    ),
+                    "unmatched_run": _longest_unmatched_query_run(query, content),
+                }
+            )
+            ranked.append(hit)
+        return ranked
+
+    def _rrf_fuse(
+        self,
         *,
         vector_hits: list[dict[str, Any]],
         bm25_hits: list[dict[str, Any]],
-        top_k: int,
     ) -> list[dict[str, Any]]:
         candidates: dict[str, dict[str, Any]] = {}
 
@@ -1129,13 +1312,73 @@ class LocalRAGRetriever:
         for rank, hit in enumerate(bm25_hits, 1):
             add_hit(hit, source="bm25", rank=rank)
 
+        fused = list(candidates.values())
+        fused.sort(
+            key=lambda hit: (
+                float(hit.get("hybrid_score") or 0.0),
+                float(hit.get("bm25_score") or 0.0),
+                float(hit.get("vector_score") or 0.0),
+                str((hit.get("metadata") or {}).get("chunk_id") or ""),
+            ),
+            reverse=True,
+        )
+        return fused
+
+    def _rank_rrf(
+        self,
+        query: str,
+        candidates: Sequence[dict[str, Any]],
+        *,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        ranked: list[dict[str, Any]] = []
+        for final_rank, raw_hit in enumerate(candidates[:top_k], 1):
+            hit = dict(raw_hit)
+            metadata = dict(hit.get("metadata") or {})
+            content = str(hit.get("content") or "")
+            hybrid_score = float(hit.get("hybrid_score") or 0.0)
+            hit.update(
+                {
+                    "score": round(hybrid_score, 8),
+                    "hybrid_score": round(hybrid_score, 8),
+                    "chunk_id": metadata.get("chunk_id"),
+                    "source": metadata.get("source"),
+                    "final_rank": final_rank,
+                    "rerank_provider": "none",
+                    "query_coverage": round(
+                        _evidence_query_coverage(query, content),
+                        4,
+                    ),
+                    "segment_coverage": round(
+                        _evidence_segment_coverage(query, content),
+                        4,
+                    ),
+                    "anchor_coverage": round(
+                        _evidence_anchor_coverage(query, content),
+                        4,
+                    ),
+                    "unmatched_run": _longest_unmatched_query_run(query, content),
+                }
+            )
+            ranked.append(hit)
+        return ranked
+
+    def _feature_candidates(
+        self,
+        query: str,
+        candidates: Sequence[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         if not candidates:
             return []
-
-        max_hybrid_score = max(float(hit["hybrid_score"]) for hit in candidates.values()) or 1.0
-        max_bm25_score = max(float(hit["bm25_score"]) for hit in candidates.values()) or 1.0
-        reranked: list[dict[str, Any]] = []
-        for hit in candidates.values():
+        max_hybrid_score = max(
+            float(hit.get("hybrid_score") or 0.0) for hit in candidates
+        ) or 1.0
+        max_bm25_score = max(
+            float(hit.get("bm25_score") or 0.0) for hit in candidates
+        ) or 1.0
+        enriched: list[dict[str, Any]] = []
+        for raw_hit in candidates:
+            hit = dict(raw_hit)
             vector_norm = _normalize_score(float(hit["vector_score"]), lower=-1.0, upper=1.0)
             bm25_norm = _normalize_score(float(hit["bm25_score"]), upper=max_bm25_score)
             hybrid_norm = _normalize_score(float(hit["hybrid_score"]), upper=max_hybrid_score)
@@ -1143,50 +1386,117 @@ class LocalRAGRetriever:
             anchor_coverage = _evidence_anchor_coverage(query, content)
             segment_coverage = _evidence_segment_coverage(query, content)
             query_coverage = _evidence_query_coverage(query, content)
+            unmatched_run = _longest_unmatched_query_run(query, content)
             matched_terms = _matched_evidence_terms(query, content)
             exact_term_coverage = min(1.0, len(matched_terms) / max(1, len(_salient_query_terms(query))))
-            rerank_score = (
-                0.28 * hybrid_norm
-                + 0.20 * vector_norm
-                + 0.20 * bm25_norm
-                + 0.14 * anchor_coverage
-                + 0.10 * segment_coverage
-                + 0.08 * exact_term_coverage
-            )
             hit.update(
                 {
-                    "score": round(rerank_score, 4),
-                    "rerank_score": round(rerank_score, 4),
                     "hybrid_score": round(float(hit["hybrid_score"]), 6),
                     "vector_score": round(float(hit["vector_score"]), 4),
                     "bm25_score": round(float(hit["bm25_score"]), 4),
+                    "vector_norm": round(vector_norm, 6),
+                    "bm25_norm": round(bm25_norm, 6),
+                    "hybrid_norm": round(hybrid_norm, 6),
                     "anchor_coverage": round(anchor_coverage, 4),
                     "segment_coverage": round(segment_coverage, 4),
                     "query_coverage": round(query_coverage, 4),
+                    "unmatched_run": unmatched_run,
                     "exact_term_coverage": round(exact_term_coverage, 4),
                     "matched_terms": matched_terms,
                 }
             )
-            reranked.append(hit)
+            enriched.append(hit)
+        return enriched
 
-        reranked.sort(
-            key=lambda hit: (
-                float(hit.get("rerank_score") or 0.0),
-                float(hit.get("hybrid_score") or 0.0),
-                float(hit.get("bm25_score") or 0.0),
-                float(hit.get("vector_score") or 0.0),
-            ),
-            reverse=True,
+    def _rerank_hybrid_candidates(
+        self,
+        query: str,
+        *,
+        rrf_candidates: Sequence[dict[str, Any]],
+        top_k: int,
+        allow_fallback: bool,
+    ) -> list[dict[str, Any]]:
+        enriched = self._feature_candidates(query, rrf_candidates)
+        fallback_reason = ""
+        try:
+            reranker = Qwen3Reranker(
+                api_key=settings.rag_reranker_api_key,
+                base_url=settings.rag_reranker_base_url,
+                model=settings.rag_reranker_model,
+                timeout_seconds=settings.rag_reranker_timeout_seconds,
+                instruct=settings.rag_reranker_instruct,
+            )
+            ranked = reranker.rerank(query, enriched, top_k)
+            self.last_retrieval_info.update(
+                {
+                    "reranker_provider": reranker.provider,
+                    "reranker_model": reranker.last_call_info.get(
+                        "model",
+                        settings.rag_reranker_model,
+                    ),
+                    "reranker_usage_total_tokens": reranker.last_call_info.get(
+                        "usage_total_tokens",
+                        0,
+                    ),
+                }
+            )
+            return ranked
+        except RerankerError as exc:
+            fallback_reason = str(exc)
+            if not allow_fallback:
+                raise
+
+        reranker = LocalFeatureReranker()
+        ranked = reranker.rerank(query, enriched, top_k)
+        self.last_retrieval_info.update(
+            {
+                "reranker_provider": reranker.provider,
+                "reranker_model": "",
+                "reranker_fallback_reason": fallback_reason,
+                "reranker_usage_total_tokens": 0,
+            }
         )
-        return reranked[:top_k]
+        return ranked
+
+    def _hybrid_rerank(
+        self,
+        query: str,
+        *,
+        vector_hits: list[dict[str, Any]],
+        bm25_hits: list[dict[str, Any]],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        """Compatibility helper for the previous local feature rerank tests."""
+
+        candidates = self._rrf_fuse(
+            vector_hits=vector_hits,
+            bm25_hits=bm25_hits,
+        )
+        return LocalFeatureReranker().rerank(
+            query,
+            self._feature_candidates(query, candidates),
+            top_k,
+        )
 
 
-def build_rag_context(query: str, *, corpus_dir: str | Path | None = None, top_k: int = 3) -> dict[str, Any]:
+def build_rag_context(
+    query: str,
+    *,
+    corpus_dir: str | Path | None = None,
+    top_k: int = 3,
+    retrieval_mode: str | None = None,
+    allow_reranker_fallback: bool = True,
+) -> dict[str, Any]:
     if len(str(query or "")) > RAG_MAX_QUERY_CHARS or len(str(query or "").encode("utf-8")) > RAG_MAX_QUERY_BYTES:
         raise ValueError("rag_query_too_long")
     retriever = get_rag_retriever(corpus_dir)
     candidate_top_k = max(top_k, RAG_EVIDENCE_CANDIDATE_K)
-    candidate_hits = retriever.retrieve(query, top_k=candidate_top_k)
+    candidate_hits = retriever.retrieve(
+        query,
+        top_k=candidate_top_k,
+        mode=retrieval_mode,
+        allow_reranker_fallback=allow_reranker_fallback,
+    )
     hits = candidate_hits[:top_k]
     evidence_hits = [hit for hit in candidate_hits if _is_evidence_hit(query, hit)]
     context_hits = evidence_hits[:top_k]
@@ -1246,8 +1556,23 @@ def build_rag_context(query: str, *, corpus_dir: str | Path | None = None, top_k
         "query": query,
         "corpus_dir": str(retriever.corpus_dir),
         "document_count": len(retriever.documents),
-        "retrieval_mode": "hybrid_vector_bm25",
-        "reranker_provider": "local-feature-rerank",
+        "retrieval_mode": retriever.last_retrieval_info.get(
+            "retrieval_mode",
+            retrieval_mode or settings.rag_retrieval_mode,
+        ),
+        "reranker_provider": retriever.last_retrieval_info.get(
+            "reranker_provider",
+            "none",
+        ),
+        "reranker_model": retriever.last_retrieval_info.get("reranker_model", ""),
+        "reranker_fallback_reason": retriever.last_retrieval_info.get(
+            "reranker_fallback_reason",
+            "",
+        ),
+        "reranker_usage_total_tokens": retriever.last_retrieval_info.get(
+            "reranker_usage_total_tokens",
+            0,
+        ),
         "requested_top_k": top_k,
         "candidate_top_k": candidate_top_k,
         "vector_candidate_top_k": max(candidate_top_k, RAG_VECTOR_CANDIDATE_K),

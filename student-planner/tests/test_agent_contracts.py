@@ -20,6 +20,13 @@ def test_router_contract_prioritizes_no_web_before_rag_or_llm():
     assert decision.expected_next_step == "return_no_web_text"
 
 
+def test_router_contract_treats_latest_public_events_as_no_web():
+    decision = decide_agent_route("中国最新的大事件有什么")
+
+    assert decision.route == AgentRoute.NO_WEB
+    assert decision.should_retrieve is False
+
+
 def test_router_contract_routes_rag_candidate_without_evidence_to_insufficient_gate():
     decision = decide_agent_route(
         "机器学习里的量子退相干错误怎么解释",

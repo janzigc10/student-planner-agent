@@ -1,0 +1,672 @@
+{
+  "schema_version": "course-rag-corpus-v1",
+  "corpus_version": "rag-course-v1.1",
+  "normalizer": {
+    "version": "course-rag-normalize-v1",
+    "unicode": "NFC",
+    "newlines": "LF",
+    "strip_trailing_whitespace": true,
+    "front_matter_in_chunks": false
+  },
+  "chunker": {
+    "version": "course-rag-chunker-v1",
+    "chunk_size": 520,
+    "chunk_overlap": 150,
+    "length_function": "len",
+    "keep_separator": true,
+    "separators": [
+      "\n\n",
+      "\n",
+      "。",
+      "！",
+      "？",
+      "；",
+      "，",
+      " ",
+      ""
+    ]
+  },
+  "source_count": 49,
+  "chunk_count": 552,
+  "chunk_set_sha256": "78b777b006ecb5acb9bcb0f4f1be7027c885f2be06ae4f105d2a2d052c747545",
+  "sources": [
+    {
+      "source_id": "machine_learning/classification_metrics/common_mistakes.md",
+      "source_sha256": "26c24fba0bfb850880913f83b7c8f0930a8a19d4141836d9fda21dcef6e762ef",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "classification_metrics",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "分类评估指标"
+      }
+    },
+    {
+      "source_id": "machine_learning/clustering/worked_examples.md",
+      "source_sha256": "4933484c25d5867c6054ab535853b7bd13cc78c88a05828f8faab0b54171945d",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "clustering",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "聚类"
+      }
+    },
+    {
+      "source_id": "machine_learning/cross_validation/concept_comparison.md",
+      "source_sha256": "932a58a2a173ba9e054b8437b390e178248a672735348056d6efa96efd71b5fd",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "cross_validation",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "交叉验证"
+      }
+    },
+    {
+      "source_id": "machine_learning/dataset_split/review_outline.md",
+      "source_sha256": "b89ef53a8539a652ddb18e31560e32843706771686831480dd2d528eac88a1a0",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "dataset_split",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "训练集验证集与测试集"
+      }
+    },
+    {
+      "source_id": "machine_learning/decision_tree/review_outline.md",
+      "source_sha256": "e2e9666382ba9958c4fc5ee0e24900476b8f4267b463e38c343f174d81c59533",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "decision_tree",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "决策树"
+      }
+    },
+    {
+      "source_id": "machine_learning/feature_engineering/common_mistakes.md",
+      "source_sha256": "147d20ac7e8e8f0a9f3682a4a1e0d819d53ef956497169734679c7a89c5ffcd2",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "feature_engineering",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "特征工程"
+      }
+    },
+    {
+      "source_id": "machine_learning/gradient_descent/exam_requirements.md",
+      "source_sha256": "295fb44f6477b165073e94f079e0710b600946d9756db2f8cb3819a1ed444873",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "gradient_descent",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "梯度下降"
+      }
+    },
+    {
+      "source_id": "machine_learning/linear_regression/exam_requirements.md",
+      "source_sha256": "2fb78f0cbb811b1c0abc97e43bb1686bc6693424630ff7a6d8f9e38a92ebaa0d",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "linear_regression",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "线性回归"
+      }
+    },
+    {
+      "source_id": "machine_learning/logistic_regression/chapter_notes.md",
+      "source_sha256": "f62f46a22644872d1999fb16bd0b181587bba63f63eee477430b753e3e5ceb59",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "logistic_regression",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "逻辑回归"
+      }
+    },
+    {
+      "source_id": "machine_learning/overfitting_regularization/worked_examples.md",
+      "source_sha256": "2af026c7b0702b8d7f862760338fc653186ef85f4e247642a0a1d207f7946fc5",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "overfitting_regularization",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "过拟合与正则化"
+      }
+    },
+    {
+      "source_id": "machine_learning/supervised_learning/chapter_notes.md",
+      "source_sha256": "6834ee8e5929989176446632fcbfb75c56a6dbb0c341c7d7d58a2e1ba12cc4c1",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "supervised_learning",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "监督学习"
+      }
+    },
+    {
+      "source_id": "machine_learning/svm/concept_comparison.md",
+      "source_sha256": "104634572b6de4149a33f183f2b2a92f05b171c22ec8b8f20abf4787ceee8eeb",
+      "metadata": {
+        "course_id": "machine_learning",
+        "course_name": "机器学习基础",
+        "chapter_id": "svm",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "支持向量机"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/anti_japanese/concept_comparison.md",
+      "source_sha256": "08cc535622bb007c8f7a5665fee0c058b1b13037292f13048e67df48e7f82b7e",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "anti_japanese",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "全民族抗日战争"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/cpc_founding/review_outline.md",
+      "source_sha256": "a90e213023d1ab0a924a36832b6aeae341bef67cd622966cc9927f7213416c21",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "cpc_founding",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "中国共产党成立"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/founding_prc/common_mistakes.md",
+      "source_sha256": "9e26401e6370589e23557c42718d62f78e60b710dd0f2ccba0aaffff3ca1a97c",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "founding_prc",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "中华人民共和国成立"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/liberation/worked_examples.md",
+      "source_sha256": "1b6963a8502a3f49758e73cab7795ff1f329fef9834447d0303f8ca6a1499308",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "liberation",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "解放战争"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/may_fourth/chapter_notes.md",
+      "source_sha256": "4c3137d9e0a244364d2783eaf660d6797d15abc766df4d505ce8e02c8b87636e",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "may_fourth",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "五四运动"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/new_culture/exam_requirements.md",
+      "source_sha256": "55081eac34f34fbed1c2fad0b52c31338158db7b7d512b54ea6a16f4f065c01d",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "new_culture",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "新文化运动"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/opium_war/chapter_notes.md",
+      "source_sha256": "f765d024e423c888a0974a69757007cb7ec9ebb26d35a6f43a87eaebbd39d62d",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "opium_war",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "鸦片战争"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/reform1898/worked_examples.md",
+      "source_sha256": "4bc986abdf8e455877e50b9379fe0209a9cdfc6edbd83b4c62f17d048e48e765",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "reform1898",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "戊戌维新"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/reform_opening/chapter_notes.md",
+      "source_sha256": "d50a9b42271e9a24823887f6e0f4a47b72e6112dd5a85419cf07da5f1367e7dd",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "reform_opening",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "改革开放"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/socialist_transformation/exam_requirements.md",
+      "source_sha256": "4685d28f743df77b85433e15ea0de67bea78f03cf221ebd665058c7181d6e987",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "socialist_transformation",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "社会主义改造"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/taiping/review_outline.md",
+      "source_sha256": "5563a842e12a6cec26a7bae301e0b0b518ff8de79da182936faa1cf0091b7c46",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "taiping",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "太平天国运动"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/westernization/concept_comparison.md",
+      "source_sha256": "9b50c6d0b411cdd74d4d66dc5fd2ebf9c671ba5a2e3d53fca73af47c7ff530a3",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "westernization",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "洋务运动"
+      }
+    },
+    {
+      "source_id": "modern_chinese_history/xinhai/common_mistakes.md",
+      "source_sha256": "8fe04aa06494465e319587368ea11ca800576c7b7e75e4515df534ce6502fc95",
+      "metadata": {
+        "course_id": "modern_chinese_history",
+        "course_name": "中国近现代史",
+        "chapter_id": "xinhai",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "辛亥革命"
+      }
+    },
+    {
+      "source_id": "political_theory/common_prosperity/review_outline.md",
+      "source_sha256": "b5d3a7eda0b8de2beb7b5bdefa52347c8901772a8c56affe6f89199644549a94",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "common_prosperity",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "共同富裕"
+      }
+    },
+    {
+      "source_id": "political_theory/community_future/exam_requirements.md",
+      "source_sha256": "1de20267e1f18ed72b04024e99920c23794832fce358810412073efd1d095120",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "community_future",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "人类命运共同体"
+      }
+    },
+    {
+      "source_id": "political_theory/constitution/common_mistakes.md",
+      "source_sha256": "415e1eb1565affd1f825d63cd032142ac746d4190cf743d5d79d863bf9dcf7bb",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "constitution",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "宪法与根本制度"
+      }
+    },
+    {
+      "source_id": "political_theory/core_values/review_outline.md",
+      "source_sha256": "741f7271dfec9ec44d14572802c51202fc81c76ebd4987b7b9827a50b9729243",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "core_values",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "社会主义核心价值观"
+      }
+    },
+    {
+      "source_id": "political_theory/cppcc/chapter_notes.md",
+      "source_sha256": "fe09d61f30e27d025e4e07023e37f60f5b4a5068d8c89106ac69c3e1affb089b",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "cppcc",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "中国人民政治协商会议"
+      }
+    },
+    {
+      "source_id": "political_theory/cultural_confidence/common_mistakes.md",
+      "source_sha256": "36e7e7648d040b550d7a02064e7edd3b10944634cfb1f26743597fe26940ceed",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "cultural_confidence",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "文化自信"
+      }
+    },
+    {
+      "source_id": "political_theory/ecological_civilization/worked_examples.md",
+      "source_sha256": "0a85c5a11424fb4259162008e06df767473a29036da8776998c569a24d174e07",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "ecological_civilization",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "生态文明建设"
+      }
+    },
+    {
+      "source_id": "political_theory/marxism/chapter_notes.md",
+      "source_sha256": "1179837e8d65b9976a2b2c007ff7dd1d64f9e20949607530e3bb0a51205c56fd",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "marxism",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "马克思主义基本立场"
+      }
+    },
+    {
+      "source_id": "political_theory/new_development/concept_comparison.md",
+      "source_sha256": "f369637f6f1f5213f51b1786b5f020d42107a1d233aefddbfe3e7b120a2ca07e",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "new_development",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "新发展理念"
+      }
+    },
+    {
+      "source_id": "political_theory/peoples_congress/exam_requirements.md",
+      "source_sha256": "2a3a720aa6d6cd9103c94f40f18dcd697897c77724480b58a92964ee15972280",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "peoples_congress",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "人民代表大会制度"
+      }
+    },
+    {
+      "source_id": "political_theory/rule_of_law/worked_examples.md",
+      "source_sha256": "7c1213c386621e8cb99a4eeb3e3cc430b981a76a0afb48eb6671a78886b3947c",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "rule_of_law",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "全面依法治国"
+      }
+    },
+    {
+      "source_id": "political_theory/whole_process_democracy/concept_comparison.md",
+      "source_sha256": "d4cdb6f43362fd8a78145e51efd263b3b8701f2b5c458e59c668c4062fdcaa59",
+      "metadata": {
+        "course_id": "political_theory",
+        "course_name": "思想政治理论",
+        "chapter_id": "whole_process_democracy",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "全过程人民民主"
+      }
+    },
+    {
+      "source_id": "world_modern_history/cold_war/chapter_notes.md",
+      "source_sha256": "969c65e55dc611db7f45001acd800ffa8bf064c0ceed4b476cf9651a49a8c5a3",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "cold_war",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "冷战"
+      }
+    },
+    {
+      "source_id": "world_modern_history/decolonization/common_mistakes.md",
+      "source_sha256": "f1e7e445f298857dec83a159b44224cfbdf6d69f27c798e862909e3ed3f7c40d",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "decolonization",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "亚非拉民族解放运动"
+      }
+    },
+    {
+      "source_id": "world_modern_history/great_depression/worked_examples.md",
+      "source_sha256": "d3420993c17e99ad5bee53aca6ded4d7a19238626405311a104a7d3926dd9eb3",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "great_depression",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "1929—1933年经济危机"
+      }
+    },
+    {
+      "source_id": "world_modern_history/marshall_plan/concept_comparison.md",
+      "source_sha256": "456ea99a9245decda007edff4c9e5f957f0123448da50479319c5b13c54ee683",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "marshall_plan",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "马歇尔计划"
+      }
+    },
+    {
+      "source_id": "world_modern_history/nato_warsaw/worked_examples.md",
+      "source_sha256": "ff39b82572bca768448895b3a3de217de1cdf03cb1e2da0ff3d4b46385c8f5d2",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "nato_warsaw",
+        "material_type": "worked_examples",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "北约与华约"
+      }
+    },
+    {
+      "source_id": "world_modern_history/russian_revolution/concept_comparison.md",
+      "source_sha256": "e77c867b63781369bc12066a886fd38ec6866c5d4125ea24ede8817d39ffd1ba",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "russian_revolution",
+        "material_type": "concept_comparison",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "俄国十月革命"
+      }
+    },
+    {
+      "source_id": "world_modern_history/soviet_collapse/exam_requirements.md",
+      "source_sha256": "1a6f1f4584ec779165758a532fa39263591c2d623b975ab65232bfd602c7a8bf",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "soviet_collapse",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "苏联解体"
+      }
+    },
+    {
+      "source_id": "world_modern_history/truman_doctrine/review_outline.md",
+      "source_sha256": "aeb2164011ab8de717fd9160de503e0168fe4dc233b20dac9887ec5604706529",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "truman_doctrine",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "杜鲁门主义"
+      }
+    },
+    {
+      "source_id": "world_modern_history/united_nations/exam_requirements.md",
+      "source_sha256": "2cde2dff9920a559326687d61214e66b2158d2703f967aa1fe6e1ded17fad54b",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "united_nations",
+        "material_type": "exam_requirements",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "联合国成立"
+      }
+    },
+    {
+      "source_id": "world_modern_history/versailles/review_outline.md",
+      "source_sha256": "7bdd70a18fd7608c3a77bd4ef18f2aa68dc08ace3add2c0bed07aadc44693b71",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "versailles",
+        "material_type": "review_outline",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "凡尔赛—华盛顿体系"
+      }
+    },
+    {
+      "source_id": "world_modern_history/world_war_one/chapter_notes.md",
+      "source_sha256": "a778c53a48517671c37ca0f09e1a961ab0b24c82f617c07a6318860dfb91f174",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "world_war_one",
+        "material_type": "chapter_notes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "第一次世界大战"
+      }
+    },
+    {
+      "source_id": "world_modern_history/world_war_two/common_mistakes.md",
+      "source_sha256": "eb0965f5bc52528b88bdaf23a9cc7ac8d762cf910aea8e28e868dd10a4477faf",
+      "metadata": {
+        "course_id": "world_modern_history",
+        "course_name": "世界现代史",
+        "chapter_id": "world_war_two",
+        "material_type": "common_mistakes",
+        "synthetic": true,
+        "corpus_version": "rag-course-v1.1",
+        "title": "第二次世界大战"
+      }
+    }
+  ],
+  "manifest_sha256": "8ac077eb690cba2db97fe1d3335a00b19d2a2f933a1b9e6a40cca723b93c52d7"
+}
