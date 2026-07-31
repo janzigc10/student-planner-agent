@@ -13,6 +13,7 @@ from app.agent.rag_evaluation import (
     DEFAULT_BOOTSTRAP_ITERATIONS,
     DEFAULT_BOOTSTRAP_SEED,
 )
+from app.config import settings
 from scripts.evaluate_course_rag import (
     DEFAULT_MODES,
     _ensure_empty_output_dir,
@@ -43,35 +44,43 @@ def run_benchmark_v2(
     started_at = datetime.now(timezone.utc).isoformat()
     main_output_dir = output_root / "main"
     challenge_output_dir = output_root / "challenge"
-    main_manifest = run_evaluation(
-        corpus_dir=corpus_dir,
-        dataset_path=main_dataset_path,
-        dataset_manifest_path=main_dataset_manifest_path,
-        output_dir=main_output_dir,
-        modes=DEFAULT_MODES,
-        allow_reranker_fallback=allow_reranker_fallback,
-        embedding_cost_per_1k=embedding_cost_per_1k,
-        reranker_cost_per_1k=reranker_cost_per_1k,
-        formal_run=formal_run,
-        bootstrap_iterations=bootstrap_iterations,
-        bootstrap_seed=bootstrap_seed,
-    )
-    challenge_manifest = run_challenge_evaluation(
-        corpus_dir=corpus_dir,
-        main_dataset_path=main_dataset_path,
-        main_run_dir=main_output_dir,
-        challenge_dataset_path=challenge_dataset_path,
-        challenge_manifest_path=challenge_manifest_path,
-        challenge_frozen_config_path=challenge_frozen_config_path,
-        output_dir=challenge_output_dir,
-        modes=DEFAULT_MODES,
-        allow_reranker_fallback=allow_reranker_fallback,
-        embedding_cost_per_1k=embedding_cost_per_1k,
-        reranker_cost_per_1k=reranker_cost_per_1k,
-        formal_run=formal_run,
-        bootstrap_iterations=bootstrap_iterations,
-        bootstrap_seed=bootstrap_seed,
-    )
+    original_vector_store_dir = settings.rag_vector_store_dir
+    if formal_run:
+        settings.rag_vector_store_dir = str(
+            (output_root / "vector_store").resolve()
+        )
+    try:
+        main_manifest = run_evaluation(
+            corpus_dir=corpus_dir,
+            dataset_path=main_dataset_path,
+            dataset_manifest_path=main_dataset_manifest_path,
+            output_dir=main_output_dir,
+            modes=DEFAULT_MODES,
+            allow_reranker_fallback=allow_reranker_fallback,
+            embedding_cost_per_1k=embedding_cost_per_1k,
+            reranker_cost_per_1k=reranker_cost_per_1k,
+            formal_run=formal_run,
+            bootstrap_iterations=bootstrap_iterations,
+            bootstrap_seed=bootstrap_seed,
+        )
+        challenge_manifest = run_challenge_evaluation(
+            corpus_dir=corpus_dir,
+            main_dataset_path=main_dataset_path,
+            main_run_dir=main_output_dir,
+            challenge_dataset_path=challenge_dataset_path,
+            challenge_manifest_path=challenge_manifest_path,
+            challenge_frozen_config_path=challenge_frozen_config_path,
+            output_dir=challenge_output_dir,
+            modes=DEFAULT_MODES,
+            allow_reranker_fallback=allow_reranker_fallback,
+            embedding_cost_per_1k=embedding_cost_per_1k,
+            reranker_cost_per_1k=reranker_cost_per_1k,
+            formal_run=formal_run,
+            bootstrap_iterations=bootstrap_iterations,
+            bootstrap_seed=bootstrap_seed,
+        )
+    finally:
+        settings.rag_vector_store_dir = original_vector_store_dir
     root_manifest = {
         "schema_version": "course-rag-benchmark-v2-run-v1",
         "status": "completed",

@@ -1,5 +1,9 @@
 # Student Planner 已知问题与环境坑
 
+## 2026-07-31 Formal attempt 1 被 tracked Chroma 缓存污染 Git
+- 干净 commit `e302ee8` 启动两阶段正式运行后，主集完成但 `data/rag/chroma/chroma.sqlite3` 被运行时更新，导致主 run manifest 的 `git_status` 非空，challenge formal preflight 在读取 holdout 前以 `formal_run_requires_clean_git` 失败。失败产物与完整主集产物保留在 `output/rag/course_v2_formal*`，challenge 目录不存在；不得把 attempt 1 写成完整 benchmark。
+- SQLite 运行时变化已保存在可恢复 stash 对象 `1da5bd5648f07cf7fa2eb3fd21019208e7156ed9`。修复后 formal runner 使用 `<output_root>/vector_store` 作为本次运行专属 Chroma 目录，并在异常时恢复原设置；回归 `test_formal_runner_isolates_vector_store_and_restores_setting` 已覆盖。正式重试必须使用全新输出目录，保留 attempt 1 作为失败审计证据。
+
 ## 2026-07-31 两阶段正式流程与本机环境已就绪
 - `scripts/run_course_rag_benchmark_v2.py --formal` 已能按 `main development -> main test -> challenge holdout` 执行，并对 frozen gate、模型/检索合同及各层 hash 做强校验。用户已授权继续整理干净基线并执行唯一正式运行；基线建立前使用 native venv 重跑 RAG/LangGraph/Benchmark 合同为 `112 passed`，前端 Chat/store 为 `64 passed / 2 skipped`，typecheck、build、`py_compile`、corpus/challenge validator 和 `git diff --check` 均通过。
 - 正式 runtime 禁止 Embedding、Reranker 与 Vector Store 静默 fallback。ignored 的 `student-planner/.venv-native/` 已安装项目依赖、`langchain-text-splitters`、OpenAI SDK、`chromadb 1.5.9` 和测试依赖；`_chroma_runtime_available()` 实测为 `(True, '')`。Anaconda 的 Chroma probe 仍会以 `3221225477` 失败，正式命令必须使用 `.venv-native\Scripts\python.exe`，不能改回 Anaconda。

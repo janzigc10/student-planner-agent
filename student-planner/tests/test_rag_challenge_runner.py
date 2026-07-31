@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.run_course_rag_benchmark_v2 as benchmark_runner
 from app.agent.rag import (
     RAG_BM25_CANDIDATE_K,
     RAG_EVIDENCE_CANDIDATE_K,
@@ -45,6 +46,47 @@ def _write_jsonl(path: Path, rows) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def test_formal_runner_isolates_vector_store_and_restores_setting(
+    tmp_path,
+    monkeypatch,
+):
+    output_root = tmp_path / "formal-run"
+    original_vector_store_dir = settings.rag_vector_store_dir
+    observed: dict[str, str] = {}
+
+    def fail_after_observing_vector_store(**_kwargs):
+        observed["vector_store_dir"] = settings.rag_vector_store_dir
+        raise RuntimeError("stop-after-vector-store-check")
+
+    monkeypatch.setattr(
+        benchmark_runner,
+        "run_evaluation",
+        fail_after_observing_vector_store,
+    )
+
+    with pytest.raises(RuntimeError, match="stop-after-vector-store-check"):
+        benchmark_runner.run_benchmark_v2(
+            corpus_dir=tmp_path / "corpus",
+            main_dataset_path=tmp_path / "main.jsonl",
+            main_dataset_manifest_path=tmp_path / "main-manifest.json",
+            challenge_dataset_path=tmp_path / "challenge.jsonl",
+            challenge_manifest_path=tmp_path / "challenge-manifest.json",
+            challenge_frozen_config_path=tmp_path / "frozen-config.json",
+            output_root=output_root,
+            allow_reranker_fallback=False,
+            embedding_cost_per_1k=0.0,
+            reranker_cost_per_1k=0.0,
+            formal_run=True,
+            bootstrap_iterations=100,
+            bootstrap_seed=23,
+        )
+
+    assert Path(observed["vector_store_dir"]) == (
+        output_root / "vector_store"
+    ).resolve()
+    assert settings.rag_vector_store_dir == original_vector_store_dir
 
 
 def _sha256_file(path: Path) -> str:
