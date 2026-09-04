@@ -29,7 +29,7 @@
 
 ## Agent 架构定位
 
-当前 Agent 更接近 **ReAct / function calling 执行闭环**，不是严格意义上的 Plan-and-Execute 框架。
+当前 Agent 为 **ReAct / function calling 执行闭环**
 
 它的基本流程是：
 
