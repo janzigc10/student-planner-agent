@@ -44,26 +44,7 @@
 
 项目中也有一个具体的复习计划生成工具 `create_study_plan`，但它只负责根据考试和空闲时间生成候选计划；真正写入日程仍然需要用户确认后逐条调用 `create_task`。因此更准确的项目表述是：**基于 ReAct 思路的工具调用 Agent，围绕学生日程场景做了确认、校验、落库和提醒闭环**。
 
-## LangGraph / RAG 期末提交版
 
-本分支保留原有稳定 Agent 业务闭环，同时新增一层可开关的 LangGraph 运行时：
-
-```text
-WebSocket chat
--> LangGraph StateGraph(load_context -> retrieve_study_materials -> compose_runtime_hints)
--> 本地 RAG 资料检索
--> LangChain tool schema adapter
--> 原 ReAct/function-calling Agent loop
--> ask_user 确认后确定性 create_task 落库
-```
-
-- 运行时开关：`.env` 中设置 `SP_AGENT_RUNTIME=langgraph`。
-- RAG 资料库：默认冻结语料位于 `student-planner/data/rag/course_v1/`，当前论文基线版本为 `rag-course-v1.1 / rag-course-golden-v1.1`，包含机器学习、中国近现代史、世界现代史和思想政治理论 4 门 synthetic 课程，共 49 份资料、552 个 chunks；`data/rag/public/` 下另有 74 份中文维基百科公开条目，不计入当前正式 course_v1 数据集。切分参数为 `chunk_size=520 / chunk_overlap=150`。向量层支持阿里云百炼 DashScope `text-embedding-v4`，按每批 10 条 chunk 调用；默认使用 Chroma 持久化向量库 `data/rag/chroma`，避免每次进程重启后重新 embed 全库。若运行环境检测到 Chroma native upsert 不可用，会自动退到同目录下的 SQLite 持久化文件。未配置 Key 或请求异常时退回本地 hash embedding。
-- RAG challenge：`student-planner/data/rag/course_challenge_v1/` 已冻结 28 条与主集零重复的 synthetic holdout query 和 842 个四模式候选判断项；当前证据等级为 `llm_assisted_unreviewed`，尚未人工复核或运行正式指标。
-- RAG 正式评测：`student-planner/scripts/run_course_rag_benchmark_v2.py --formal` 按“主集 development 冻结 gate → main test → challenge holdout”顺序运行；challenge 不允许重新校准 gate，三层 manifest 以 SHA-256 绑定。
-- LangChain 接入：`app/agent/langchain_tools.py` 把现有业务工具转换为 LangChain `bind_tools` 兼容 schema。
-- LangGraph 接入：`app/agent/langgraph_loop.py` 使用 `StateGraph` 编排 RAG 检索和运行时提示，并正确透传 `ask_user` 的用户确认答案。
-- 稳定性策略：旧 `run_agent_loop` 没有被重写；LangGraph 只做外层编排，最终写入仍走原有工具校验、review 卡和确定性落库链路。
 
 最新验证结果：
 
@@ -96,13 +77,7 @@ WebSocket chat
 3. [student-planner/frontend/src](./student-planner/frontend/src): 看前端页面、状态管理和 PWA 入口。
 4. [student-planner/tests](./student-planner/tests): 看自动化测试覆盖的核心链路。
 
-## 适合向面试官强调的点
 
-- 这是一个完整的全栈产品项目，不是单一算法 demo。
-- Agent 能力和业务动作之间有明确边界：模型负责选择下一步动作，后端工具负责真实查询、确认、落库和提醒。
-- 项目采用的是 ReAct 风格工具调用闭环，而不是声称实现了完整 Planner / Executor 双角色框架。
-- 项目既覆盖了后端接口和调度，也覆盖了移动端 PWA、推送订阅和真实使用场景下的体验问题。
-- 仓库中保留了设计、计划、测试和迭代痕迹，能看出从需求到交付的完整过程。
 
 ## 说明
 
